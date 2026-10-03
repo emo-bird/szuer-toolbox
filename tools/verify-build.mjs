@@ -12,9 +12,13 @@ const checks = [
   ['@version 0.1.0', /^\/\/ @version\s+0\.1\.0$/m.test(text)],
   ['@match szu.edu.cn', /^\/\/ @match\s+\*:\/\/\*\.szu\.edu\.cn\/\*$/m.test(text)],
   ['@match uooc.net.cn', /^\/\/ @match\s+\*:\/\/\*\.uooc\.net\.cn\/\*$/m.test(text)],
-  ['@grant GM_xmlhttpRequest', /^\/\/ @grant\s+GM_xmlhttpRequest$/m.test(text)],
+  // 请求出口定稿为「页面 fetch」（需求文档 Q-AE）：不再声明 GM_xmlhttpRequest，
+  // 也不再需要 @connect 白名单；改为申请 unsafeWindow 以拿到页面上下文的 fetch。
+  ['不再声明 @grant GM_xmlhttpRequest', !/^\/\/ @grant\s+GM_xmlhttpRequest$/m.test(text)],
+  ['声明 @grant unsafeWindow', /^\/\/ @grant\s+unsafeWindow$/m.test(text)],
+  ['没有遗留的 @connect 白名单', !/^\/\/ @connect\s/m.test(text)],
   ['@noframes', /^\/\/ @noframes$/m.test(text)],
-  ['@run-at document-idle', /^\/\/ @run-at\s+document-idle$/m.test(text)],
+  ['@run-at document-start', /^\/\/ @run-at\s+document-start$/m.test(text)],
   [
     '@updateURL 指向 master/dist',
     text.includes(
@@ -30,6 +34,11 @@ const checks = [
   ['含公共标签页 id', text.includes('common:settings') && text.includes('common:log')],
   ['含演示适配器 id', text.includes('demo:playground')],
   ['含 UOOC 适配器 id', text.includes("id: \"uooc\"") || text.includes("id: 'uooc'")],
+  // 这一条专门防 UOOC 那次事故：header 的 @match 承诺了站点，注册表却没登记，
+  // 表现是「脚本注入执行完全正常但什么都不做、日志里一行说明都没有」。
+  // 所以既要看到适配器本体（显示名），也要看到它真的被 registerAdapter 注册。
+  ['含 bkxk 适配器', text.includes('name: "本科选课"')],
+  ['bkxk 适配器已注册进注册表', text.includes('registerAdapter(bkxkAdapter)')],
   ['未把 .css 拆成单独文件', !text.includes('.sztb-panel{') || true],
 ];
 

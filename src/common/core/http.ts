@@ -1,27 +1,51 @@
 /**
  * HTTP 出口：全站唯一的请求通道。
  *
- * 三条硬约束：
- *   1. **串行队列 + 限流**（红线 R2）：校园站对高频请求零容忍（实测会被直接终止会话）。
- *      所有请求走同一条队列，默认间隔 500ms，**200ms 是代码里写死的硬下限，不可配**。
- *   2. **凭证不落盘**（红线 R3）：本模块只记录 方法 / 路径 / 状态码 / 耗时 / 响应长度，
- *      绝不记录请求头与请求体。
- *   3. **未识别返回落档**（红线 R4）：由调用方通过 `onUnrecognized` 决定落档策略，
+ * 四条硬约束：
+ *   1. **串行队列**：同一时刻只有 1 条在飞；相邻两条的**开始时刻**至少间隔 `intervalMs`。
+ *   2. **限流只有软提示**（见 `limits.ts`）：低于建议下限（200ms）会 warn，但**不改用户的值**。
+ *      校园站对高频请求零容忍（实测会被直接终止会话），所以默认值保守、提示醒目，
+ *      但「要不要冒险」这个决定权归用户。红线 R2 的这一处放松由用户显式拍板（需求文档 Q-AF）。
+ *   3. **凭证不落盘**（红线 R3）：本模块只记录 方法 / 路径 / 状态码 / 耗时 / 响应长度，
+ *      绝不记录请求头与请求体。`Cookie` 与 `token` 只作为**参数**流经，不写日志。
+ *   4. **未识别返回落档**（红线 R4）：由调用方通过 `classify` 决定落档策略，
  *      本模块只负责把原始响应文本原样交出去。
  *
- * 传输层优先用 `GM_xmlhttpRequest`（能跨域、能带 Cookie 头），
- * 没有 GM 时降级到 `fetch`（纯 node 测试 / 本地 mock 用）。
+ * ## 传输层：统一走**页面** fetch（用户拍板 Q-AE）
+ *
+ * 用 `unsafeWindow.fetch` 而不是 `GM_xmlhttpRequest`，理由：本站点鉴权是
+ * 「页面 cookie + 请求头 token 缺一不可」，用页面自己的 fetch 发出的请求，
+ * 其 Origin / Referer / Cookie / Sec-Fetch-* 与站点自身请求**逐字节一致**，
+ * 不存在「服务端认不出这是谁」的可能。为此脚本必须 `@grant unsafeWindow`
+ * 并以 `@run-at document-start` 启动。
+ *
+ * 代价（已知并接受）：我们的请求受页面 CSP 约束，且会被页面上的其它脚本看见。
+ * 将来若要做跨域（例如 UOOC 的 LLM 调用），需要另开出口，不要在调用方偷偷绕。
  */
 
 import { scoped } from './log.ts';
+import { LIMITS, clampLimit, isBelowRecommended } from './limits.ts';
 
 const log = scoped('core/http');
 
-/** 硬下限：任何配置都不得低于这个值 */
-export const MIN_INTERVAL_MS = 200;
+/** 建议下限（**不是**硬钳制值）：低于它可用但会 warn。见 limits.ts */
+export const RECOMMENDED_MIN_INTERVAL_MS = LIMITS.intervalMs.recommended;
 
 /** 默认间隔 */
-export const DEFAULT_INTERVAL_MS = 500;
+export const DEFAULT_INTERVAL_MS = LIMITS.intervalMs.def;
+
+/** 队列长度上限：积压过多说明调用方在失控，早点拒绝比雪崩好 */
+export const MAX_QUEUE_SIZE = 10;
+
+/** 优先级：数字越小越先出队（沿用旧仓库 szu_bkxk 的语义） */
+export const PRIORITY = {
+  /** 监控命中：抢课窗口内必须插到所有普通请求前面 */
+  MONITOR_HIT: -10,
+  HIGH: 0,
+  NORMAL: 10,
+} as const;
+
+export type Priority = (typeof PRIORITY)[keyof typeof PRIORITY];
 
 export interface HttpRequest {
   url: string;
@@ -32,6 +56,8 @@ export interface HttpRequest {
   timeoutMs?: number;
   /** 响应解析方式，默认 'text'；'json' 会在解析失败时抛错 */
   responseType?: 'text' | 'json';
+  /** 出队优先级，默认 PRIORITY.NORMAL */
+  priority?: number;
 }
 
 export interface HttpResponse {
@@ -39,11 +65,11 @@ export interface HttpResponse {
   readonly statusText: string;
   /** 原始响应文本，永不裁剪（未识别返回要能全量落档） */
   readonly text: string;
-  /** responseType 为 'json' 时的解析结果，否则为惰性解析后的对象或 null */
+  /** responseType 为 'json' 时的解析结果，否则为 null */
   readonly json: unknown;
   /** 重定向后的最终 URL（可用时） */
   readonly finalUrl: string;
-  /** 耗时（毫秒） */
+  /** 耗时（毫秒，从入队算到响应返回，含排队等待） */
   readonly elapsedMs: number;
 }
 
@@ -63,16 +89,35 @@ export class HttpError extends Error {
 
 // -------------------------------------------------------------- 串行队列
 
-let intervalMs = DEFAULT_INTERVAL_MS;
-let queueTail: Promise<void> = Promise.resolve();
-let lastStartedAt = 0;
-let pendingCount = 0;
+interface QueueItem {
+  readonly task: () => Promise<unknown>;
+  readonly priority: number;
+  readonly seq: number;
+  readonly resolve: (value: unknown) => void;
+  readonly reject: (reason: unknown) => void;
+}
 
-/** 调整请求间隔；低于硬下限会被钳到硬下限 */
+let intervalMs: number = DEFAULT_INTERVAL_MS;
+let items: QueueItem[] = [];
+let seq = 0;
+let inflight = false;
+let timer: ReturnType<typeof setTimeout> | null = null;
+let nextAt = 0;
+
+/**
+ * 调整请求间隔。
+ * `clampLimit` 只防非法值（上限 60s）；低于建议下限时 **warn 但不改值**。
+ */
 export function setIntervalMs(ms: number): void {
-  const clamped = Math.max(MIN_INTERVAL_MS, Math.floor(ms));
+  const clamped = clampLimit('intervalMs', ms);
   if (clamped !== ms) {
-    log.warn(`请求间隔 ${ms}ms 低于硬下限，已钳制为 ${clamped}ms`);
+    log.warn(`请求间隔 ${ms} 超出可接受范围，已夹到 ${clamped}ms`);
+  }
+  if (isBelowRecommended('intervalMs', clamped)) {
+    log.warn(
+      `请求间隔 ${clamped}ms 低于建议下限 ${RECOMMENDED_MIN_INTERVAL_MS}ms；` +
+        `校园站对高频请求零容忍，实测会被直接终止会话，请自行确认风险`,
+    );
   }
   intervalMs = clamped;
 }
@@ -83,35 +128,64 @@ export function getIntervalMs(): number {
 
 /** 队列中排队中的请求数（不含正在执行的） */
 export function queueDepth(): number {
-  return pendingCount;
+  return items.length;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function schedule(): void {
+  if (timer !== null || inflight) return;
+  if (items.length === 0) return;
+  const delay = Math.max(0, nextAt - Date.now());
+  timer = setTimeout(() => {
+    timer = null;
+    runOne();
+  }, delay);
+}
+
+function runOne(): void {
+  if (inflight || items.length === 0) return;
+
+  // 取优先级最高者；同级按入队先后
+  let idx = 0;
+  for (let i = 1; i < items.length; i += 1) {
+    const a = items[i]!;
+    const b = items[idx]!;
+    if (a.priority < b.priority || (a.priority === b.priority && a.seq < b.seq)) idx = i;
+  }
+  const item = items.splice(idx, 1)[0]!;
+
+  inflight = true;
+  nextAt = Date.now() + intervalMs;
+
+  Promise.resolve()
+    .then(() => item.task())
+    .then(
+      (value) => item.resolve(value),
+      (err: unknown) => item.reject(err),
+    )
+    .then(() => {
+      inflight = false;
+      schedule();
+    });
 }
 
 /**
  * 把任务排进全局串行队列。
- * 前一个任务无论成功失败都会释放队列；两个任务之间保证至少 `intervalMs` 的间隔。
+ * 队列满时立即 reject（不排队、不静默丢弃）。
  */
-function enqueue<T>(task: () => Promise<T>): Promise<T> {
-  pendingCount += 1;
-  const run = queueTail.then(async () => {
-    const wait = lastStartedAt + intervalMs - Date.now();
-    if (wait > 0) await sleep(wait);
-    lastStartedAt = Date.now();
-    try {
-      return await task();
-    } finally {
-      pendingCount -= 1;
-    }
+function enqueue<T>(task: () => Promise<T>, priority?: number): Promise<T> {
+  if (items.length >= MAX_QUEUE_SIZE) {
+    return Promise.reject(new Error(`请求队列已满（上限 ${MAX_QUEUE_SIZE}），本条已丢弃`));
+  }
+  return new Promise<T>((resolve, reject) => {
+    items.push({
+      task: task as () => Promise<unknown>,
+      priority: typeof priority === 'number' && Number.isFinite(priority) ? priority : PRIORITY.NORMAL,
+      seq: seq++,
+      resolve: resolve as (value: unknown) => void,
+      reject,
+    });
+    schedule();
   });
-  // 队列尾部永远是一条不会 reject 的链，避免一次失败把后续请求全带塌
-  queueTail = run.then(
-    () => undefined,
-    () => undefined,
-  );
-  return run;
 }
 
 // -------------------------------------------------------------- 传输层
@@ -123,8 +197,26 @@ function toBody(data: HttpRequest['data']): string | undefined {
   return JSON.stringify(data);
 }
 
-function hasGmRequest(): boolean {
-  return typeof (globalThis as Record<string, unknown>)['GM_xmlhttpRequest'] === 'function';
+interface FetchOwner {
+  fn: typeof fetch;
+  /** 调用 fetch 时的 this（页面 fetch 需要挂在页面上才不会被判定为非法调用） */
+  owner: unknown;
+}
+
+/**
+ * 解析该用哪个 fetch。
+ * 优先 `unsafeWindow.fetch`（页面自己的 fetch，凭证/头与站点请求一致），
+ * 没有 unsafeWindow 时（纯 node 测试、本地 mock）退回 `globalThis.fetch`。
+ */
+function resolveFetch(): FetchOwner | null {
+  const g = globalThis as Record<string, unknown>;
+  const uw = g['unsafeWindow'];
+  if (uw !== null && typeof uw === 'object') {
+    const f = (uw as Record<string, unknown>)['fetch'];
+    if (typeof f === 'function') return { fn: f as typeof fetch, owner: uw };
+  }
+  if (typeof fetch === 'function') return { fn: fetch, owner: globalThis };
+  return null;
 }
 
 interface RawResult {
@@ -134,36 +226,23 @@ interface RawResult {
   finalUrl: string;
 }
 
-function viaGm(req: HttpRequest, body: string | undefined): Promise<RawResult> {
-  return new Promise<RawResult>((resolve, reject) => {
-    GM_xmlhttpRequest({
-      method: req.method ?? 'GET',
-      url: req.url,
-      ...(req.headers !== undefined ? { headers: req.headers } : {}),
-      ...(body !== undefined ? { data: body } : {}),
-      ...(req.timeoutMs !== undefined ? { timeout: req.timeoutMs } : {}),
-      onload: (res) => {
-        resolve({
-          status: res.status,
-          statusText: res.statusText,
-          text: res.responseText,
-          finalUrl: res.finalUrl || req.url,
-        });
-      },
-      onerror: () => reject(new Error('网络错误（GM_xmlhttpRequest onerror）')),
-      ontimeout: () => reject(new Error(`请求超时（>${req.timeoutMs ?? 0}ms）`)),
-      onabort: () => reject(new Error('请求被中止')),
-    });
-  });
-}
-
 async function viaFetch(req: HttpRequest, body: string | undefined): Promise<RawResult> {
-  const init: RequestInit = {
+  const target = resolveFetch();
+  if (target === null) throw new Error('当前环境没有可用的 fetch');
+
+  const init: RequestInit & { __szuSkip?: boolean } = {
     method: req.method ?? 'GET',
+    // 页面 fetch 的默认 credentials 是 same-origin，这里显式写出来，
+    // 免得将来有人把出口挪到别的上下文时 cookie 静默丢失。
+    credentials: 'include',
     ...(req.headers !== undefined ? { headers: req.headers } : {}),
     ...(body !== undefined ? { body } : {}),
+    // 标记「本脚本发出」：响应接管（sites/bkxk/hijack）据此跳过我们自己的请求，
+    // 只接管站点自己发出的那些。**改这里要同步改 hijack。**
+    __szuSkip: true,
   };
-  const res = await fetch(req.url, init);
+
+  const res = await target.fn.call(target.owner, req.url, init);
   const text = await res.text();
   return { status: res.status, statusText: res.statusText, text, finalUrl: res.url };
 }
@@ -171,13 +250,13 @@ async function viaFetch(req: HttpRequest, body: string | undefined): Promise<Raw
 // -------------------------------------------------------------- 公开 API
 
 /**
- * 发一个请求。**必须**通过本函数，不要自己 fetch / XHR —— 否则绕过限流。
+ * 发一个请求。**必须**通过本函数，不要自己 fetch / XHR —— 否则绕过串行队列。
  */
 export async function request(req: HttpRequest): Promise<HttpResponse> {
   const body = toBody(req.data);
   const started = Date.now();
 
-  const raw = await enqueue<RawResult>(() => (hasGmRequest() ? viaGm(req, body) : viaFetch(req, body)));
+  const raw = await enqueue<RawResult>(() => viaFetch(req, body), req.priority);
 
   const elapsedMs = Date.now() - started;
   let json: unknown = null;
@@ -191,7 +270,9 @@ export async function request(req: HttpRequest): Promise<HttpResponse> {
   }
 
   // 只记路径，不记 query（query 里可能有 token），绝不记 header / body
-  log.debug(`${req.method ?? 'GET'} ${safePath(req.url)} → ${raw.status} (${elapsedMs}ms, ${raw.text.length}B)`);
+  log.debug(
+    `${req.method ?? 'GET'} ${safePath(req.url)} → ${raw.status} (${elapsedMs}ms, ${raw.text.length}B)`,
+  );
 
   return { ...raw, elapsedMs, json };
 }
@@ -218,8 +299,11 @@ export function qs(params: Record<string, string | number | boolean | undefined 
 
 /** 测试用：把队列与限流状态复位 */
 export function resetQueueForTest(): void {
-  queueTail = Promise.resolve();
-  lastStartedAt = 0;
-  pendingCount = 0;
+  items = [];
+  seq = 0;
+  inflight = false;
+  if (timer !== null) clearTimeout(timer);
+  timer = null;
+  nextAt = 0;
   intervalMs = DEFAULT_INTERVAL_MS;
 }

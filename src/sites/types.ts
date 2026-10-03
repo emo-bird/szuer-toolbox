@@ -98,8 +98,25 @@ export interface SiteAdapter {
   readonly tabs: readonly TabRegistration[];
   /** 站点专属功能开关；注册后由设置标签页统一渲染复选框 */
   readonly toggles?: readonly SiteToggleDef[];
+  /**
+   * **启动期**钩子：在 `document-start` 时机调用，**早于页面加载任何脚本**。
+   *
+   * 存在的理由：响应接管（劫持页面 XHR / fetch）必须抢在站点自己的脚本之前完成，
+   * 否则等 DOM 就绪时站点的请求早已发出、构造函数也已被别的代码捕获。
+   *
+   * ⚠️ 此时 `document.body` 尚不存在，**不允许碰 DOM**（只能挂钩子、读 storage）。
+   * 需要操作 DOM 的初始化请放 `init`。
+   */
+  earlyInit?(ctx: SiteEarlyContext): void;
   /** 命中站点域时调用一次（不论是否是功能页），用于初始化站点级监听 */
   init?(ctx: SiteInitContext): void;
+}
+
+/** 启动期上下文：此时还没有悬浮窗，也没有 DOM */
+export interface SiteEarlyContext {
+  readonly adapter: SiteAdapter;
+  /** 启动时的 URL；hash 路由站点后续变化由 main 的 watchNavigation 负责 */
+  readonly url: URL;
 }
 
 /** 站点初始化上下文 */

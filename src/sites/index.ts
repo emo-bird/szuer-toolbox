@@ -20,6 +20,7 @@ import { registerAdapter, allAdapters } from './registry.ts';
 import { registerToggles } from '../common/core/settings.ts';
 import { demoAdapter } from './demo/index.ts';
 import { uoocAdapter } from './uooc/index.ts';
+import { bkxkAdapter } from './bkxk/index.ts';
 
 /**
  * 注册全部站点适配器，并把站点声明的开关灌进设置注册表。
@@ -30,6 +31,7 @@ import { uoocAdapter } from './uooc/index.ts';
 export function registerSites(): void {
   registerAdapter(demoAdapter);
   registerAdapter(uoocAdapter);
+  registerAdapter(bkxkAdapter);
 
   for (const adapter of allAdapters()) {
     if (adapter.toggles !== undefined && adapter.toggles.length > 0) {
@@ -43,4 +45,4 @@ export function registeredSiteIds(): string[] {
   return allAdapters().map((a) => a.id);
 }
 
-export { demoAdapter, uoocAdapter };
+export { demoAdapter, uoocAdapter, bkxkAdapter };

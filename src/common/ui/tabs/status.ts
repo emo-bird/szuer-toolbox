@@ -9,7 +9,7 @@
 
 import { el, clear } from '../../utils/dom.ts';
 import { backendName, hasGmStorage } from '../../core/storage.ts';
-import { getIntervalMs, queueDepth, MIN_INTERVAL_MS } from '../../core/http.ts';
+import { getIntervalMs, queueDepth, RECOMMENDED_MIN_INTERVAL_MS } from '../../core/http.ts';
 import { getLevel } from '../../core/log.ts';
 import type { TabRegistration } from '../../../sites/types.ts';
 
@@ -78,7 +78,9 @@ function renderTab(root: HTMLElement): () => void {
     root.appendChild(row('构建时间', info.buildTime ?? '（开发模式，未注入）'));
     root.appendChild(row('存储后端', backendName()));
     root.appendChild(row('GM 存储可用', hasGmStorage() ? '是' : '否（已降级）'));
-    root.appendChild(row('请求间隔', `${getIntervalMs()}ms（硬下限 ${MIN_INTERVAL_MS}ms）`));
+    root.appendChild(
+      row('请求间隔', `${getIntervalMs()}ms（建议不低于 ${RECOMMENDED_MIN_INTERVAL_MS}ms）`),
+    );
     root.appendChild(row('队列排队中', String(queueDepth())));
     root.appendChild(row('日志等级', getLevel()));
 

@@ -28,10 +28,11 @@ function bootReal(): void {
 }
 
 describe('sites 真实注册表 —— 与 userscript header 的 @match 对齐', () => {
-  it('registerSites() 至少注册了 demo 与 uooc', () => {
+  it('registerSites() 至少注册了 demo、uooc 与 bkxk', () => {
     bootReal();
     const ids = allAdapters().map((a) => a.id);
     assert(ids.includes('uooc'), `registerSites() 必须注册 uooc，实际=${ids.join(',')}`);
+    assert(ids.includes('bkxk'), `registerSites() 必须注册 bkxk，实际=${ids.join(',')}`);
     assert(ids.includes('demo'), `registerSites() 必须注册 demo，实际=${ids.join(',')}`);
   });
 
@@ -73,12 +74,50 @@ describe('sites 真实注册表 —— 与 userscript header 的 @match 对齐',
     }
   });
 
-  it('szu.edu.cn 根域兜底：未注册适配器也注入', () => {
+  it('szu.edu.cn 根域兜底：未注册适配器的子域也注入', () => {
     bootReal();
-    const r = resolve(new URL('https://bkxk.szu.edu.cn/'));
+    const r = resolve(new URL('https://ehall.szu.edu.cn/'));
     assert(r.inject, '深大根域下应注入悬浮球');
     assertEqual(r.reason, 'root-domain');
     assertEqual(r.adapter, null, '未命中具体适配器时 adapter 为 null');
+  });
+
+  it('bkxk 选课页命中适配器并自动展开', () => {
+    bootReal();
+    const r = resolve(new URL('https://bkxk.szu.edu.cn/xsxkapp/sys/xsxkapp/*default/grablessons.do'));
+    assert(r.inject, '选课页应注入');
+    assertEqual(r.adapter?.id, 'bkxk');
+    assertEqual(r.reason, 'adapter');
+    assertEqual(r.autoExpand, true, '功能页应自动展开');
+  });
+
+  it('bkxk 课表页命中适配器并自动展开', () => {
+    bootReal();
+    const r = resolve(new URL('https://bkxk.szu.edu.cn/xsxkapp/sys/xsxkapp/*default/curriculum.do'));
+    assertEqual(r.adapter?.id, 'bkxk');
+    assertEqual(r.autoExpand, true);
+  });
+
+  it('bkxk 非功能页只注入不展开（有功能页声明的站点不该到处弹面板）', () => {
+    bootReal();
+    const r = resolve(new URL('https://bkxk.szu.edu.cn/'));
+    assert(r.inject, '站点首页仍应注入悬浮球');
+    assertEqual(r.adapter?.id, 'bkxk');
+    assertEqual(r.autoExpand, false);
+  });
+
+  it('bkxk 适配器声明了 6 个开关，且 🔴/🟠 不能被默认打开', () => {
+    bootReal();
+    const bkxk = allAdapters().find((a) => a.id === 'bkxk');
+    assert(bkxk !== undefined, 'bkxk 适配器应已注册');
+    assertEqual(bkxk!.toggles?.length, 6, '批 1 应注册 6 个开关');
+    for (const t of bkxk!.toggles ?? []) {
+      if (t.risk !== 'safe') {
+        assert(!t.default, `危险开关 ${t.id}（${t.risk}）的 default 必须是 false`);
+      }
+    }
+    assertEqual(bkxk!.hosts.length, 1);
+    assertEqual(bkxk!.hosts[0], 'bkxk.szu.edu.cn');
   });
 
   it('根域白名单当前只含 szu.edu.cn（UOOC 靠适配器而非白名单）', () => {

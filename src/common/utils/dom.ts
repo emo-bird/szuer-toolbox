@@ -84,3 +84,37 @@ export function clamp(value: number, min: number, max: number): number {
   if (max < min) return min;
   return Math.min(max, Math.max(min, value));
 }
+
+// ------------------------------------------------------------ DOM 就绪
+
+/**
+ * 该 readyState 下能否安全挂载悬浮窗。
+ *
+ * `loading` 时 `document.body` 还不存在（`@run-at document-start` 就处在这个状态），
+ * 往 `<html>` 上挂节点虽然浏览器一般也接受，但会早于站点的样式表生效，
+ * 造成一次可见的布局跳动，所以统一等到 DOM 就绪。
+ *
+ * 单独抽成纯函数是为了能在 node 下直接测（`document` 不存在也能测判定逻辑）。
+ */
+export function readyStateAllowsMount(state: string): boolean {
+  return state === 'interactive' || state === 'complete';
+}
+
+/** 当前文档是否已可挂载 */
+export function isDomReady(): boolean {
+  return readyStateAllowsMount(document.readyState);
+}
+
+/**
+ * DOM 就绪后执行；已就绪则**立即同步**执行。
+ *
+ * 用 `{ once: true }` 而不是自己 removeEventListener：后者在「fn 抛错」时
+ * 会因为没走到 remove 而留下一个永远不会再触发的监听器。
+ */
+export function whenDomReady(fn: () => void): void {
+  if (isDomReady()) {
+    fn();
+    return;
+  }
+  document.addEventListener('DOMContentLoaded', fn, { once: true });
+}

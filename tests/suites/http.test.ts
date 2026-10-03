@@ -14,7 +14,7 @@ import {
   getIntervalMs,
   queueDepth,
   resetQueueForTest,
-  MIN_INTERVAL_MS,
+  RECOMMENDED_MIN_INTERVAL_MS,
   DEFAULT_INTERVAL_MS,
   HttpError,
 } from '../../src/common/core/http.ts';
@@ -69,14 +69,31 @@ describe('common/core/http —— 纯函数', () => {
     assertEqual(qs({ a: 1, b: 'x', c: undefined, d: null, e: false }), 'a=1&b=x&e=false');
   });
 
-  it('请求间隔低于硬下限会被钳制', () => {
+  it('请求间隔低于建议下限不会被钳制，只记一条警告', () => {
     resetQueueForTest();
+    clearLog();
+    setLevel('debug');
+
     setIntervalMs(10);
-    assertEqual(getIntervalMs(), MIN_INTERVAL_MS, '必须钳到 200ms 硬下限');
+    assertEqual(getIntervalMs(), 10, '已取消 200ms 硬下限，不再钳制（用户 Q-AF 拍板）');
+    const warned = entries().some((e) => e.message.includes('低于建议下限'));
+    assert(warned, `应有一条「低于建议下限」的警告，实际日志：${JSON.stringify(entries())}`);
+
     setIntervalMs(3000);
-    assertEqual(getIntervalMs(), 3000);
+    assertEqual(getIntervalMs(), 3000, '正常值原样保留');
     resetQueueForTest();
-    assertEqual(getIntervalMs(), DEFAULT_INTERVAL_MS);
+    assertEqual(getIntervalMs(), DEFAULT_INTERVAL_MS, 'resetQueueForTest 回到默认值');
+
+    setLevel('error');
+  });
+
+  it('请求间隔超出合法区间才被钳制（防非法值，不是防高频）', () => {
+    resetQueueForTest();
+    setIntervalMs(-5);
+    assertEqual(getIntervalMs(), 0, '负数钳到下限 0');
+    setIntervalMs(999999);
+    assertEqual(getIntervalMs(), 60000, '超大值钳到上限 60000');
+    resetQueueForTest();
   });
 });
 
@@ -94,7 +111,7 @@ describe('common/core/http —— 串行队列', () => {
 
   it('并发发出的请求被串行化，且顺序与发起顺序一致', async () => {
     resetQueueForTest();
-    setIntervalMs(MIN_INTERVAL_MS);
+    setIntervalMs(RECOMMENDED_MIN_INTERVAL_MS);
     installFakeFetch();
 
     const results = await Promise.all([
@@ -110,19 +127,19 @@ describe('common/core/http —— 串行队列', () => {
 
   it('相邻两个请求的启动间隔不低于硬下限', async () => {
     resetQueueForTest();
-    setIntervalMs(MIN_INTERVAL_MS);
+    setIntervalMs(RECOMMENDED_MIN_INTERVAL_MS);
     installFakeFetch();
 
     await Promise.all([request({ url: 'https://a.cn/1' }), request({ url: 'https://a.cn/2' })]);
 
     assert(calls.length === 2, `应有 2 次调用，实际 ${calls.length}`);
     const gap = (calls[1]?.at ?? 0) - (calls[0]?.at ?? 0);
-    assert(gap >= MIN_INTERVAL_MS - 20, `间隔应 ≥ ${MIN_INTERVAL_MS}ms（含调度误差），实际 ${gap}ms`);
+    assert(gap >= RECOMMENDED_MIN_INTERVAL_MS - 20, `间隔应 ≥ ${RECOMMENDED_MIN_INTERVAL_MS}ms（含调度误差），实际 ${gap}ms`);
   });
 
   it('队列计数在请求结束后归零', async () => {
     resetQueueForTest();
-    setIntervalMs(MIN_INTERVAL_MS);
+    setIntervalMs(RECOMMENDED_MIN_INTERVAL_MS);
     installFakeFetch();
     await request({ url: 'https://a.cn/1' });
     assertEqual(queueDepth(), 0);
@@ -130,7 +147,7 @@ describe('common/core/http —— 串行队列', () => {
 
   it('前一个请求失败不会把后面的请求带塌', async () => {
     resetQueueForTest();
-    setIntervalMs(MIN_INTERVAL_MS);
+    setIntervalMs(RECOMMENDED_MIN_INTERVAL_MS);
     installFakeFetch((url) => {
       if (url.endsWith('/boom')) throw new Error('模拟网络错误');
       return { status: 200, body: '{"ok":1}' };
@@ -154,7 +171,7 @@ describe('common/core/http —— 串行队列', () => {
 
   it('responseType=json 时解析失败抛 HttpError 且带上原始文本', async () => {
     resetQueueForTest();
-    setIntervalMs(MIN_INTERVAL_MS);
+    setIntervalMs(RECOMMENDED_MIN_INTERVAL_MS);
     installFakeFetch(() => ({ status: 200, body: '<html>不是 JSON</html>' }));
 
     let caught: unknown = null;
@@ -169,7 +186,7 @@ describe('common/core/http —— 串行队列', () => {
 
   it('responseType=json 时正常解析', async () => {
     resetQueueForTest();
-    setIntervalMs(MIN_INTERVAL_MS);
+    setIntervalMs(RECOMMENDED_MIN_INTERVAL_MS);
     installFakeFetch(() => ({ status: 200, body: '{"code":0,"data":{"n":3}}' }));
     const res = await request({ url: 'https://a.cn/x', responseType: 'json' });
     assertEqual((res.json as { code: number }).code, 0);
@@ -177,7 +194,7 @@ describe('common/core/http —— 串行队列', () => {
 
   it('日志里不出现 query 参数（凭证不落盘）', async () => {
     resetQueueForTest();
-    setIntervalMs(MIN_INTERVAL_MS);
+    setIntervalMs(RECOMMENDED_MIN_INTERVAL_MS);
     installFakeFetch();
     clearLog();
     setLevel('debug');

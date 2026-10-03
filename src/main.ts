@@ -9,11 +9,22 @@
  *   5. 处理 SPA 站内跳转（hash 路由）导致的重新分派
  *
  * 这里**不做任何业务逻辑** —— 业务一律在 sites/<id>/ 里。
+ *
+ * ## 两个执行阶段（`@run-at document-start`）
+ *
+ * | 阶段 | 时机 | 能做什么 |
+ * |---|---|---|
+ * | 启动期 | 脚本注入瞬间，早于页面任何脚本 | 挂钩子（`adapter.earlyInit`）、读 storage、分派 |
+ * | 挂载期 | `DOMContentLoaded` | 建悬浮窗、`adapter.init`、操作页面 DOM |
+ *
+ * 拆开的唯一理由：响应接管必须抢在站点脚本之前（见 sites/types.ts 的 `earlyInit`），
+ * 而悬浮窗必须等 body 存在。**不要把两件事塞进同一个时机。**
  */
 
 import baseCss from './common/ui/style.css';
 
 import { scoped } from './common/core/log.ts';
+import { whenDomReady } from './common/utils/dom.ts';
 import { createPanel } from './common/ui/panel.ts';
 import type { PanelHandle, TabEntry } from './common/ui/panel.ts';
 import { settingsTab, setSiteNameResolver } from './common/ui/tabs/settings.ts';
@@ -176,8 +187,24 @@ function main(): void {
     return;
   }
 
-  boot(url, res);
-  watchNavigation();
+  // ---- 启动期（document-start）：只允许挂钩子，不许碰 DOM ----
+  // 站点脚本可能马上就开始发请求，接管必须抢在这一刻。
+  if (res.adapter?.earlyInit !== undefined) {
+    try {
+      res.adapter.earlyInit({ adapter: res.adapter, url });
+      log.debug(`已执行启动期钩子：${res.adapter.id}`);
+    } catch (err) {
+      // 站点钩子挂不上不应该连累悬浮窗：接管的失败要能在日志里看见，
+      // 但不能让整个脚本死掉（否则用户连日志面板都打不开）。
+      log.error(`启动期钩子执行失败：${res.adapter.id}`, err);
+    }
+  }
+
+  // ---- 挂载期（DOMContentLoaded）：建悬浮窗、初始化站点 UI ----
+  whenDomReady(() => {
+    boot(url, res);
+    watchNavigation();
+  });
 }
 
 try {
