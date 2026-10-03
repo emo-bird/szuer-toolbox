@@ -49,7 +49,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-03T19:19:19.594Z（构建号 29） */
+/* 构建信息：2026-10-03T19:56:02.619Z（构建号 31） */
 
 "use strict";
 (() => {
@@ -2575,6 +2575,55 @@ ${options.desc ?? ""}
   margin-top: 0;
   margin-bottom: 2px;
 }
+
+/* ---- 站点节点的重新摆位（v0.20）----
+
+   list.ts 会把站点自己的两个节点挪位置（见那边 relocateInUnit 的注释）：
+     · 退选按钮 button.cv-delete-volunteer → 挪进 h5、「已选」标签旁边
+     · 收藏星标 img.collection-img → 挪到课名（span.cv-info-title）前面
+   搬完剩下的宽度问题由这里的样式解决。 */
+
+/* h5 原来是「float:left 的课名 + inline-block 的标签」。
+   课名浮动后不占文档流宽度，剩下的空间不够再塞一个退选按钮（h5 宽 216px，
+   课名 136 + 已选 41 + 间隙 4 = 177，只剩 39px，而退选按钮要 41px）。
+   改成 flex 之后三个元素一起参与排布，课名按内容自适应宽度，标签靠右。 */
+.cv-info:has(> .sztb-bkxk-block) > h5 {
+  display: flex !important;
+  align-items: center;
+  gap: 4px;
+}
+
+/* 课名：取消浮动、按内容宽度占位（min-width: 0 允许它在极窄时收缩，不撑破卡片） */
+.cv-info:has(> .sztb-bkxk-block) > h5 > .cv-info-title {
+  float: none !important;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+/* h5 里的三个标签（星标 / 已选 / 退选）：不缩放、不换行，各自的 margin 由站点给 */
+.cv-info:has(> .sztb-bkxk-block) > h5 > .cv-one,
+.cv-info:has(> .sztb-bkxk-block) > h5 > .cv-delete-volunteer,
+.cv-info:has(> .sztb-bkxk-block) > h5 > .collection-img {
+  flex: 0 0 auto;
+}
+
+/* 星标搬进 h5 后，原本由它那层 div 提供的 20px 行高没了 —— 星标自己带
+   vertical-align: middle 是给行内流用的，flex 下不生效，靠 align-items: center 对齐。
+   站点给它的 inline style 里有 width/height: 20px，保留。 */
+.cv-info:has(> .sztb-bkxk-block) > h5 > .collection-img {
+  display: block;
+  cursor: pointer;
+}
+
+/* 退选按钮搬走以后，站点那个只装它一个的 div.cv-caption-text 会变成空 div。
+   站点在未选课时这个 div 本来就高 0，所以**不需要额外规则** —— 这里只兜一层保险：
+   万一站点给空 div 补了伪元素或背景，也不让它冒出行高。 */
+.cv-info:has(> .sztb-bkxk-block) > div.cv-caption-text:empty {
+  height: 0 !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
 `;
 
   // src/sites/bkxk/list-model.ts
@@ -2745,6 +2794,34 @@ ${options.desc ?? ""}
     if (last === void 0) return "";
     if (last.endsWith("节") || last.endsWith("周")) return "";
     return last;
+  }
+  var CLASS_DELETE_VOLUNTEER = "cv-delete-volunteer";
+  var CLASS_COLLECTION_IMG = "collection-img";
+  function planDeleteVolunteer(inH5) {
+    return inH5 ? "none" : "h5";
+  }
+  function planCollectionImg(beforeTitle) {
+    return beforeTitle ? "none" : "title-before";
+  }
+  var H5_ORDER = [
+    CLASS_COLLECTION_IMG,
+    "cv-info-title",
+    "cv-one",
+    CLASS_DELETE_VOLUNTEER
+  ];
+  function orderH5Children(keys) {
+    const rank = (key) => {
+      const i = H5_ORDER.indexOf(key);
+      return i === -1 ? H5_ORDER.length : i;
+    };
+    return [...keys].map((key, index) => ({ key, index })).sort((a, b) => rank(a.key) - rank(b.key) || a.index - b.index).map((item) => item.key);
+  }
+  function elementKey(classList) {
+    let best = "";
+    for (const c of classList) {
+      if (c.length > best.length) best = c;
+    }
+    return best;
   }
 
   // src/sites/bkxk/list.ts
@@ -2942,6 +3019,7 @@ ${options.desc ?? ""}
     const block = buildBlock(info, ctx);
     unit.insertBefore(block, unit.firstChild);
     ctx.budget += 1;
+    relocateInUnit(unit);
   }
   function enhanceRow(row3, ctx) {
     if (ctx.budget >= MAX_BLOCKS_PER_SCAN) return;
@@ -2970,6 +3048,49 @@ ${options.desc ?? ""}
       head.appendChild(el("div", { class: "sztb-bkxk-col sztb-bkxk-head", text: HEAD_TEXT }));
     }
   }
+  function relocateInUnit(unit) {
+    const title = ownDescendant(unit, ".cv-info-title");
+    const star = ownDescendant(unit, `.${CLASS_COLLECTION_IMG}`);
+    if (star !== null && title !== null) {
+      const already = title.previousElementSibling === star;
+      if (planCollectionImg(already) === "title-before") {
+        title.parentElement?.insertBefore(star, title);
+      }
+    }
+    const del = ownDescendant(unit, `.${CLASS_DELETE_VOLUNTEER}`);
+    const h5 = ownDescendant(unit, "h5");
+    if (del !== null && h5 !== null) {
+      const already = del.parentElement === h5;
+      if (planDeleteVolunteer(already) === "h5") {
+        h5.appendChild(del);
+      }
+      reorderH5(h5);
+    }
+  }
+  function reorderH5(h5) {
+    const kids = Array.from(h5.children);
+    if (kids.length < 2) return;
+    const current = kids.map((node) => elementKey(Array.from(node.classList)));
+    const wanted = orderH5Children(current);
+    if (current.every((key, i) => key === wanted[i])) return;
+    const byKey = /* @__PURE__ */ new Map();
+    for (const node of kids) {
+      const key = elementKey(Array.from(node.classList));
+      const list = byKey.get(key);
+      if (list === void 0) byKey.set(key, [node]);
+      else list.push(node);
+    }
+    for (const key of wanted) {
+      const list = byKey.get(key);
+      const node = list?.shift();
+      if (node !== void 0) h5.appendChild(node);
+    }
+  }
+  function syncRelocation() {
+    for (const unit of document.querySelectorAll(`${CARD_SELECTOR} ${INFO_SELECTOR}`)) {
+      relocateInUnit(unit);
+    }
+  }
   function removeInjected() {
     const nodes = document.querySelectorAll(".sztb-bkxk-block, .sztb-bkxk-col, .sztb-bkxk-head");
     if (nodes.length === 0) return;
@@ -2990,6 +3111,7 @@ ${options.desc ?? ""}
       enhanceRow(row3, ctx);
     }
     syncHeads();
+    syncRelocation();
   }
   function startListInjection(panel) {
     if (!location.pathname.includes(LIST_PAGE_MARK)) {
@@ -3102,8 +3224,8 @@ ${options.desc ?? ""}
   // src/main.ts
   var log12 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-03T19:19:19.594Z" : null;
-  var BUILD_NO = true ? 29 : null;
+  var BUILD_TIME = true ? "2026-10-03T19:56:02.619Z" : null;
+  var BUILD_NO = true ? 31 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();

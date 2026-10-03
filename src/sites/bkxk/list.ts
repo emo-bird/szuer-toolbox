@@ -53,6 +53,12 @@ import {
   readTaskStore,
   removeMonitor,
   teacherFromTitle,
+  CLASS_COLLECTION_IMG,
+  CLASS_DELETE_VOLUNTEER,
+  elementKey,
+  orderH5Children,
+  planCollectionImg,
+  planDeleteVolunteer,
   type MonitorStore,
   type TargetInfo,
   type TaskStore,
@@ -337,6 +343,10 @@ function enhanceUnit(unit: HTMLElement, ctx: Ctx): void {
   // 放到 `.cv-info` 的第一个子位置，块就成了卡片的普通块级子元素，宽度自然被卡片约束。
   unit.insertBefore(block, unit.firstChild);
   ctx.budget += 1;
+  // 站点自己的节点（星标 / 退选按钮）也要摆到用户要的位置。
+  // 这里做一次是为了「开关刚打开 / 页面刚加载」时就位；站点重绘后的补摆位
+  // 由扫描末尾的 syncRelocation() 兜底（那条路径不受「已有块就 return」影响）。
+  relocateInUnit(unit);
 }
 
 /** 列表形态：注入单元是整行，块放在行末新加的一列里 */
@@ -371,6 +381,90 @@ function syncHeads(): void {
   }
 }
 
+// ------------------------------------------------------------ 站点节点重新摆位（v0.20）
+
+/**
+ * 把站点自己的两个节点挪到用户要的位置（v7 采样定案，用户 m01837/m02024 拍板）。
+ *
+ * `list-model.ts` 里那组 `plan*` 是纯函数（算「该不该动、动到哪」），这里只负责执行。
+ *
+ * ⚠️ **本项目第一次移动站点节点**，三条硬纪律：
+ *   1. **只动这两个类名**（`cv-delete-volunteer` / `collection-img`），其余一概不碰；
+ *   2. **位置不对就摆回去，不在中间态下手** —— 判据是「它现在是否已在目标位置」，
+ *      所以站点重绘后放回原位，下一轮扫描会再摆一次，反复执行结果一致；
+ *   3. **挪走之后留下的空壳也要处理**：站点给退选按钮的外层 `div.cv-caption-text`
+ *      只有它一个子节点（v7 采样 D 段实测），按钮搬走后那个 div 会塌成 0 高 ——
+ *      本来就是这样（未选课时该 div 就高 0），所以**不用额外做什么**。
+ */
+function relocateInUnit(unit: HTMLElement): void {
+  const title = ownDescendant(unit, '.cv-info-title');
+
+  // ① 星标：挪到课名（span.cv-info-title）前面 —— 用「紧邻前一个兄弟」判幂等
+  const star = ownDescendant(unit, `.${CLASS_COLLECTION_IMG}`);
+  if (star !== null && title !== null) {
+    const already = title.previousElementSibling === star;
+    if (planCollectionImg(already) === 'title-before') {
+      title.parentElement?.insertBefore(star, title);
+    }
+  }
+
+  // ② 退选按钮：挪进 h5、「已选」标签旁边
+  const del = ownDescendant(unit, `.${CLASS_DELETE_VOLUNTEER}`);
+  const h5 = ownDescendant(unit, 'h5');
+  if (del !== null && h5 !== null) {
+    const already = del.parentElement === h5;
+    if (planDeleteVolunteer(already) === 'h5') {
+      h5.appendChild(del);
+    }
+    reorderH5(h5);
+  }
+}
+
+/**
+ * 把 `h5` 里的元素按「星标 → 课名 → 已选 → 退选」重排。
+ *
+ * 每轮都执行（不只是刚搬完那一次）：站点自己也会往 `h5` 里插「已选」标签，
+ * 顺序由站点决定；我们只保证最终次序是我们要的，且**重复执行稳定**。
+ *
+ * 只在顺序真的不对时才改 DOM —— 否则每次 `MutationObserver` 回调都会引发
+ * 新一轮 DOM 变动，把站点和我们自己都拖进重排循环。
+ */
+function reorderH5(h5: HTMLElement): void {
+  const kids = Array.from(h5.children);
+  if (kids.length < 2) return;
+  const current = kids.map((node) => elementKey(Array.from(node.classList)));
+  const wanted = orderH5Children(current);
+  if (current.every((key, i) => key === wanted[i])) return;
+
+  // 按目标顺序重排：认识的元素按 H5_ORDER，其余保持相对次序（见 orderH5Children）
+  const byKey = new Map<string, Element[]>();
+  for (const node of kids) {
+    const key = elementKey(Array.from(node.classList));
+    const list = byKey.get(key);
+    if (list === undefined) byKey.set(key, [node]);
+    else list.push(node);
+  }
+  for (const key of wanted) {
+    const list = byKey.get(key);
+    const node = list?.shift();
+    if (node !== undefined) h5.appendChild(node);
+  }
+}
+
+/**
+ * 没被注入过的教学班也要摆位（幂等兜底）。
+ *
+ * 为什么需要这一步：`relocateInUnit()` 挂在 `enhanceUnit()` 里，而 `enhanceUnit()`
+ * 遇到「已经有我们的块」会**提前 return** —— 于是站点重绘把退选按钮放回原位后，
+ * 那个教学班因为「块还在」而永远不会被重新摆位，用户看到的是「搬一次就失效」。
+ * 所以扫描末尾单独过一遍**全部教学班**，只做摆位、不碰注入。
+ */
+function syncRelocation(): void {
+  for (const unit of document.querySelectorAll<HTMLElement>(`${CARD_SELECTOR} ${INFO_SELECTOR}`)) {
+    relocateInUnit(unit);
+  }
+}
+
 /**
  * 把我们注入的节点全部摘掉（关开关时用）。
  *
@@ -399,6 +493,7 @@ function scan(ctx: Ctx): void {
     enhanceRow(row, ctx);
   }
   syncHeads();
+  syncRelocation();
 }
 
 /**

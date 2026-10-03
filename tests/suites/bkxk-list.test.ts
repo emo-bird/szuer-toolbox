@@ -17,18 +17,26 @@
 import { describe, it, assert, assertEqual, assertDeepEqual } from '../harness.ts';
 import {
   BODY_CATEGORY,
+  CLASS_COLLECTION_IMG,
+  CLASS_DELETE_VOLUNTEER,
+  H5_ORDER,
   addMonitor,
   addTask,
   categoryOfBodyId,
   cleanText,
+  describePlace,
+  elementKey,
   grabButtonLabel,
   hasMonitor,
   hasTask,
   idLineText,
   isTcId,
   monitorButtonLabel,
+  orderH5Children,
   pickTcId,
   placeFromTimeText,
+  planCollectionImg,
+  planDeleteVolunteer,
   readMonitorStore,
   readTaskStore,
   removeMonitor,
@@ -345,5 +353,88 @@ describe('bkxk 列表注入 —— 读旧数据（迁移兼容）', () => {
       items: [{ id: 't1', teachingClassID: REAL_TC }, { id: 't2', teachingClassID: REAL_TC2 }],
     });
     assertEqual(store.seq, 2, 'seq 丢了也要能继续加，不然 id 会重号');
+  });
+});
+
+describe('bkxk 列表注入 —— 站点节点的重新摆位（v0.20）', () => {
+  it('退选按钮：不在 h5 里就搬，已在 h5 里就是 none', () => {
+    assertEqual(planDeleteVolunteer(false), 'h5');
+    assertEqual(planDeleteVolunteer(true), 'none');
+  });
+
+  it('星标：不是课名的紧邻前一个兄弟就搬', () => {
+    assertEqual(planCollectionImg(false), 'title-before');
+    assertEqual(planCollectionImg(true), 'none');
+  });
+
+  it('摆位结果是幂等的：连算两次不会得出「还要再搬」', () => {
+    // 第一次搬完，位置判据变成 true，第二次必须返回 none ——
+    // 否则每轮扫描都动一次 DOM，Observer 会把页面拖进重排循环
+    assertEqual(planDeleteVolunteer(planDeleteVolunteer(false) === 'h5'), 'none');
+    assertEqual(planCollectionImg(planCollectionImg(false) === 'title-before'), 'none');
+  });
+
+  it('elementKey 取最长的类名（站点 class 顺序与个数都不稳定）', () => {
+    assertEqual(elementKey(['cv-btn', 'cv-tag', 'cv-delete-volunteer']), CLASS_DELETE_VOLUNTEER);
+    assertEqual(elementKey(['cv-btn', 'cv-tag', 'collection-img']), CLASS_COLLECTION_IMG);
+    assertEqual(elementKey(['cv-btn', 'cv-tag', 'cv-delete-volunteer', 'cv-block-hide']), CLASS_DELETE_VOLUNTEER);
+    assertEqual(elementKey([]), '');
+  });
+
+  it('两个抓手类名与站点实测一致（改错就等于整个功能静默失效）', () => {
+    assertEqual(CLASS_DELETE_VOLUNTEER, 'cv-delete-volunteer');
+    assertEqual(CLASS_COLLECTION_IMG, 'collection-img');
+    // 站点的通用类不能当抓手：它们到处都是，一改就会误伤别的元素
+    assert(!H5_ORDER.includes('cv-btn'), 'cv-btn 是站点通用类，绝不可作为识别依据');
+    assert(!H5_ORDER.includes('cv-tag'), 'cv-tag 是站点通用类，绝不可作为识别依据');
+  });
+
+  describe('h5 子元素重排', () => {
+    const KEY_STAR = CLASS_COLLECTION_IMG;
+    const KEY_TITLE = 'cv-info-title';
+    const KEY_ONE = 'cv-one';
+    const KEY_DEL = CLASS_DELETE_VOLUNTEER;
+
+    it('目标顺序是 星标 → 课名 → 已选 → 退选', () => {
+      // 站点原始顺序：课名、已选（退选还在别处）
+      assertDeepEqual(orderH5Children([KEY_TITLE, KEY_ONE]), [KEY_TITLE, KEY_ONE]);
+      // 退选搬进来时排在最后才是对的（课名 → 已选 → 退选）
+      assertDeepEqual(orderH5Children([KEY_ONE, KEY_DEL, KEY_TITLE]), [KEY_TITLE, KEY_ONE, KEY_DEL]);
+      // 星标始终最前
+      assertDeepEqual(orderH5Children([KEY_TITLE, KEY_STAR, KEY_ONE, KEY_DEL]), [
+        KEY_STAR,
+        KEY_TITLE,
+        KEY_ONE,
+        KEY_DEL,
+      ]);
+    });
+
+    it('已经排好时原样返回 —— 这是「不在顺序对的时候动 DOM」的依据', () => {
+      const good = [KEY_STAR, KEY_TITLE, KEY_ONE, KEY_DEL];
+      assertDeepEqual(orderH5Children(good), good);
+    });
+
+    it('不认识的元素一律排到最后，且保持它们彼此的相对次序', () => {
+      // 站点以后往 h5 里加了个别的元素，不能被我们插到课名前面
+      const out = orderH5Children(['zzz-unknown', KEY_TITLE, KEY_ONE, 'aaa-unknown']);
+      assertDeepEqual(out, [KEY_TITLE, KEY_ONE, 'zzz-unknown', 'aaa-unknown']);
+    });
+
+    it('认得的元素里出现重复（同一类名多个）时全部保留，不丢元素', () => {
+      const out = orderH5Children([KEY_TITLE, KEY_ONE, KEY_ONE]);
+      assertEqual(out.length, 3, '重排绝不能吃掉元素');
+      assertEqual(out.filter((k) => k === KEY_ONE).length, 2);
+    });
+
+    it('空输入与单元素不出错', () => {
+      assertDeepEqual(orderH5Children([]), []);
+      assertDeepEqual(orderH5Children([KEY_TITLE]), [KEY_TITLE]);
+    });
+  });
+
+  it('describePlace 三种位置都有可读文案（日志与排障要用）', () => {
+    assert(describePlace('h5').includes('已摆好'), 'h5 位置文案应含「已摆好」');
+    assert(describePlace('title-before').includes('已摆好'), 'title-before 位置文案应含「已摆好」');
+    assert(describePlace('elsewhere').includes('需要搬家'), 'elsewhere 位置文案应含「需要搬家」');
   });
 });

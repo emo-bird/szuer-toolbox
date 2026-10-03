@@ -370,3 +370,119 @@ export function placeFromTimeText(raw: string | null | undefined): string {
   if (last.endsWith('节') || last.endsWith('周')) return '';
   return last;
 }
+
+// ------------------------------------------------------------ 站点节点的重新摆位（v0.20）
+
+/**
+ * 站点自己的两个节点，我们要把它们从「站点放的位置」挪到「用户要的位置」：
+ *
+ *   · **退选按钮** `button.cv-delete-volunteer`（带 `tcid="<教学班id>"`）
+ *     站点把它单独扔在一个只装了它一个子节点的 `div.cv-caption-text` 里，
+ *     于是**每个已选教学班都白白多出 20px 行高**（未选教学班的同一个 div 高 0）。
+ *     v7 采样实测：已选卡 256px / 225px，未选卡一律 236px。
+ *     ⇒ 搬到 `h5` 里、「已选」标签旁边。
+ *
+ *   · **收藏星标** `img.collection-img`（站点没给它任何 id 属性，只有一个 class）
+ *     站点把它挂在 `.cv-info` 的**最后一个子节点**里 —— 离课名 140px 远。
+ *     ⇒ 搬到 `<span.cv-info-title>` 前面（课名左侧）。
+ *
+ * ⚠️ **这是本项目第一次移动站点的 DOM 节点**（此前只做插入与改样式）。
+ * 支撑这个决定的实测依据：退选按钮**带 `tcid` 属性，站点是按属性找它的，
+ * 不是按 DOM 位置找**（v7 采样 D 段：`class="cv-btn cv-tag cv-delete-volunteer"
+ * type="button" tcid="202620271500199000229"`）。所以把它挪进 `h5` 不会让站点点错课。
+ * 但站点重绘会把节点放回原位，所以每一轮扫描都要重新摆位（幂等靠「位置对不对」判断，
+ * 不靠自定义属性 —— 与 `list.ts` 的注入判重同一套理由）。
+ */
+
+/** 退选按钮的类名（站点给的，用来在 `h5` 里认出它自己） */
+export const CLASS_DELETE_VOLUNTEER = 'cv-delete-volunteer';
+
+/** 星标的类名（站点没给 id，这是唯一的抓手） */
+export const CLASS_COLLECTION_IMG = 'collection-img';
+
+/** 一个节点「该去哪儿」 —— 由纯函数算出，`list.ts` 只负责执行 */
+export type RelocateTarget = 'h5' | 'title-before' | 'none';
+
+/** 现在这个节点在哪 —— 也是纯函数算的，用来判断要不要动手 */
+export type RelocatePlace = 'h5' | 'title-before' | 'elsewhere';
+
+/**
+ * 退选按钮该去哪儿。
+ *
+ * 判据只看**这个按钮自己**的判断结果，不看它的父元素长什么样：
+ *   · 已经在 `h5` 里了 ⇒ `none`（没事做，幂等的核心）
+ *   · 别的地方 ⇒ `h5`
+ *
+ * ⚠️ 为什么不检查「父容器是不是只剩它一个子节点」：站点结构一变（比如给那个 div
+ * 再加点东西），这个前提就不成立，而**搬走按钮本身仍然是对的**（用户要的就是它在
+ * 课名旁边）。把前提写进判据，只会让功能在站点改版时静默失效。
+ */
+export function planDeleteVolunteer(inH5: boolean): RelocateTarget {
+  return inH5 ? 'none' : 'h5';
+}
+
+/**
+ * 星标该去哪儿。
+ *
+ * 位置判据：它是不是 `span.cv-info-title` 的**紧邻前一个兄弟**。
+ * 用「紧邻前一个兄弟」而不是「在 title 之前」 —— 后者对 `title.before(img)` 恒真，
+ * 会让幂等判断永远返回「已在位」，于是什么都不做。
+ */
+export function planCollectionImg(beforeTitle: boolean): RelocateTarget {
+  return beforeTitle ? 'none' : 'title-before';
+}
+
+/** 当前所在位置 → 报告的字符串（日志与测试用） */
+export function describePlace(place: RelocatePlace): string {
+  if (place === 'h5') return '课名行（已摆好）';
+  if (place === 'title-before') return '课名前（已摆好）';
+  return '站点原位（需要搬家）';
+}
+
+/** `h5` 里三个元素的目标顺序：星标 → 课名 → 已选 → 退选 */
+export const H5_ORDER: readonly string[] = [
+  CLASS_COLLECTION_IMG,
+  'cv-info-title',
+  'cv-one',
+  CLASS_DELETE_VOLUNTEER,
+];
+
+/**
+ * 算出 `h5` 的**目标子元素顺序**（只排我们认识的类名，其余元素保持相对次序不动）。
+ *
+ * 入参是 `h5` 现有子元素的类名标识数组（用 `elementKey` 生成），
+ * 返回同样长度的新数组，表示目标顺序。
+ *
+ * 为什么需要它：光把节点 `appendChild` 进去，它会排在最后 —— 而我们要的是
+ * 「星标 / 课名 / 已选 / 退选」这个特定次序，且**每轮扫描重复执行时结果必须一致**
+ * （否则站点重绘一次、顺序就抖一次）。用稳定分组而非全量排序：
+ * 认识的元素按 `H5_ORDER` 分组、组内保持原相对次序，不认识的一律排到最后。
+ */
+export function orderH5Children(keys: readonly string[]): readonly string[] {
+  const rank = (key: string): number => {
+    const i = H5_ORDER.indexOf(key);
+    return i === -1 ? H5_ORDER.length : i;
+  };
+  // 稳定排序：Array.prototype.sort 在现代引擎里是稳定的，rank 相同则保持原序
+  return [...keys]
+    .map((key, index) => ({ key, index }))
+    .sort((a, b) => rank(a.key) - rank(b.key) || a.index - b.index)
+    .map((item) => item.key);
+}
+
+/**
+ * 元素的「类名标识」：取它 class 列表里**唯一能代表它身份**的那个键。
+ *
+ * 用**最长**的那个类名，而不是第一个 —— 站点的 class 顺序不稳定
+ * （退选按钮实测是 `cv-btn cv-tag cv-delete-volunteer`，但另一些卡的同类按钮
+ * 写成 `cv-btn cv-tag cv-delete-volunteer cv-blo`），取第一个会得到 `cv-btn`，
+ * 那是个到处都在用的通用类，不具辨识度。`cv-delete-volunteer`（19 字符）与
+ * `collection-img`（14 字符）都能靠「最长」稳定选中。
+ */
+export function elementKey(classList: readonly string[]): string {
+  let best = '';
+  for (const c of classList) {
+    if (c.length > best.length) best = c;
+  }
+  return best;
+}
