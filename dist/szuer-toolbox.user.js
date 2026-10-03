@@ -49,7 +49,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-03T18:49:32.666Z（构建号 27） */
+/* 构建信息：2026-10-03T19:07:58.861Z（构建号 28） */
 
 "use strict";
 (() => {
@@ -2451,32 +2451,60 @@ ${options.desc ?? ""}
   flex: 1 1 auto;
 }
 
-/* ---- 卡片页：压站点自己的间距，一屏多显示几张卡（v0.17 手测 #54） ----
+/* ---- 卡片页：卡片高度改为「按内容自适应」+ 缩小卡片内外边距（v0.17 手测 #54/#55，
+        v0.18 按 v5 采样定稿）----
+
+   **为什么必须让高度自适应**：站点给 .cv-course-card 写死了 210px 高（v5 采样实测 13 张卡
+   的计算高度全是 210px，overflow 是 visible），而卡片里的 .cv-info 实际有 234–254px 高
+   —— 各卡内容本来就不一样（有的多一行 .cv-caption-text / .cv-caption-red）。
+   固定高度装不下，内容就从卡片下沿漏出去；也是因为这个写死的高度，我们压 h5 的行高
+   在屏幕上一屏卡片数量毫无变化（用户手测「行高没有减少」的真正原因）。
+   所以这里对含我们块的卡片改 height: auto（!important 压得住站点的行内 style），
+   min-height 保留站点原值，以免内容少的卡变得比站点风格还矮。
+
    严格限制在「含我们注入块的那张卡」上：没有注入的卡片一律不动。
-   注入块是 .cv-info 的第一个子元素，所以锚点用 :has(> .sztb-bkxk-block)。 */
+   注入块是 .cv-info 的第一个子元素，所以锚点用 :has(> .cv-info > .sztb-bkxk-block)。 */
+
+.cv-course-card:has(> .cv-info > .sztb-bkxk-block) {
+  height: auto !important;
+  min-height: 210px;
+  /* 站点是 16px；缩小上下左右边距，卡片内容因此更宽、整卡更矮 */
+  padding: 8px 10px !important;
+  box-sizing: border-box;
+}
 
 .cv-info:has(> .sztb-bkxk-block) {
-  padding-top: 2px !important;
-  padding-bottom: 2px !important;
+  padding: 2px 0 !important;
+}
+
+/* 卡片内容区里的每一层：上下外边距一律清零（站点给这些 div 挂了 margin-top: 4px）。
+   这里用通配而不是逐个列举，是因为站点各卡的元素数量不同 ——
+   列举漏掉的那一层就是「部分卡片还是溢出」的原因（v5 采样里那三个 20/16/32px 的 div）。 */
+.cv-info:has(> .sztb-bkxk-block) > * {
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
 }
 
 .cv-info:has(> .sztb-bkxk-block) > h5 {
-  margin-top: 0 !important;
-  margin-bottom: 0 !important;
   line-height: 1.3 !important;
 }
 
 .cv-info:has(> .sztb-bkxk-block) > h5 > div,
 .cv-info:has(> .sztb-bkxk-block) > div.cv-caption-text,
 .cv-info:has(> .sztb-bkxk-block) > div.cv-caption-red {
-  margin-top: 0 !important;
-  margin-bottom: 0 !important;
   line-height: 1.3 !important;
 }
 
 .cv-info:has(> .sztb-bkxk-block) > div.cv-operate {
   margin-top: 2px !important;
   margin-bottom: 2px !important;
+}
+
+/* 卡片里我们的块：ID 与按钮保持两行（卡片只有 ~212px 宽，硬挤一行会把 ID 截断），
+   但纵向间距再收一点。站点给 .cv-info 的子元素挂了 margin-top，这里要显式压掉。 */
+.cv-info > .sztb-bkxk-block {
+  margin-top: 0;
+  margin-bottom: 2px;
 }
 `;
 
@@ -3006,8 +3034,8 @@ ${options.desc ?? ""}
   // src/main.ts
   var log12 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-03T18:49:32.666Z" : null;
-  var BUILD_NO = true ? 27 : null;
+  var BUILD_TIME = true ? "2026-10-03T19:07:58.861Z" : null;
+  var BUILD_NO = true ? 28 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();
