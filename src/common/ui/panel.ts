@@ -21,7 +21,8 @@
  *   ui:collapsed   boolean
  */
 
-import { el, clamp } from '../utils/dom.ts';
+import { el } from '../utils/dom.ts';
+import { clamp } from '../utils/misc.ts';
 import { read, write } from '../core/storage.ts';
 import { scoped } from '../core/log.ts';
 import { TabView } from './tabs.ts';
@@ -116,8 +117,8 @@ function clampPosition(pos: Pos, width: number, height: number): Pos {
   const maxLeft = Math.max(VIEWPORT_MARGIN, window.innerWidth - width - VIEWPORT_MARGIN);
   const maxTop = Math.max(VIEWPORT_MARGIN, window.innerHeight - height - VIEWPORT_MARGIN);
   return {
-    left: clamp(pos.left, VIEWPORT_MARGIN, maxLeft),
-    top: clamp(pos.top, VIEWPORT_MARGIN, maxTop),
+    left: clamp(pos.left, VIEWPORT_MARGIN, maxLeft, VIEWPORT_MARGIN),
+    top: clamp(pos.top, VIEWPORT_MARGIN, maxTop, VIEWPORT_MARGIN),
   };
 }
 
@@ -359,11 +360,13 @@ export function createPanel(
             origin.width + dx,
             MIN_SIZE.width,
             Math.max(MIN_SIZE.width, window.innerWidth - startLeft - VIEWPORT_MARGIN),
+            MIN_SIZE.width,
           ),
           height: clamp(
             origin.height + dy,
             MIN_SIZE.height,
             Math.max(MIN_SIZE.height, window.innerHeight - startTop - VIEWPORT_MARGIN),
+            MIN_SIZE.height,
           ),
         };
         applyGeometry();

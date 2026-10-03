@@ -2,7 +2,7 @@
  * 纯函数冒烟（档1）：bkxk 会话读取。
  *
  * 重点钉死两件事：
- *   1. 批次码的真实落点是 `studentInfo.electiveBstch.code`，**不是** `currentBstch`
+ *   1. 批次码的真实落点是 `studentInfo.electiveBatch.code`，**不是** `currentBatch`
  *      （旧仓库取错来源，功能静默失败）
  *   2. `sessionSummary()` 是给人看/给日志用的，**绝不能吐 token**，学号也要打码
  */
@@ -12,6 +12,7 @@ import {
   DEFAULT_CAMPUS,
   buildSession,
   parseCampusCode,
+  parseCodeObject,
   parseStudentInfo,
   sessionSummary,
 } from '../../src/sites/bkxk/session.ts';
@@ -135,5 +136,21 @@ describe('bkxk/session —— sessionSummary（红线 R3：不泄凭证）', () 
   it('学号短于 4 位时不越界', () => {
     const s = buildSession({ studentInfo: JSON.stringify({ code: '12' }), campus: null, token: 'T' });
     assert(typeof sessionSummary(s) === 'string', '短学号不应让摘要函数抛错');
+  });
+});
+
+describe('bkxk/session —— parseCodeObject（currentBatch / currentCampus 共用）', () => {
+  it('取 code 字段', () => {
+    assertEqual(parseCodeObject(JSON.stringify({ code: 'B9' })), 'B9');
+    assertEqual(parseCodeObject(JSON.stringify({ code: 99 })), '99', '数字 code 转字符串');
+  });
+
+  it('读不到时返回 null（**不是**默认值，默认由调用方决定）', () => {
+    assertEqual(parseCodeObject(null), null);
+    assertEqual(parseCodeObject(''), null);
+    assertEqual(parseCodeObject('坏 JSON'), null);
+    assertEqual(parseCodeObject(JSON.stringify({})), null);
+    assertEqual(parseCodeObject(JSON.stringify({ code: '' })), null);
+    assertEqual(parseCodeObject(JSON.stringify([{ code: 'B9' }])), null, '数组不是对象');
   });
 });

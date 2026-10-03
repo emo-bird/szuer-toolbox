@@ -12,7 +12,9 @@
  */
 
 import { scoped } from '../../common/core/log.ts';
+import { getValue } from '../../common/core/settings.ts';
 import { pageSessionStorage } from '../../common/utils/page.ts';
+import { SITE_ID, VALUE } from './settings.ts';
 
 const log = scoped('bkxk/session');
 
@@ -76,9 +78,9 @@ export function parseStudentInfo(raw: string | null): {
   return { studentCode, batchCode, data: json };
 }
 
-/** 解析 `sessionStorage.currentCampus`，只取 `code` */
-export function parseCampusCode(raw: string | null): string {
-  if (raw === null || raw === '') return DEFAULT_CAMPUS;
+/** 解析任意 `{ code }` 形状的 sessionStorage 项，取不到返回 null */
+export function parseCodeObject(raw: string | null): string | null {
+  if (raw === null || raw === '') return null;
   try {
     const json: unknown = JSON.parse(raw);
     if (json !== null && typeof json === 'object' && !Array.isArray(json)) {
@@ -86,9 +88,14 @@ export function parseCampusCode(raw: string | null): string {
       if (code !== undefined && code !== null && String(code) !== '') return String(code);
     }
   } catch {
-    /* 落回默认校区 */
+    /* 落回 null */
   }
-  return DEFAULT_CAMPUS;
+  return null;
+}
+
+/** 解析 `sessionStorage.currentCampus`，只取 `code` */
+export function parseCampusCode(raw: string | null): string {
+  return parseCodeObject(raw) ?? DEFAULT_CAMPUS;
 }
 
 /** 组装会话对象（纯函数，便于测试） */
@@ -136,4 +143,69 @@ export function sessionSummary(s: BkxkSession): string {
   if (!s.loggedIn) return '未登录（学号或 token 缺失）';
   const tail = s.studentCode.length > 4 ? s.studentCode.slice(-4) : s.studentCode;
   return `已登录（学号 ****${tail}，批次 ${s.batchCode ?? '未知'}，校区 ${s.campus}）`;
+}
+
+// ------------------------------------------------------------ 会话上下文
+
+/**
+ * 会话上下文 —— 抢课 / 监控链路真正消费的形状。
+ *
+ * 【这是全局原语，不是列表页的东西】
+ * 旧仓库把它定义在 `C:\Project\szu_bkxk\src\list.js:121`（`L.sessionContext`）是**错位置**，
+ * 实测有 7 处跨模块引用：`tasks.js:243,259`、`monitor.js:159,216,340`、`ui.js:549,584`。
+ * 本仓库把等价能力放在这里，`batchCode` 保持**空串**（而非 null）以便旧调用点的
+ * `if (!ctx.batchCode)` 判空逻辑原样成立。
+ *
+ * 批次码三级回退，顺序**不要调整**（与站点 `buildAddVolunteerParam()` 的实际取值一致）：
+ *   1. `sessionStorage.studentInfo` 的 `electiveBatch.code`（站点实际用的；旧版只有 `currentBatch`）
+ *   2. `sessionStorage.currentBatch` 的 `code`（`capacity.do` 那条路径用的）
+ *   3. 设置面板里手填的「选课批次码」
+ */
+export interface BkxkSessionContext {
+  /** 学号；读不到为空串 */
+  readonly studentCode: string;
+  /** 批次码；三级回退都拿不到时为空串（**不是 null**） */
+  readonly batchCode: string;
+  /** 校区码；读不到为 `DEFAULT_CAMPUS` */
+  readonly campus: string;
+}
+
+/** `sessionStorage.currentBatch` 的 `code`，读不到返回 null */
+function readCurrentBatchCode(ss: Storage | null): string | null {
+  if (ss === null) return null;
+  try {
+    return parseCodeObject(ss.getItem('currentBatch'));
+  } catch {
+    return null;
+  }
+}
+
+/** 读当前会话上下文（含批次码三级回退） */
+export function sessionContext(): BkxkSessionContext {
+  const s = readSession();
+  const ss = pageSessionStorage();
+
+  let batchCode = s.batchCode;
+  if (batchCode === null) batchCode = readCurrentBatchCode(ss);
+  if (batchCode === null) {
+    const manual = getValue<string>(SITE_ID, VALUE.BATCH_CODE);
+    batchCode = manual !== '' ? manual : null;
+  }
+
+  return {
+    studentCode: s.studentCode,
+    batchCode: batchCode ?? '',
+    campus: s.campus,
+  };
+}
+
+/** 当前登录学号（`sessionContext()` 的常用子集） */
+export function studentCode(): string {
+  return sessionContext().studentCode;
+}
+
+/** 当前批次对象（`capacity.do` 等接口要求的形状）；无批次时返回 null */
+export function currentBatch(): { code: string } | null {
+  const ctx = sessionContext();
+  return ctx.batchCode === '' ? null : { code: ctx.batchCode };
 }

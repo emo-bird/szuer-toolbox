@@ -79,11 +79,8 @@ function kebab(prop: string): string {
   return prop.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
 }
 
-/** 把数字钳制到区间内 */
-export function clamp(value: number, min: number, max: number): number {
-  if (max < min) return min;
-  return Math.min(max, Math.max(min, value));
-}
+// 数值钳制 `clamp(value, min, max, dflt)` 已搬到 `common/utils/misc.ts` ——
+// 与旧仓库 bkxk 的 `NS.util.clamp` 合并成一个函数，避免两份同名实现漂移。
 
 // ------------------------------------------------------------ DOM 就绪
 

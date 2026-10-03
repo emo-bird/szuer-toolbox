@@ -49,7 +49,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-03T15:40:14.658Z（构建号 14） */
+/* 构建信息：2026-10-03T16:05:18.739Z（构建号 15） */
 
 "use strict";
 (() => {
@@ -190,10 +190,6 @@
   function kebab(prop) {
     return prop.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
   }
-  function clamp(value, min, max) {
-    if (max < min) return min;
-    return Math.min(max, Math.max(min, value));
-  }
   function readyStateAllowsMount(state) {
     return state === "interactive" || state === "complete";
   }
@@ -206,6 +202,14 @@
       return;
     }
     document.addEventListener("DOMContentLoaded", fn, { once: true });
+  }
+
+  // src/common/utils/misc.ts
+  function clamp(value, min, max, dflt) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return dflt;
+    if (max < min) return min;
+    return Math.min(max, Math.max(min, n));
   }
 
   // src/common/core/storage.ts
@@ -553,8 +557,8 @@
     const maxLeft = Math.max(VIEWPORT_MARGIN, window.innerWidth - width - VIEWPORT_MARGIN);
     const maxTop = Math.max(VIEWPORT_MARGIN, window.innerHeight - height - VIEWPORT_MARGIN);
     return {
-      left: clamp(pos.left, VIEWPORT_MARGIN, maxLeft),
-      top: clamp(pos.top, VIEWPORT_MARGIN, maxTop)
+      left: clamp(pos.left, VIEWPORT_MARGIN, maxLeft, VIEWPORT_MARGIN),
+      top: clamp(pos.top, VIEWPORT_MARGIN, maxTop, VIEWPORT_MARGIN)
     };
   }
   var HEAD_HEIGHT = 37;
@@ -713,12 +717,14 @@
             width: clamp(
               origin.width + dx,
               MIN_SIZE.width,
-              Math.max(MIN_SIZE.width, window.innerWidth - startLeft - VIEWPORT_MARGIN)
+              Math.max(MIN_SIZE.width, window.innerWidth - startLeft - VIEWPORT_MARGIN),
+              MIN_SIZE.width
             ),
             height: clamp(
               origin.height + dy,
               MIN_SIZE.height,
-              Math.max(MIN_SIZE.height, window.innerHeight - startTop - VIEWPORT_MARGIN)
+              Math.max(MIN_SIZE.height, window.innerHeight - startTop - VIEWPORT_MARGIN),
+              MIN_SIZE.height
             )
           };
           applyGeometry();
@@ -2026,8 +2032,8 @@ ${options.desc ?? ""}
     }
     return { studentCode, batchCode, data: json };
   }
-  function parseCampusCode(raw) {
-    if (raw === null || raw === "") return DEFAULT_CAMPUS;
+  function parseCodeObject(raw) {
+    if (raw === null || raw === "") return null;
     try {
       const json = JSON.parse(raw);
       if (json !== null && typeof json === "object" && !Array.isArray(json)) {
@@ -2036,7 +2042,10 @@ ${options.desc ?? ""}
       }
     } catch {
     }
-    return DEFAULT_CAMPUS;
+    return null;
+  }
+  function parseCampusCode(raw) {
+    return parseCodeObject(raw) ?? DEFAULT_CAMPUS;
   }
   function buildSession(input) {
     const info = parseStudentInfo(input.studentInfo);
@@ -2326,8 +2335,8 @@ ${options.desc ?? ""}
   // src/main.ts
   var log11 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-03T15:40:14.658Z" : null;
-  var BUILD_NO = true ? 14 : null;
+  var BUILD_TIME = true ? "2026-10-03T16:05:18.739Z" : null;
+  var BUILD_NO = true ? 15 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();
