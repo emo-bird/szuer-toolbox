@@ -24,14 +24,17 @@
  *
  * ⚠️ 本轮**不判断写接口开关**：这里只入队，不发请求，所以不存在「关了还写」的问题。
  * 真正的门禁在批 4 的执行引擎里（`TOGGLE.WRITE_API` + 二次确认）。
+ * 本模块自己的门禁是 `TOGGLE.LIST_INJECT`（🟢，默认开）：每一轮扫描都重新读一次，
+ * 关掉即移除已注入的节点 —— 不需要刷新页面才能看到效果。
  */
 
 import { scoped } from '../../common/core/log.ts';
 import { read, write } from '../../common/core/storage.ts';
-import { getValue } from '../../common/core/settings.ts';
+import { getValue, isEnabled } from '../../common/core/settings.ts';
 import { el, whenDomReady } from '../../common/utils/dom.ts';
-import { LIST_CSS, LIST_STYLE_ID } from './list-style.ts';import { BKXK_STORE_KEY } from './legacy.ts';
-import { SITE_ID, VALUE } from './settings.ts';
+import { LIST_CSS, LIST_STYLE_ID } from './list-style.ts';
+import { BKXK_STORE_KEY } from './legacy.ts';
+import { SITE_ID, TOGGLE, VALUE } from './settings.ts';
 import {
   addMonitor,
   addTask,
@@ -359,8 +362,27 @@ function syncHeads(): void {
   }
 }
 
+/**
+ * 把我们注入的节点全部摘掉（关开关时用）。
+ *
+ * 只认带 `sztb-bkxk-` 前缀的类名 —— 站点自己的类都是 `cv-` 开头，
+ * 不会误删。摘掉之后站点行里会留下一个空 `div`（我们没有改它的行结构），
+ * 无害；重绘后连空壳也没了。
+ */
+function removeInjected(): void {
+  const nodes = document.querySelectorAll('.sztb-bkxk-block, .sztb-bkxk-col, .sztb-bkxk-head');
+  if (nodes.length === 0) return;
+  for (const node of nodes) node.remove();
+  log.info(`列表注入开关已关闭：移除 ${String(nodes.length)} 个注入节点`);
+}
+
 function scan(ctx: Ctx): void {
+  if (!isEnabled(SITE_ID, TOGGLE.LIST_INJECT)) {
+    removeInjected();
+    return;
+  }
   ctx.budget = 0;
+  injectStyle();
   for (const unit of document.querySelectorAll<HTMLElement>(`${CARD_SELECTOR} ${INFO_SELECTOR}`)) {
     enhanceUnit(unit, ctx);
   }
@@ -401,7 +423,6 @@ export function startListInjection(panel: PanelApi): () => void {
   };
 
   whenDomReady(() => {
-    injectStyle();
     scan(ctx);
     // 站点的页签切换 / 翻页全是 XHR + 重绘，必须跟着补注入
     observer = new MutationObserver(schedule);

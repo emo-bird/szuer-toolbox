@@ -49,7 +49,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-03T18:21:27.570Z（构建号 23） */
+/* 构建信息：2026-10-03T18:29:00.779Z（构建号 25） */
 
 "use strict";
 (() => {
@@ -1881,6 +1881,8 @@ ${options.desc ?? ""}
     TIMETABLE_SELF_DRAW: "timetable-self-draw",
     /** 🟢 列表加列 */
     LIST_EXTRA_COLUMNS: "list-extra-columns",
+    /** 🟢 列表注入（教学班ID / 抢课按钮） */
+    LIST_INJECT: "list-inject",
     /** 🟢 自定义课程 */
     CUSTOM_COURSES: "custom-courses"
   };
@@ -1930,6 +1932,14 @@ ${options.desc ?? ""}
       id: TOGGLE.LIST_EXTRA_COLUMNS,
       label: "列表加列（冲突 / 余量）",
       desc: "在选课列表里补上冲突提示与实时余量。用 flex 布局，不写死列宽。",
+      risk: "safe",
+      default: true,
+      group: "选课列表"
+    },
+    {
+      id: TOGGLE.LIST_INJECT,
+      label: "列表注入（教学班ID / 抢课按钮）",
+      desc: "在选课列表的每个教学班旁补上教学班ID 与「添加抢课 / 添加监控」两个按钮。点击只写本地队列，不发送任何请求。关掉后已注入的块会立即移除。",
       risk: "safe",
       default: true,
       group: "选课列表"
@@ -2821,8 +2831,19 @@ ${options.desc ?? ""}
       head.appendChild(el("div", { class: "sztb-bkxk-col sztb-bkxk-head", text: HEAD_TEXT }));
     }
   }
+  function removeInjected() {
+    const nodes = document.querySelectorAll(".sztb-bkxk-block, .sztb-bkxk-col, .sztb-bkxk-head");
+    if (nodes.length === 0) return;
+    for (const node of nodes) node.remove();
+    log10.info(`列表注入开关已关闭：移除 ${String(nodes.length)} 个注入节点`);
+  }
   function scan(ctx) {
+    if (!isEnabled(SITE_ID, TOGGLE.LIST_INJECT)) {
+      removeInjected();
+      return;
+    }
     ctx.budget = 0;
+    injectStyle();
     for (const unit of document.querySelectorAll(`${CARD_SELECTOR} ${INFO_SELECTOR}`)) {
       enhanceUnit(unit, ctx);
     }
@@ -2852,7 +2873,6 @@ ${options.desc ?? ""}
       }, RESCAN_DELAY_MS);
     };
     whenDomReady(() => {
-      injectStyle();
       scan(ctx);
       observer = new MutationObserver(schedule2);
       observer.observe(document.body, { childList: true, subtree: true });
@@ -2943,8 +2963,8 @@ ${options.desc ?? ""}
   // src/main.ts
   var log12 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-03T18:21:27.570Z" : null;
-  var BUILD_NO = true ? 23 : null;
+  var BUILD_TIME = true ? "2026-10-03T18:29:00.779Z" : null;
+  var BUILD_NO = true ? 25 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();
