@@ -49,7 +49,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-03T19:07:58.861Z（构建号 28） */
+/* 构建信息：2026-10-03T19:19:19.594Z（构建号 29） */
 
 "use strict";
 (() => {
@@ -1156,19 +1156,87 @@ ${options.desc ?? ""}
     }
   };
 
+  // src/common/utils/clipboard.ts
+  var ORDER = ["gm", "exec", "modern"];
+  function has(env, method) {
+    if (method === "gm") return env.hasGm;
+    if (method === "exec") return env.hasExec;
+    if (method === "modern") return env.hasClipboard;
+    return false;
+  }
+  function copyMethodOrder(env) {
+    return ORDER.filter((m) => has(env, m));
+  }
+  function detectCopyEnv() {
+    const g = globalThis;
+    return {
+      hasGm: typeof g["GM_setClipboard"] === "function",
+      // http 页面上这是 undefined；访问它本身也可能抛（极少），所以整段包起来
+      hasClipboard: typeof navigator !== "undefined" && navigator.clipboard !== void 0,
+      hasExec: typeof document !== "undefined" && typeof document.execCommand === "function"
+    };
+  }
+  function execCopy(text) {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.top = "-1000px";
+    ta.style.left = "-1000px";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    const sel = typeof document.getSelection === "function" ? document.getSelection() : null;
+    const saved = [];
+    if (sel !== null) {
+      for (let i = 0; i < sel.rangeCount; i++) saved.push(sel.getRangeAt(i).cloneRange());
+    }
+    let ok = false;
+    try {
+      ta.select();
+      ok = document.execCommand("copy");
+    } catch {
+      ok = false;
+    }
+    ta.remove();
+    if (sel !== null) {
+      sel.removeAllRanges();
+      for (const r of saved) sel.addRange(r);
+    }
+    return ok;
+  }
+  async function copyText(text) {
+    const methods = copyMethodOrder(detectCopyEnv());
+    if (methods.length === 0) {
+      return { ok: false, method: "none", detail: "当前环境没有任何可用的剪贴板写入方式" };
+    }
+    let last = "none";
+    let detail = "";
+    for (const method of methods) {
+      last = method;
+      try {
+        if (method === "gm") {
+          globalThis.GM_setClipboard(text);
+          return { ok: true, method, detail: "" };
+        }
+        if (method === "exec") {
+          if (execCopy(text)) return { ok: true, method, detail: "" };
+          detail = "document.execCommand(copy) 返回 false";
+          continue;
+        }
+        await navigator.clipboard.writeText(text);
+        return { ok: true, method, detail: "" };
+      } catch (err) {
+        detail = `${method} 失败：${String(err)}`;
+      }
+    }
+    return { ok: false, method: last, detail };
+  }
+
   // src/common/ui/tabs/log.ts
   var LEVELS = ["debug", "info", "warn", "error"];
   async function copyAll() {
     const text = entries().map(formatEntry).join("\n");
-    const gm = globalThis["GM_setClipboard"];
-    if (typeof gm === "function") {
-      gm(text);
-      return;
-    }
-    try {
-      await navigator.clipboard.writeText(text);
-    } catch {
-    }
+    await copyText(text);
   }
   var tabCss = `
 .sztb-log-wrap { display: flex; flex-direction: column; gap: 8px; height: 100%; min-height: 0; }
@@ -2468,8 +2536,9 @@ ${options.desc ?? ""}
 .cv-course-card:has(> .cv-info > .sztb-bkxk-block) {
   height: auto !important;
   min-height: 210px;
-  /* 站点是 16px；缩小上下左右边距，卡片内容因此更宽、整卡更矮 */
-  padding: 8px 10px !important;
+  /* 站点是 16px。v0.18 先压到 8px 10px，手测反馈「过于不美观」⇒ v0.19 恢复一点点到 12px 14px：
+     既比站点原样紧，又不至于内容贴边。想再松/再紧就改这一行。 */
+  padding: 12px 14px !important;
   box-sizing: border-box;
 }
 
@@ -2770,15 +2839,14 @@ ${options.desc ?? ""}
     return info.category === "" ? `${label}（类别未识别）` : label;
   }
   async function copyId(tcId, panel) {
-    try {
-      if (navigator.clipboard === void 0) throw new Error("当前环境没有 navigator.clipboard");
-      await navigator.clipboard.writeText(tcId);
-      log10.info(`已复制教学班ID ${tcId} 到剪贴板`);
+    const res = await copyText(tcId);
+    if (res.ok) {
+      log10.info(`已复制教学班ID ${tcId} 到剪贴板（方式：${res.method}）`);
       panel.toast("已复制教学班ID", "success");
-    } catch (err) {
-      log10.warn(`复制教学班ID 失败：${String(err)}（可手动选中那一行复制）`);
-      panel.toast("复制失败，请手动选中复制", "warn");
+      return;
     }
+    log10.warn(`复制教学班ID 失败：${res.detail}（可手动选中那一行复制）`);
+    panel.toast("复制失败，请手动选中复制", "warn");
   }
   function onGrab(info, ctx, btn) {
     if (hasTask(ctx.tasks, info.tcId)) {
@@ -3034,8 +3102,8 @@ ${options.desc ?? ""}
   // src/main.ts
   var log12 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-03T19:07:58.861Z" : null;
-  var BUILD_NO = true ? 28 : null;
+  var BUILD_TIME = true ? "2026-10-03T19:19:19.594Z" : null;
+  var BUILD_NO = true ? 29 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();

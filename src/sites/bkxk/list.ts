@@ -32,6 +32,7 @@ import { scoped } from '../../common/core/log.ts';
 import { read, write } from '../../common/core/storage.ts';
 import { getValue, isEnabled } from '../../common/core/settings.ts';
 import { el, whenDomReady } from '../../common/utils/dom.ts';
+import { copyText } from '../../common/utils/clipboard.ts';
 import { LIST_CSS, LIST_STYLE_ID } from './list-style.ts';
 import { BKXK_STORE_KEY } from './legacy.ts';
 import { SITE_ID, TOGGLE, VALUE } from './settings.ts';
@@ -206,17 +207,24 @@ function targetText(info: TargetInfo): string {
   return info.category === '' ? `${label}（类别未识别）` : label;
 }
 
+/**
+ * 复制教学班ID。
+ *
+ * ⚠️ **不能只用 `navigator.clipboard`**：bkxk 是 `http://` 页面（非安全上下文），
+ * Chromium 在那里根本不暴露它 —— 第五轮手测报的
+ * `Error: 当前环境没有 navigator.clipboard` 就是这个原因。
+ * 现在走 `copyText()`（GM_setClipboard → execCommand → 剪贴板 API 三条路依次退）。
+ */
 async function copyId(tcId: string, panel: PanelApi): Promise<void> {
-  try {
-    if (navigator.clipboard === undefined) throw new Error('当前环境没有 navigator.clipboard');
-    await navigator.clipboard.writeText(tcId);
-    log.info(`已复制教学班ID ${tcId} 到剪贴板`);
+  const res = await copyText(tcId);
+  if (res.ok) {
+    log.info(`已复制教学班ID ${tcId} 到剪贴板（方式：${res.method}）`);
     panel.toast('已复制教学班ID', 'success');
-  } catch (err) {
-    // 复制失败不是致命错误：ID 行整块可选中，用户能手动拖选
-    log.warn(`复制教学班ID 失败：${String(err)}（可手动选中那一行复制）`);
-    panel.toast('复制失败，请手动选中复制', 'warn');
+    return;
   }
+  // 复制失败不是致命错误：ID 行整块可选中（user-select: all），用户能手动拖选
+  log.warn(`复制教学班ID 失败：${res.detail}（可手动选中那一行复制）`);
+  panel.toast('复制失败，请手动选中复制', 'warn');
 }
 
 function onGrab(info: TargetInfo, ctx: Ctx, btn: HTMLButtonElement): void {

@@ -160,8 +160,9 @@ export const LIST_CSS = `
 .cv-course-card:has(> .cv-info > .sztb-bkxk-block) {
   height: auto !important;
   min-height: 210px;
-  /* 站点是 16px；缩小上下左右边距，卡片内容因此更宽、整卡更矮 */
-  padding: 8px 10px !important;
+  /* 站点是 16px。v0.18 先压到 8px 10px，手测反馈「过于不美观」⇒ v0.19 恢复一点点到 12px 14px：
+     既比站点原样紧，又不至于内容贴边。想再松/再紧就改这一行。 */
+  padding: 12px 14px !important;
   box-sizing: border-box;
 }
 
