@@ -8,6 +8,18 @@
 | `capture/` | mitmproxy `.flow`、`.har` | 抓包原始文件，可能含真实姓名/学号/手机号，**绝不喂云端模型** |
 | `reference/` | 第三方参考脚本、参考数据 | 例如 UOOC 参考脚本、`szu_bkxk` 的参考片段 |
 | `export/` | 导出的数据 | 例如测验答案 JSON、课程表 CSV |
+| `manual/` | 手动测试台页面 | 复刻站点 DOM 契约的离线页，配合 `tools/serve.mjs` 验证悬浮窗/设置/门禁 |
+
+## 手动测试台怎么用
+
+```
+node tools/serve.mjs                                     # 起在 127.0.0.1:8080
+浏览器打开 http://localhost:8080/manual.html#sztb-demo    # 带 hash 标记才会被框架接管
+```
+
+真实站点适配器在框架层不碰 DOM，`localhost` 又被 `@noframes` 挡着不能用 iframe 套真实页面，
+所以只能手工复刻一份页面契约来验「悬浮球 → 展开 → 设置页 → 风险门禁 → 日志」这条链路。
+`manual.html` **不是交付物，也不参与构建**。
 
 ## 处理 flows 的规矩（摘自 preset）
 
