@@ -1,5 +1,9 @@
 /**
- * 公共标签页「设置」。
+ * 公共标签页「全局设置」。
+ *
+ * ⚠️ 标题是**全局设置**（用户 m00593 拍板改名）而不是「设置」：站点自己也有一个叫
+ * 【设置】的标签页（如本科选课），两个都叫「设置」时并排在标签栏里根本分不清谁是谁。
+ * id `common:settings` 不变 —— 改 id 会让老用户的记忆键与文档一起作废，得不偿失。
  *
  * 渲染**没有自己设置标签页**的站点的功能开关与配置项。
  * 站点若自己注册了 `<siteId>:settings` 标签页（见 sites/registry.ts 的约定），
@@ -60,7 +64,7 @@ function renderTab(root: HTMLElement, ctx: TabContext): void {
 
 export const settingsTab: TabRegistration = {
   id: 'common:settings',
-  title: '设置',
+  title: '全局设置',
   order: 10,
   mount(root, ctx) {
     renderTab(root, ctx);

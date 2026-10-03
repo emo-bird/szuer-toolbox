@@ -17,6 +17,8 @@ import './suites/settings.test.ts';
 import './suites/log.test.ts';
 import './suites/http.test.ts';
 import './suites/limits.test.ts';
+import './suites/tab-order.test.ts';
+import './suites/panel-geometry.test.ts';
 import './suites/bkxk-api.test.ts';
 import './suites/bkxk-session.test.ts';
 import './suites/bkxk-migrate.test.ts';
