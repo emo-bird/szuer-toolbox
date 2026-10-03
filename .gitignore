@@ -1,0 +1,38 @@
+# ---- 本地资料（内容不随 git 提交）----
+# 参考脚本、抓包 flows/HAR、导出的答案 JSON 等，可能含隐私或第三方代码。
+# 只放行说明文件本身，其余内容一律忽略。
+local/*
+!local/README.md
+
+# ---- 依赖 ----
+node_modules/
+
+# ---- 构建产物 ----
+# 产物会随 dist/ 发布（自动更新需要 raw 链接），但构建中间物不入库
+dist/*.map
+build/
+*.tsbuildinfo
+.vite/
+
+# ---- 测试与覆盖率 ----
+coverage/
+
+# ---- 编辑器与 IDE ----
+.vscode/
+.idea/
+*.swp
+
+# ---- 系统 ----
+Thumbs.db
+Desktop.ini
+desktop.ini
+$RECYCLE.BIN/
+
+# ---- 日志 ----
+*.log
+logs/
+
+# ---- 环境变量 ----
+.env
+.env.*
+!.env.example
