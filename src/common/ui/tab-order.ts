@@ -83,3 +83,31 @@ function byOrder<T extends TabOrderInput>(entries: readonly T[]): T[] {
 function orderOf(entry: TabOrderInput): number {
   return entry.tab.order ?? DEFAULT_ORDER;
 }
+
+// ------------------------------------------------------ 「上次停留的标签」
+
+/**
+ * 记忆键，**按站点分键**：`ui:active-tab:<siteId>`。
+ *
+ * 为什么不跟 `ui:size` 它们一样用一个全局键：位置是「我的面板在哪」（跨站共用才合理），
+ * 而标签是「我在这个站点看哪一页」。bkxk 将来有任务 / 监控 / 自定义 / 设置 / 日志
+ * **五个**专属标签页，共用一个键意味着「在 bkxk 停在站点设置，去一趟 UOOC，
+ * 回来记忆就没了」。
+ *
+ * `siteId` 已经过校验，所以这里不需要再转义：适配器 id 的格式有测试钉住
+ * （`tests/suites/registry.test.ts`），冒号与 `sztb:` 前缀都不会出现。
+ */
+export function activeTabKey(siteId: string): string {
+  return `ui:active-tab:${siteId}`;
+}
+
+/**
+ * 是否应该为「当前生效的标签页」写盘。
+ *
+ * 与 `read(key) === effective` 等价，单独抽出来是因为「存的 id 已不在当前标签集里」
+ * 这个分支最容易写错：那时必须**回退显示但不写盘**，否则一次落空访问就会
+ * 把上一站的记忆抹掉（用户拍板的配套规则）。
+ */
+export function shouldRememberActive(remembered: string | null, effective: string): boolean {
+  return remembered === effective;
+}

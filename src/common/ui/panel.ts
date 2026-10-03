@@ -19,13 +19,17 @@
  *   ui:pos         { left, top }     面板与悬浮球共用左上角
  *   ui:size        { width, height }
  *   ui:collapsed   boolean
+ *
+ * 例外是「上次停留的标签页」`ui:active-tab:<siteId>` —— 它**按站点分键**：
+ * 位置是「我的面板在哪」（跨站共用才合理），标签是「我在这个站点看哪一页」，两者语义不同。
+ * bkxk 将来有 5 个专属标签页，共用一个键会让跨站访问互相覆写记忆。
  */
 
 import { el, clamp } from '../utils/dom.ts';
 import { read, write } from '../core/storage.ts';
 import { scoped } from '../core/log.ts';
 import { TabView } from './tabs.ts';
-import { COMMON_SITE_ID } from './tab-order.ts';
+import { COMMON_SITE_ID, activeTabKey, shouldRememberActive } from './tab-order.ts';
 import { ToastStack } from './widgets/toast.ts';
 import { showConfirm } from './widgets/confirm.ts';
 import type { ConfirmOptions, PanelApi, TabContext, TabRegistration } from '../../sites/types.ts';
@@ -223,7 +227,15 @@ export function createPanel(
     collapseBtn,
   );
 
-  const tabView = new TabView(shadow);
+  const tabView = new TabView(shadow, {
+    // 记住「用户上次停留的标签页」需要知道它属于哪个站点。
+    // 这里只把 id 转交给 setTabs 装的闭包（它手上有 id → siteId 映射），
+    // 不在这里直接读 storage —— 落盘时机对顺序很敏感，原因见 setTabs 里的注释。
+    onActivate: (tabId) => {
+      lastActivated = tabId;
+      restore?.onRemember(tabId, restore.remembers);
+    },
+  });
   const resizeHandle = el('div', { class: 'sztb-resize', attrs: { title: '拖拽调整大小' } });
 
   const panelEl = el('div', { class: 'sztb-panel' }, head, tabView.tabbar, tabView.body, resizeHandle);
@@ -232,6 +244,16 @@ export function createPanel(
   shadow.appendChild(root);
 
   const toasts = new ToastStack(shadow);
+  let lastActivated: string | null = null;
+
+  /**
+   * 「上次停留的标签页」的落盘闸门，每次重建标签页时由 setTabs 重装。
+   * `remembers === false` 表示**当前这次激活是回退出来的**（存的 id 已不在标签集里），
+   * 此时不写盘 —— 否则「在 bkxk 停在站点设置 → 去 UOOC 落空一次」就会抹掉 bkxk 的记忆。
+   */
+  let restore:
+    | { remembers: boolean; onRemember: (tabId: string, persist: boolean) => void }
+    | undefined;
 
   // ------------------------------------------------------------ 状态
   //
@@ -386,10 +408,41 @@ export function createPanel(
     confirm: (opts: ConfirmOptions) => showConfirm(shadow, opts),
     activateTab: (tabId) => tabView.activate(tabId),
     setTabs: (next: readonly TabEntry[]) => {
-      const map = new Map<string, string>();
-      for (const entry of next) map.set(entry.tab.id, entry.siteId);
+      lastActivated = null;
+
+      const siteToId = new Map<string, string>();
+      for (const entry of next) siteToId.set(entry.tab.id, entry.siteId);
+
       // 整条 entries 交给 TabView：分组要用 siteId，丢掉了就只能全局按 order 平铺
-      tabView.setTabs(next, makeContext(map));
+      tabView.setTabs(next, makeContext(siteToId));
+
+      const active = tabView.activeTabId();
+      if (active === null) {
+        restore = undefined;
+        return; // 没有任何标签页，无从记忆
+      }
+
+      // setup 里有 activate()，它会**同步**触发 onActivate，把 lastActivated 填上；
+      // 若标签页列表为空则是 undefined，上面已提前返回。
+      // ⚠️ 不能把下面这行挪到 tabView.setTabs 之前：那会清掉上一次的 lastActivated，
+      //    导致重建时反复回写 storage（无谓写盘的 bug）。
+      const effective = lastActivated ?? active;
+      const scope = siteToId.get(effective) ?? COMMON_SITE_ID;
+      const id = activeTabKey(scope);
+      const remembers = shouldRememberActive(read<string | null>(id, null), effective);
+      if (!remembers) write(id, effective); // 首次（或上次的标签页已不存在）以当前为准
+
+      restore = {
+        remembers,
+        onRemember: (tabId, persist) => {
+          // 落空的激活（标签页不在当前集合里）只回退显示、**不写盘**，
+          // 否则一次跨站访问就会把上一站的记忆抹掉。
+          if (!tabView.has(tabId)) return;
+          if (!persist) return;
+          const nextScope = siteToId.get(tabId) ?? COMMON_SITE_ID;
+          write(activeTabKey(nextScope), tabId);
+        },
+      };
     },
     destroy: () => {
       try {

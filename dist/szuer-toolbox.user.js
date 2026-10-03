@@ -49,7 +49,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-03T17:00:42.637Z（构建号 19） */
+/* 构建信息：2026-10-03T17:02:01.498Z（构建号 20） */
 
 "use strict";
 (() => {
@@ -318,6 +318,12 @@
   }
   function orderOf(entry) {
     return entry.tab.order ?? DEFAULT_ORDER;
+  }
+  function activeTabKey(siteId) {
+    return `ui:active-tab:${siteId}`;
+  }
+  function shouldRememberActive(remembered, effective) {
+    return remembered === effective;
   }
 
   // src/common/ui/tabs.ts
@@ -630,12 +636,22 @@
       titleText,
       collapseBtn
     );
-    const tabView = new TabView(shadow);
+    const tabView = new TabView(shadow, {
+      // 记住「用户上次停留的标签页」需要知道它属于哪个站点。
+      // 这里只把 id 转交给 setTabs 装的闭包（它手上有 id → siteId 映射），
+      // 不在这里直接读 storage —— 落盘时机对顺序很敏感，原因见 setTabs 里的注释。
+      onActivate: (tabId) => {
+        lastActivated = tabId;
+        restore?.onRemember(tabId, restore.remembers);
+      }
+    });
     const resizeHandle = el("div", { class: "sztb-resize", attrs: { title: "拖拽调整大小" } });
     const panelEl = el("div", { class: "sztb-panel" }, head, tabView.tabbar, tabView.body, resizeHandle);
     const root = el("div", { class: "sztb-root" }, ball, panelEl);
     shadow.appendChild(root);
     const toasts = new ToastStack(shadow);
+    let lastActivated = null;
+    let restore;
     const storedCollapsed = read(COLLAPSED_KEY, null);
     let collapsed = storedCollapsed ?? false;
     let size = readSize();
@@ -751,9 +767,29 @@
       confirm: (opts) => showConfirm(shadow, opts),
       activateTab: (tabId) => tabView.activate(tabId),
       setTabs: (next) => {
-        const map = /* @__PURE__ */ new Map();
-        for (const entry of next) map.set(entry.tab.id, entry.siteId);
-        tabView.setTabs(next, makeContext(map));
+        lastActivated = null;
+        const siteToId = /* @__PURE__ */ new Map();
+        for (const entry of next) siteToId.set(entry.tab.id, entry.siteId);
+        tabView.setTabs(next, makeContext(siteToId));
+        const active = tabView.activeTabId();
+        if (active === null) {
+          restore = void 0;
+          return;
+        }
+        const effective = lastActivated ?? active;
+        const scope = siteToId.get(effective) ?? COMMON_SITE_ID;
+        const id = activeTabKey(scope);
+        const remembers = shouldRememberActive(read(id, null), effective);
+        if (!remembers) write(id, effective);
+        restore = {
+          remembers,
+          onRemember: (tabId, persist) => {
+            if (!tabView.has(tabId)) return;
+            if (!persist) return;
+            const nextScope = siteToId.get(tabId) ?? COMMON_SITE_ID;
+            write(activeTabKey(nextScope), tabId);
+          }
+        };
       },
       destroy: () => {
         try {
@@ -2339,8 +2375,8 @@ ${options.desc ?? ""}
   // src/main.ts
   var log11 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-03T17:00:42.637Z" : null;
-  var BUILD_NO = true ? 19 : null;
+  var BUILD_TIME = true ? "2026-10-03T17:02:01.498Z" : null;
+  var BUILD_NO = true ? 20 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();

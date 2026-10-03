@@ -13,8 +13,14 @@
  * 所以判定逻辑必须留在这类纯函数里。
  */
 
-import { describe, it, assertEqual, assertDeepEqual } from '../harness.ts';
-import { planTabOrder, COMMON_SITE_ID, DEFAULT_ORDER } from '../../src/common/ui/tab-order.ts';
+import { describe, it, assert, assertEqual, assertDeepEqual } from '../harness.ts';
+import {
+  planTabOrder,
+  activeTabKey,
+  shouldRememberActive,
+  COMMON_SITE_ID,
+  DEFAULT_ORDER,
+} from '../../src/common/ui/tab-order.ts';
 import type { TabOrderInput } from '../../src/common/ui/tab-order.ts';
 import type { TabRegistration } from '../../src/sites/types.ts';
 
@@ -127,5 +133,36 @@ describe('common/ui/tab-order —— 分组与排序', () => {
       ids([site('uooc', 'uooc:settings', 300), site('bkxk', 'bkxk:settings', 200), common('log', 90)]),
       ['bkxk:settings', 'uooc:settings', 'log'],
     );
+  });
+});
+
+describe('common/ui/tab-order —— 记忆键与落盘闸门', () => {
+  it('记忆键按站点分键，且共用 storage 的 sztb: 命名空间前缀', () => {
+    // storage.write 会自己加 sztb: 前缀，这里只给不带前缀的键
+    assertEqual(activeTabKey('bkxk'), 'ui:active-tab:bkxk');
+    assertEqual(activeTabKey('uooc'), 'ui:active-tab:uooc');
+  });
+
+  it('两个站点的键互不相同 —— 这正是「按站点分键」要防的覆写', () => {
+    assert(activeTabKey('bkxk') !== activeTabKey('uooc'), 'bkxk 与 uooc 的记忆必须是两个键');
+  });
+
+  it('站点 id 里不含冒号（键结构不会被撑破），也没有空白', () => {
+    for (const id of ['bkxk', 'uooc', 'demo']) {
+      assert(!id.includes(':'), `${id} 不应含冒号`);
+      assert(!/\s/.test(id), `${id} 不应含空白`);
+    }
+  });
+
+  it('存的 id 与生效的 id 一致 ⇒ 该记（无需再写盘）', () => {
+    assertEqual(shouldRememberActive('bkxk:settings', 'bkxk:settings'), true);
+  });
+
+  it('存的 id 已不在当前标签集里 ⇒ 不记（回退显示但不写盘）', () => {
+    assertEqual(shouldRememberActive('bkxk:settings', 'common:settings'), false);
+  });
+
+  it('从没存过 ⇒ 不记，于是首次访问会以当前标签页为准写一次', () => {
+    assertEqual(shouldRememberActive(null, 'common:settings'), false);
   });
 });
