@@ -47,11 +47,19 @@ describe('bkxk/tasks —— classifyMsg', () => {
     assertEqual(classifyMsg('选课门数已达上限'), 'terminal');
   });
 
-  it('「学分已满」被判成可重试 —— 旧仓库的既有行为，刻意原样搬过来', () => {
-    // TERMINAL_RE 里有「学分」，但 RETRYABLE_RE 的「已满」先命中。
-    // 旧版 `tasks.js:33-34` 就是这个顺序，所以「学分已满」会被 smart 策略无限重试。
-    // 移植时**没有**擅自改判 —— 要不要收紧属于行为变更，等用户拍板。
-    assertEqual(classifyMsg('学分已满'), 'retryable');
+  it('配额类（学分 / 门数）优先判终结，不被后面的「已满」抢走', () => {
+    // 旧仓库这里是 retryable（RETRYABLE_RE 的「已满」先命中），
+    // 结果是 quota 类拒绝被智能策略无限重试 —— 按红线 R2 有把会话打没的风险。
+    // 用户拍板「精准收紧」（方案 C）：只把 学分/门数/门课 这一小撮提到最前面。
+    assertEqual(classifyMsg('学分已满'), 'terminal');
+    assertEqual(classifyMsg('学分已达上限'), 'terminal');
+    assertEqual(classifyMsg('选课门数已满'), 'terminal');
+  });
+
+  it('收紧不得误伤：撞车后语义仍是「满员」的一律保持可重试', () => {
+    assertEqual(classifyMsg('限选人数已满'), 'retryable');
+    assertEqual(classifyMsg('已选人数已达上限'), 'retryable');
+    assertEqual(classifyMsg('课容量已满'), 'retryable');
   });
 
   it('认不出来的一律 unknown', () => {

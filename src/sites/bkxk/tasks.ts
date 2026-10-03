@@ -59,9 +59,16 @@ export const KIND_AUTH = 'auth';
 
 /**
  * 业务返回文案分类。
- * 【顺序重要】先判可重试：`已选人数超过课容量` 同时含「已选」与「容量」，
- * 但它表达的是「满员」，必须算可重试；故 可重试 优先于 终结性。
+ *
+ * 【顺序重要，共三级】
+ * 1. `TERMINAL_QUOTA_RE`（配额类终结）——
+ *    `学分已满` / `选课门数已满` 同时含「已满」（可重试词），但它们是**配额上限**，
+ *    再重试毫无意义：只会按红线 R2 的节奏反复打站点，甚至把会话打没。
+ * 2. `RETRYABLE_RE` —— `已选人数超过课容量` 同时含「已选」（终结词）与「容量」，
+ *    但它表达的是「满员」，必须算可重试，故可重试优先于终结性。
+ * 3. `TERMINAL_RE` —— 其余终结性文案。
  */
+const TERMINAL_QUOTA_RE = /学分|门数|门课/;
 const RETRYABLE_RE = /已满|满员|容量|人数/;
 const TERMINAL_RE =
   /已选|已添加|选中|重复|冲突|学分|门数|门课|限选|性别|年级|不允许|未开放|无权限|不在|已经存在|存在选课结果/;
@@ -70,6 +77,7 @@ export type MsgKind = 'retryable' | 'terminal' | 'unknown';
 
 export function classifyMsg(msg: unknown): MsgKind {
   const m = msg === undefined || msg === null ? '' : String(msg);
+  if (TERMINAL_QUOTA_RE.test(m)) return 'terminal';
   if (RETRYABLE_RE.test(m)) return 'retryable';
   if (TERMINAL_RE.test(m)) return 'terminal';
   return 'unknown';
