@@ -75,7 +75,6 @@ const INFO_SELECTOR = '.cv-info';
 const ROW_SELECTOR = '.cv-row';
 const BODY_SELECTOR = '.cv-body';
 const SETTING_COL_SELECTOR = '.cv-setting-col';
-const CAPTION_RED_SELECTOR = '.cv-caption-red';
 const TITLE_CELL_SELECTOR = '.cv-title-col, .cv-course';
 
 interface Ctx {
@@ -324,9 +323,11 @@ function enhanceUnit(unit: HTMLElement, ctx: Ctx): void {
   }
   const info = infoForUnit(unit, tcId);
   const block = buildBlock(info, ctx);
-  const anchor = ownDescendant(unit, CAPTION_RED_SELECTOR);
-  if (anchor !== null) anchor.insertAdjacentElement('afterend', block);
-  else unit.appendChild(block);
+  // 注入点在**卡片最前面**（教师名那一行之前）—— v0.17 用户手测后指定。
+  // 原先插在 `.cv-caption-red` 之后，而它实测位于 `div.cv-info > h5 > div.cv-caption-red`，
+  // 也就是塞进了站点的单行容器 `<h5>` 里：块宽度不受卡片约束，部分卡片因此把内容顶到卡片外。
+  // 放到 `.cv-info` 的第一个子位置，块就成了卡片的普通块级子元素，宽度自然被卡片约束。
+  unit.insertBefore(block, unit.firstChild);
   ctx.budget += 1;
 }
 

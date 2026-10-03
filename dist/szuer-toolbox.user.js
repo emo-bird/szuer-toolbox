@@ -49,7 +49,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-03T18:29:00.779Z（构建号 25） */
+/* 构建信息：2026-10-03T18:49:32.666Z（构建号 27） */
 
 "use strict";
 (() => {
@@ -2335,21 +2335,24 @@ ${options.desc ?? ""}
   // src/sites/bkxk/list-style.ts
   var LIST_STYLE_ID = "sztb-bkxk-list-style";
   var LIST_CSS = `
+/* ---- 我们自己的注入块（列表行与卡片共用，v0.17 起整体压缩高度） ---- */
+
 .sztb-bkxk-block {
   display: block;
-  margin: 2px 0;
-  padding: 2px 6px;
+  margin: 0 0 1px;
+  padding: 1px 5px;
   border-left: 2px solid #2a6df4;
   border-radius: 3px;
   background: rgba(42, 109, 244, 0.06);
   font-size: 12px;
-  line-height: 1.5;
+  line-height: 1.35;
 }
 
 .sztb-bkxk-id {
   display: block;
   font-family: ui-monospace, Consolas, "Courier New", monospace;
   font-size: 11px;
+  line-height: 1.4;
   color: #1b4fd8;
   white-space: nowrap;
   cursor: pointer;
@@ -2361,21 +2364,26 @@ ${options.desc ?? ""}
   text-decoration: underline;
 }
 
+/* 两个按钮**必须在同一行**：列表页这一列只有 150px 上下，
+   一旦允许换行就折成两行、把整行行高顶上去（v0.17 手测 #52 的反馈） */
 .sztb-bkxk-ops {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 4px;
-  margin-top: 2px;
+  margin-top: 1px;
+  white-space: nowrap;
 }
 
 .sztb-bkxk-btn {
-  padding: 1px 6px;
+  flex: 0 0 auto;
+  padding: 0 6px;
   border: 1px solid #c9d4e6;
   border-radius: 3px;
   background: #fff;
   color: #333;
   font-size: 11px;
   line-height: 1.5;
+  white-space: nowrap;
   cursor: pointer;
 }
 
@@ -2395,7 +2403,7 @@ ${options.desc ?? ""}
   color: #fff;
 }
 
-/* 新加的那一列：占满剩余宽度，最小宽度兜住两个按钮不换行 */
+/* 新加的那一列：占满剩余宽度，最小宽度兜住「ID 一行 + 两个按钮一行」 */
 .sztb-bkxk-col {
   flex: 1 1 auto;
   min-width: 150px;
@@ -2404,6 +2412,16 @@ ${options.desc ?? ""}
 
 .sztb-bkxk-head {
   font-weight: bold;
+  /* 站点给表头单元格挂的排序箭头（伪元素或背景图）会连我们这份一起命中 ——
+     我们的表头不是可排序列，v0.17 手测 #53 要求清掉（用户拍板保留「抢课模块」文字） */
+  background-image: none !important;
+  cursor: default;
+}
+
+.sztb-bkxk-head::before,
+.sztb-bkxk-head::after {
+  content: none !important;
+  display: none !important;
 }
 
 /* ---- 只在被我们加过列的容器上改布局 ---- */
@@ -2431,6 +2449,34 @@ ${options.desc ?? ""}
 
 .cv-head:has(> .sztb-bkxk-col) > .sztb-bkxk-col {
   flex: 1 1 auto;
+}
+
+/* ---- 卡片页：压站点自己的间距，一屏多显示几张卡（v0.17 手测 #54） ----
+   严格限制在「含我们注入块的那张卡」上：没有注入的卡片一律不动。
+   注入块是 .cv-info 的第一个子元素，所以锚点用 :has(> .sztb-bkxk-block)。 */
+
+.cv-info:has(> .sztb-bkxk-block) {
+  padding-top: 2px !important;
+  padding-bottom: 2px !important;
+}
+
+.cv-info:has(> .sztb-bkxk-block) > h5 {
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+  line-height: 1.3 !important;
+}
+
+.cv-info:has(> .sztb-bkxk-block) > h5 > div,
+.cv-info:has(> .sztb-bkxk-block) > div.cv-caption-text,
+.cv-info:has(> .sztb-bkxk-block) > div.cv-caption-red {
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+  line-height: 1.3 !important;
+}
+
+.cv-info:has(> .sztb-bkxk-block) > div.cv-operate {
+  margin-top: 2px !important;
+  margin-bottom: 2px !important;
 }
 `;
 
@@ -2615,7 +2661,6 @@ ${options.desc ?? ""}
   var ROW_SELECTOR = ".cv-row";
   var BODY_SELECTOR = ".cv-body";
   var SETTING_COL_SELECTOR = ".cv-setting-col";
-  var CAPTION_RED_SELECTOR = ".cv-caption-red";
   var TITLE_CELL_SELECTOR = ".cv-title-col, .cv-course";
   function swallow(ev) {
     ev.preventDefault();
@@ -2799,9 +2844,7 @@ ${options.desc ?? ""}
     }
     const info = infoForUnit(unit, tcId);
     const block = buildBlock(info, ctx);
-    const anchor = ownDescendant(unit, CAPTION_RED_SELECTOR);
-    if (anchor !== null) anchor.insertAdjacentElement("afterend", block);
-    else unit.appendChild(block);
+    unit.insertBefore(block, unit.firstChild);
     ctx.budget += 1;
   }
   function enhanceRow(row3, ctx) {
@@ -2963,8 +3006,8 @@ ${options.desc ?? ""}
   // src/main.ts
   var log12 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-03T18:29:00.779Z" : null;
-  var BUILD_NO = true ? 25 : null;
+  var BUILD_TIME = true ? "2026-10-03T18:49:32.666Z" : null;
+  var BUILD_NO = true ? 27 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();
