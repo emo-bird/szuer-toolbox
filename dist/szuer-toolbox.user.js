@@ -49,7 +49,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-03T17:02:01.498Z（构建号 20） */
+/* 构建信息：2026-10-03T17:17:05.745Z（构建号 21） */
 
 "use strict";
 (() => {
@@ -322,8 +322,21 @@
   function activeTabKey(siteId) {
     return `ui:active-tab:${siteId}`;
   }
-  function shouldRememberActive(remembered, effective) {
-    return remembered === effective;
+  function resolveActiveTab(entries2, stored) {
+    const planned = planTabOrder(entries2);
+    const mounted = /* @__PURE__ */ new Set();
+    const scopes = [];
+    for (const item of planned) {
+      mounted.add(item.entry.tab.id);
+      if (item.entry.siteId === COMMON_SITE_ID) continue;
+      if (!scopes.includes(item.entry.siteId)) scopes.push(item.entry.siteId);
+    }
+    scopes.push(COMMON_SITE_ID);
+    for (const scope of scopes) {
+      const id = stored(activeTabKey(scope));
+      if (id !== null && mounted.has(id)) return id;
+    }
+    return null;
   }
 
   // src/common/ui/tabs.ts
@@ -348,8 +361,12 @@
      *
      * 入参是「标签页 + 它归属的站点 id」而不是裸的 `TabRegistration`：
      * 分组要靠 `siteId` 区分站点组与公共组（见 ./tab-order.ts）。
+     *
+     * @param preferredTabId 初始选中的标签页 id（「上次停留的标签」）。
+     *   **本模块不读 storage** —— 记忆的读取与写回都在 panel 里，这里只负责
+     *   「优先选它；它不在本批标签集里就退回首屏第一个」。传 null / 省略即传统行为。
      */
-    setTabs(entries2, ctx) {
+    setTabs(entries2, ctx, preferredTabId = null) {
       this.destroyTabs();
       const planned = planTabOrder(entries2);
       for (const item of planned) {
@@ -358,7 +375,7 @@
       }
       const first = planned[0];
       if (first !== void 0) {
-        const keep = this.current !== null && this.mounted.has(this.current) ? this.current : first.entry.tab.id;
+        const keep = preferredTabId !== null && this.mounted.has(preferredTabId) ? preferredTabId : first.entry.tab.id;
         this.activate(keep);
       }
     }
@@ -539,7 +556,6 @@
   var MIN_SIZE = { width: 260, height: 180 };
   var BALL_SIZE = 44;
   var VIEWPORT_MARGIN = 8;
-  var BALL_POS_KEY = "ui:ball-pos";
   var PANEL_POS_KEY = "ui:panel-pos";
   function isPos(v) {
     return typeof v === "object" && v !== null && typeof v.left === "number" && typeof v.top === "number";
@@ -641,8 +657,9 @@
       // 这里只把 id 转交给 setTabs 装的闭包（它手上有 id → siteId 映射），
       // 不在这里直接读 storage —— 落盘时机对顺序很敏感，原因见 setTabs 里的注释。
       onActivate: (tabId) => {
-        lastActivated = tabId;
-        restore?.onRemember(tabId, restore.remembers);
+        currentTabId = tabId;
+        if (restoring) return;
+        remember?.(tabId);
       }
     });
     const resizeHandle = el("div", { class: "sztb-resize", attrs: { title: "拖拽调整大小" } });
@@ -650,13 +667,14 @@
     const root = el("div", { class: "sztb-root" }, ball, panelEl);
     shadow.appendChild(root);
     const toasts = new ToastStack(shadow);
-    let lastActivated = null;
-    let restore;
+    let restoring = false;
+    let remember;
+    let currentTabId = null;
     const storedCollapsed = read(COLLAPSED_KEY, null);
     let collapsed = storedCollapsed ?? false;
     let size = readSize();
     let panelPos = readPos(PANEL_POS_KEY) ?? defaultPanelPos();
-    let ballPos = readPos(BALL_POS_KEY) ?? ballPosFromPanel(panelPos, size);
+    let ballPos = ballPosFromPanel(panelPos, size);
     function applyGeometry() {
       size = {
         width: Math.max(MIN_SIZE.width, size.width),
@@ -677,7 +695,7 @@
         collapsed = next;
         if (persist) write(COLLAPSED_KEY, collapsed);
       }
-      if (collapsed && readPos(BALL_POS_KEY) === null) {
+      if (collapsed) {
         ballPos = ballPosFromPanel(panelPos, size);
       }
       applyGeometry();
@@ -718,7 +736,6 @@
       () => ballPos,
       (p) => {
         ballPos = p;
-        write(BALL_POS_KEY, p);
       },
       () => ({ w: BALL_SIZE, h: BALL_SIZE })
     );
@@ -767,29 +784,20 @@
       confirm: (opts) => showConfirm(shadow, opts),
       activateTab: (tabId) => tabView.activate(tabId),
       setTabs: (next) => {
-        lastActivated = null;
         const siteToId = /* @__PURE__ */ new Map();
         for (const entry of next) siteToId.set(entry.tab.id, entry.siteId);
-        tabView.setTabs(next, makeContext(siteToId));
-        const active = tabView.activeTabId();
-        if (active === null) {
-          restore = void 0;
-          return;
-        }
-        const effective = lastActivated ?? active;
-        const scope = siteToId.get(effective) ?? COMMON_SITE_ID;
-        const id = activeTabKey(scope);
-        const remembers = shouldRememberActive(read(id, null), effective);
-        if (!remembers) write(id, effective);
-        restore = {
-          remembers,
-          onRemember: (tabId, persist) => {
-            if (!tabView.has(tabId)) return;
-            if (!persist) return;
-            const nextScope = siteToId.get(tabId) ?? COMMON_SITE_ID;
-            write(activeTabKey(nextScope), tabId);
-          }
+        const preferred = currentTabId ?? resolveActiveTab(next, (key) => read(key, null));
+        remember = (tabId) => {
+          if (!tabView.has(tabId)) return;
+          const scope = siteToId.get(tabId) ?? COMMON_SITE_ID;
+          write(activeTabKey(scope), tabId);
         };
+        restoring = true;
+        try {
+          tabView.setTabs(next, makeContext(siteToId), preferred);
+        } finally {
+          restoring = false;
+        }
       },
       destroy: () => {
         try {
@@ -2375,8 +2383,8 @@ ${options.desc ?? ""}
   // src/main.ts
   var log11 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-03T17:02:01.498Z" : null;
-  var BUILD_NO = true ? 20 : null;
+  var BUILD_TIME = true ? "2026-10-03T17:17:05.745Z" : null;
+  var BUILD_NO = true ? 21 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();

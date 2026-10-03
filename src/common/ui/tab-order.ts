@@ -102,12 +102,44 @@ export function activeTabKey(siteId: string): string {
 }
 
 /**
- * 是否应该为「当前生效的标签页」写盘。
+ * 重新打开面板时该选中哪个标签页 —— **纯函数**，`stored` 是「按 key 取值」的查询函数
+ * （调用方传 `storage.read`，测试传一个查表的闭包）。
  *
- * 与 `read(key) === effective` 等价，单独抽出来是因为「存的 id 已不在当前标签集里」
- * 这个分支最容易写错：那时必须**回退显示但不写盘**，否则一次落空访问就会
- * 把上一站的记忆抹掉（用户拍板的配套规则）。
+ * ## 恢复优先级（用户拍板：站点组优先）
+ *
+ * 一次加载可能**同时存在多个有效键**：bkxk 页面上 `ui:active-tab:bkxk`
+ * 与 `ui:active-tab:common` 都可能存着值。规则是：
+ *
+ *   1. 按 `planTabOrder` 的顺序看**站点组**的键（多个站点按组内先后）；
+ *   2. 站点组的键都没值（或值已失效）⇒ 看公共键 `ui:active-tab:common`；
+ *   3. 全都没值 / 值已失效 ⇒ 返回 `null`，调用方回退到第一个标签页。
+ *
+ * 「站点组优先」的理由：站点自己的标签页是这个站点的主场（bkxk 页面的默认落地页
+ * 就该是【本科选课设置】），与「站点标签页排在前面」的偏好一致。
+ *
+ * ## 「值已失效」为什么返回 `null` 而不是"就地修好"
+ *
+ * 返回 `null` 时调用方只是回退显示，**不写盘** —— 这是用户拍板的配套规则：
+ * 存的 id 已不在当前标签集里（例如 bkxk 将来删掉某个标签页）时不覆盖记忆。
+ * 真值会在用户下一次**主动点击**标签页时自愈。
  */
-export function shouldRememberActive(remembered: string | null, effective: string): boolean {
-  return remembered === effective;
+export function resolveActiveTab<T extends TabOrderInput>(
+  entries: readonly T[],
+  stored: (key: string) => string | null,
+): string | null {
+  const planned = planTabOrder(entries);
+  const mounted = new Set<string>();
+  const scopes: string[] = [];
+  for (const item of planned) {
+    mounted.add(item.entry.tab.id);
+    if (item.entry.siteId === COMMON_SITE_ID) continue;
+    if (!scopes.includes(item.entry.siteId)) scopes.push(item.entry.siteId);
+  }
+  scopes.push(COMMON_SITE_ID); // 公共组兜底，永远最后一个看
+
+  for (const scope of scopes) {
+    const id = stored(activeTabKey(scope));
+    if (id !== null && mounted.has(id)) return id;
+  }
+  return null;
 }

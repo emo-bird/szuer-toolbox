@@ -17,7 +17,7 @@ import { describe, it, assert, assertEqual, assertDeepEqual } from '../harness.t
 import {
   planTabOrder,
   activeTabKey,
-  shouldRememberActive,
+  resolveActiveTab,
   COMMON_SITE_ID,
   DEFAULT_ORDER,
 } from '../../src/common/ui/tab-order.ts';
@@ -29,8 +29,9 @@ function tab(id: string, order?: number): TabRegistration {
   return { id, title: id, ...(order !== undefined ? { order } : {}), mount: () => undefined };
 }
 
-function common(id: string, order?: number): TabOrderInput {
-  return { siteId: COMMON_SITE_ID, tab: tab(id, order) };
+/** 公共标签页。id 按真实约定带 `common:` 前缀（见 `common/ui/tabs/*.ts` 的注册） */
+function common(name: string, order?: number): TabOrderInput {
+  return { siteId: COMMON_SITE_ID, tab: tab(`common:${name}`, order) };
 }
 
 function site(siteId: string, id: string, order?: number): TabOrderInput {
@@ -55,7 +56,7 @@ describe('common/ui/tab-order —— 分组与排序', () => {
   it('站点组在前、公共组在后（这是本次需求的核心）', () => {
     assertDeepEqual(ids([common('settings', 10), site('bkxk', 'bkxk:settings', 200)]), [
       'bkxk:settings',
-      'settings',
+      'common:settings',
     ]);
   });
 
@@ -63,7 +64,7 @@ describe('common/ui/tab-order —— 分组与排序', () => {
     // 站点标签页 order=999，公共 order=10：旧的全局排序会把公共排在前面
     assertDeepEqual(ids([common('settings', 10), site('bkxk', 'bkxk:tasks', 999)]), [
       'bkxk:tasks',
-      'settings',
+      'common:settings',
     ]);
   });
 
@@ -75,7 +76,7 @@ describe('common/ui/tab-order —— 分组与排序', () => {
         common('settings', 10),
         site('bkxk', 'bkxk:tasks', 100),
       ]),
-      ['bkxk:tasks', 'bkxk:settings', 'settings', 'status'],
+      ['bkxk:tasks', 'bkxk:settings', 'common:settings', 'common:status'],
     );
   });
 
@@ -98,14 +99,17 @@ describe('common/ui/tab-order —— 分组与排序', () => {
       common('settings', 10),
     ];
     assertDeepEqual(dividerIndexes(entries), [1], '应在 index 1（公共组第一个）之前插线');
-    // 顺序此时是 [bkxk:settings, settings, log]，分隔线之后紧跟着 settings
-    assertDeepEqual(ids(entries), ['bkxk:settings', 'settings', 'log']);
+    // 顺序此时是 [bkxk:settings, common:settings, common:log]，分隔线之后紧跟着 common:settings
+    assertDeepEqual(ids(entries), ['bkxk:settings', 'common:settings', 'common:log']);
   });
 
   it('只有公共标签页时**不插**分隔线 —— 否则非支持站点开头会多一条孤零零的竖线', () => {
     // 这正是 UOOC 现状：只有空壳适配器、零个站点标签页
     assertDeepEqual(dividerIndexes([common('settings', 10), common('log', 90)]), []);
-    assertDeepEqual(ids([common('settings', 10), common('log', 90)]), ['settings', 'log']);
+    assertDeepEqual(ids([common('settings', 10), common('log', 90)]), [
+      'common:settings',
+      'common:log',
+    ]);
   });
 
   it('只有站点标签页时也不插分隔线', () => {
@@ -131,12 +135,22 @@ describe('common/ui/tab-order —— 分组与排序', () => {
   it('多个站点的标签页同组处理（站内顺序仍由 order 决定）', () => {
     assertDeepEqual(
       ids([site('uooc', 'uooc:settings', 300), site('bkxk', 'bkxk:settings', 200), common('log', 90)]),
-      ['bkxk:settings', 'uooc:settings', 'log'],
+      ['bkxk:settings', 'uooc:settings', 'common:log'],
     );
   });
 });
 
-describe('common/ui/tab-order —— 记忆键与落盘闸门', () => {
+/** 用一张普通表冒充 storage：没写过的键读出来是 null */
+function store(record: Record<string, string>): (key: string) => string | null {
+  return (key) => record[key] ?? null;
+}
+
+/** 一个 bkxk 页面：一个站点标签页 + 公共标签页 */
+function bkxkPage(): TabOrderInput[] {
+  return [common('settings', 10), site('bkxk', 'bkxk:settings', 200), common('log', 90)];
+}
+
+describe('common/ui/tab-order —— 记忆键与恢复优先级', () => {
   it('记忆键按站点分键，且共用 storage 的 sztb: 命名空间前缀', () => {
     // storage.write 会自己加 sztb: 前缀，这里只给不带前缀的键
     assertEqual(activeTabKey('bkxk'), 'ui:active-tab:bkxk');
@@ -154,15 +168,88 @@ describe('common/ui/tab-order —— 记忆键与落盘闸门', () => {
     }
   });
 
-  it('存的 id 与生效的 id 一致 ⇒ 该记（无需再写盘）', () => {
-    assertEqual(shouldRememberActive('bkxk:settings', 'bkxk:settings'), true);
+  it('站点键命中 ⇒ 恢复那个站点标签页（用户拍板：站点组优先）', () => {
+    assertEqual(
+      resolveActiveTab(bkxkPage(), store({ 'ui:active-tab:bkxk': 'bkxk:settings' })),
+      'bkxk:settings',
+    );
   });
 
-  it('存的 id 已不在当前标签集里 ⇒ 不记（回退显示但不写盘）', () => {
-    assertEqual(shouldRememberActive('bkxk:settings', 'common:settings'), false);
+  it('两个键都有值时仍以站点键为准 —— 这就是「站点组优先」的全部含义', () => {
+    assertEqual(
+      resolveActiveTab(
+        bkxkPage(),
+        store({ 'ui:active-tab:bkxk': 'bkxk:settings', 'ui:active-tab:common': 'common:log' }),
+      ),
+      'bkxk:settings',
+    );
   });
 
-  it('从没存过 ⇒ 不记，于是首次访问会以当前标签页为准写一次', () => {
-    assertEqual(shouldRememberActive(null, 'common:settings'), false);
+  it('站点键没值（没存过）⇒ 退到公共键', () => {
+    assertEqual(
+      resolveActiveTab(bkxkPage(), store({ 'ui:active-tab:common': 'common:log' })),
+      'common:log',
+    );
+  });
+
+  it('站点键的值已不在当前标签集里（失效）⇒ 退到公共键', () => {
+    assertEqual(
+      resolveActiveTab(
+        bkxkPage(),
+        store({ 'ui:active-tab:bkxk': 'bkxk:tasks', 'ui:active-tab:common': 'common:log' }),
+      ),
+      'common:log',
+      'bkxk:tasks 将来被删掉后，不该因为一条失效记忆就卡在回退值上',
+    );
+  });
+
+  it('两个键都失效 / 都没存过 ⇒ null（调用方回退第一个标签页，且**不写盘**）', () => {
+    assertEqual(resolveActiveTab(bkxkPage(), store({})), null, '从没存过');
+    assertEqual(
+      resolveActiveTab(
+        bkxkPage(),
+        store({ 'ui:active-tab:bkxk': 'bkxk:gone', 'ui:active-tab:common': 'common:gone' }),
+      ),
+      null,
+      '两个键都失效',
+    );
+  });
+
+  it('纯公共页面（UOOC 现状：零个站点标签页）⇒ 只可能读到公共键', () => {
+    const uoocPage = [common('settings', 10), common('log', 90)];
+    assertEqual(
+      resolveActiveTab(uoocPage, store({ 'ui:active-tab:common': 'common:log' })),
+      'common:log',
+    );
+    assertEqual(
+      resolveActiveTab(uoocPage, store({ 'ui:active-tab:uooc': 'uooc:settings' })),
+      null,
+      'uooc 键里的 id 不在本页标签集里，不能采用',
+    );
+  });
+
+  it('查询顺序：先站点键、后公共键（公共键只在站点组全军覆没后才读）', () => {
+    const seen: string[] = [];
+    const spy = (key: string): string | null => {
+      seen.push(key);
+      return null;
+    };
+    resolveActiveTab(bkxkPage(), spy);
+    assertDeepEqual(seen, ['ui:active-tab:bkxk', 'ui:active-tab:common']);
+  });
+
+  it('多个站点组时按 planTabOrder 的先后查（bkxk 在 uooc 之前）', () => {
+    const twoSites = [site('uooc', 'uooc:settings', 300), site('bkxk', 'bkxk:settings', 200)];
+    assertEqual(
+      resolveActiveTab(
+        twoSites,
+        store({ 'ui:active-tab:uooc': 'uooc:settings', 'ui:active-tab:bkxk': 'bkxk:settings' }),
+      ),
+      'bkxk:settings',
+    );
+  });
+
+  it('空标签集 ⇒ null（不抛错）', () => {
+    assertEqual(resolveActiveTab([], store({ 'ui:active-tab:common': 'common:settings' })), null);
   });
 });

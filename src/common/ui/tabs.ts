@@ -50,8 +50,12 @@ export class TabView {
    *
    * 入参是「标签页 + 它归属的站点 id」而不是裸的 `TabRegistration`：
    * 分组要靠 `siteId` 区分站点组与公共组（见 ./tab-order.ts）。
+   *
+   * @param preferredTabId 初始选中的标签页 id（「上次停留的标签」）。
+   *   **本模块不读 storage** —— 记忆的读取与写回都在 panel 里，这里只负责
+   *   「优先选它；它不在本批标签集里就退回首屏第一个」。传 null / 省略即传统行为。
    */
-  setTabs(entries: readonly TabOrderInput[], ctx: TabContext): void {
+  setTabs(entries: readonly TabOrderInput[], ctx: TabContext, preferredTabId: string | null = null): void {
     this.destroyTabs();
 
     const planned = planTabOrder(entries);
@@ -63,7 +67,12 @@ export class TabView {
 
     const first = planned[0];
     if (first !== undefined) {
-      const keep = this.current !== null && this.mounted.has(this.current) ? this.current : first.entry.tab.id;
+      // ⚠️ 不要在这里读 `this.current`：上一行的 destroyTabs() 刚把它清成 null，
+      //    写回退分支等于死代码（曾经因此让「记住上次停留的标签页」整条功能失效）。
+      const keep =
+        preferredTabId !== null && this.mounted.has(preferredTabId)
+          ? preferredTabId
+          : first.entry.tab.id;
       this.activate(keep);
     }
   }

@@ -16,20 +16,23 @@
  *   <div class="sztb-modal-mask">…</div>          ← 二次确认时临时插入
  *
  * 位置 / 大小 / 折叠状态**跨站点共用同一份存储**（需求文档 §4）：
- *   ui:pos         { left, top }     面板与悬浮球共用左上角
+ *   ui:panel-pos   { left, top }     面板左上角
  *   ui:size        { width, height }
  *   ui:collapsed   boolean
  *
  * 例外是「上次停留的标签页」`ui:active-tab:<siteId>` —— 它**按站点分键**：
  * 位置是「我的面板在哪」（跨站共用才合理），标签是「我在这个站点看哪一页」，两者语义不同。
  * bkxk 将来有 5 个专属标签页，共用一个键会让跨站访问互相覆写记忆。
+ *
+ * 悬浮球**没有自己的坐标**（v0.13 改）：每次折叠都对齐到标题栏折叠按钮的中心，
+ * 那个位置由面板位置 + 尺寸算得，所以「球在哪」不构成第三份状态。
  */
 
 import { el, clamp } from '../utils/dom.ts';
 import { read, write } from '../core/storage.ts';
 import { scoped } from '../core/log.ts';
 import { TabView } from './tabs.ts';
-import { COMMON_SITE_ID, activeTabKey, shouldRememberActive } from './tab-order.ts';
+import { COMMON_SITE_ID, activeTabKey, resolveActiveTab } from './tab-order.ts';
 import { ToastStack } from './widgets/toast.ts';
 import { showConfirm } from './widgets/confirm.ts';
 import type { ConfirmOptions, PanelApi, TabContext, TabRegistration } from '../../sites/types.ts';
@@ -65,11 +68,10 @@ const BALL_SIZE = 44;
 const VIEWPORT_MARGIN = 8;
 
 /**
- * 悬浮球与面板**各自独立记忆位置**。
- * 球默认停在**标题栏折叠按钮的位置**（面板右上角），这样点折叠后球正好落在原地，
- * 点球展开后面板又回到原处 —— 视觉上是一次「收起 / 展开」而不是一次「移动」。
+ * 面板位置。**球没有自己的键了**（v0.13）：球每次折叠都对齐到关闭键中心，
+ * 那个坐标由面板位置 + 尺寸算出来，没有第三份状态可存。
+ * 旧安装留下的 `ui:ball-pos` 已停用 —— 不再读取，也不主动删除（留着无害）。
  */
-const BALL_POS_KEY = 'ui:ball-pos';
 const PANEL_POS_KEY = 'ui:panel-pos';
 
 interface Pos {
@@ -232,8 +234,12 @@ export function createPanel(
     // 这里只把 id 转交给 setTabs 装的闭包（它手上有 id → siteId 映射），
     // 不在这里直接读 storage —— 落盘时机对顺序很敏感，原因见 setTabs 里的注释。
     onActivate: (tabId) => {
-      lastActivated = tabId;
-      restore?.onRemember(tabId, restore.remembers);
+      // 内存态的「当前标签页」：重建标签集时（适配器二次注册）用它，
+      // 免得又去读一次 storage —— 那会把用户从当前这一页拽回站点键里的旧值。
+      currentTabId = tabId;
+      // 重建标签页时那次**自动**激活不算「用户的选择」，此时不写盘
+      if (restoring) return;
+      remember?.(tabId);
     },
   });
   const resizeHandle = el('div', { class: 'sztb-resize', attrs: { title: '拖拽调整大小' } });
@@ -244,16 +250,19 @@ export function createPanel(
   shadow.appendChild(root);
 
   const toasts = new ToastStack(shadow);
-  let lastActivated: string | null = null;
 
   /**
    * 「上次停留的标签页」的落盘闸门，每次重建标签页时由 setTabs 重装。
-   * `remembers === false` 表示**当前这次激活是回退出来的**（存的 id 已不在标签集里），
-   * 此时不写盘 —— 否则「在 bkxk 停在站点设置 → 去 UOOC 落空一次」就会抹掉 bkxk 的记忆。
+   *
+   * ⚠️ 关键是把「用户点标签页」与「setTabs 内部那次自动激活」分开：
+   * 后者只是把上次的记忆恢复出来，不是新选择，写盘会把它抹成回退值。
+   * （初版把闸门写成「存的值已等于当前值才写盘」，于是首次访问之后
+   *   用户的所有点击都不落盘，记忆永远冻在第一次写入的值上。）
    */
-  let restore:
-    | { remembers: boolean; onRemember: (tabId: string, persist: boolean) => void }
-    | undefined;
+  let restoring = false;
+  let remember: ((tabId: string) => void) | undefined;
+  /** 内存里的当前标签页；只在**首次**建标签集时才去读 storage 的记忆 */
+  let currentTabId: string | null = null;
 
   // ------------------------------------------------------------ 状态
   //
@@ -265,8 +274,8 @@ export function createPanel(
 
   let size = readSize();
   let panelPos: Pos = readPos(PANEL_POS_KEY) ?? defaultPanelPos();
-  // 球的位置：没存过就从面板的折叠按钮处推算，这样收起时球正好落在原地
-  let ballPos: Pos = readPos(BALL_POS_KEY) ?? ballPosFromPanel(panelPos, size);
+  // 球的位置：永远由面板位置 + 尺寸推出「折叠按钮中心」，收起时球正好落在原地
+  let ballPos: Pos = ballPosFromPanel(panelPos, size);
 
   function applyGeometry(): void {
     size = {
@@ -294,8 +303,10 @@ export function createPanel(
       collapsed = next;
       if (persist) write(COLLAPSED_KEY, collapsed);
     }
-    // 首次折叠时，若球还没有自己的位置，就对齐到标题栏折叠按钮处
-    if (collapsed && readPos(BALL_POS_KEY) === null) {
+    // 每次折叠都把球对齐到标题栏折叠按钮的**中心**（用户拍板：两者同坐标，
+    // 收起 / 展开看上去是在同一个点上的「缩 / 放」而不是「移动」）。
+    // 展开时不重算：折叠期间用户可能顺手把球拖开，那次拖动只在本次会话内有效。
+    if (collapsed) {
       ballPos = ballPosFromPanel(panelPos, size);
     }
     applyGeometry();
@@ -322,7 +333,7 @@ export function createPanel(
   /**
    * 给某个元素装上拖拽。
    * @param readPos 取当前位置
-   * @param writePos 落下时写回存储
+   * @param applyPos 拖动过程中应用新位置（是否落盘由调用方决定）
    * @param sizeOf 当前元素尺寸（用于视口钳制）
    */
   function makeDraggable(
@@ -353,8 +364,9 @@ export function createPanel(
     ball,
     () => ballPos,
     (p) => {
+      // **只改内存、不落盘**（v0.13）：球的位置是「折叠按钮在哪」的导出量，
+      // 存下来就会与下一次折叠的对齐结果打架。拖动仅在本次会话内有效。
       ballPos = p;
-      write(BALL_POS_KEY, p);
     },
     () => ({ w: BALL_SIZE, h: BALL_SIZE }),
   );
@@ -408,41 +420,29 @@ export function createPanel(
     confirm: (opts: ConfirmOptions) => showConfirm(shadow, opts),
     activateTab: (tabId) => tabView.activate(tabId),
     setTabs: (next: readonly TabEntry[]) => {
-      lastActivated = null;
-
       const siteToId = new Map<string, string>();
       for (const entry of next) siteToId.set(entry.tab.id, entry.siteId);
 
-      // 整条 entries 交给 TabView：分组要用 siteId，丢掉了就只能全局按 order 平铺
-      tabView.setTabs(next, makeContext(siteToId));
+      // 记忆的**读**：只在首次建标签集时发生。站点组键优先、公共键兜底，
+      // 值失效则返回 null（细节见 tab-order.ts）。之后一律用内存里的当前标签页。
+      const preferred =
+        currentTabId ?? resolveActiveTab(next, (key) => read<string | null>(key, null));
 
-      const active = tabView.activeTabId();
-      if (active === null) {
-        restore = undefined;
-        return; // 没有任何标签页，无从记忆
-      }
-
-      // setup 里有 activate()，它会**同步**触发 onActivate，把 lastActivated 填上；
-      // 若标签页列表为空则是 undefined，上面已提前返回。
-      // ⚠️ 不能把下面这行挪到 tabView.setTabs 之前：那会清掉上一次的 lastActivated，
-      //    导致重建时反复回写 storage（无谓写盘的 bug）。
-      const effective = lastActivated ?? active;
-      const scope = siteToId.get(effective) ?? COMMON_SITE_ID;
-      const id = activeTabKey(scope);
-      const remembers = shouldRememberActive(read<string | null>(id, null), effective);
-      if (!remembers) write(id, effective); // 首次（或上次的标签页已不存在）以当前为准
-
-      restore = {
-        remembers,
-        onRemember: (tabId, persist) => {
-          // 落空的激活（标签页不在当前集合里）只回退显示、**不写盘**，
-          // 否则一次跨站访问就会把上一站的记忆抹掉。
-          if (!tabView.has(tabId)) return;
-          if (!persist) return;
-          const nextScope = siteToId.get(tabId) ?? COMMON_SITE_ID;
-          write(activeTabKey(nextScope), tabId);
-        },
+      // 记忆的**写**：只在用户真的点了标签页时发生（restoring 闸门在 onActivate 里）。
+      // ⚠️ 必须每次重建都换掉这个闭包：它捕获了本轮的 id → siteId 映射。
+      remember = (tabId) => {
+        if (!tabView.has(tabId)) return; // 理论上不会走到：activate 对未知 id 直接返回
+        const scope = siteToId.get(tabId) ?? COMMON_SITE_ID;
+        write(activeTabKey(scope), tabId);
       };
+
+      restoring = true;
+      try {
+        // 整条 entries 交给 TabView：分组要用 siteId，丢掉了就只能全局按 order 平铺
+        tabView.setTabs(next, makeContext(siteToId), preferred);
+      } finally {
+        restoring = false;
+      }
     },
     destroy: () => {
       try {
