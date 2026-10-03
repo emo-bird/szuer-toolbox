@@ -24,5 +24,6 @@ import './suites/bkxk-courses.test.ts';
 import './suites/misc.test.ts';
 import './suites/bkxk-migrate.test.ts';
 import './suites/bkxk-settings.test.ts';
+import './suites/bkxk-tasks.test.ts';
 
 await run();

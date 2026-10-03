@@ -49,7 +49,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-03T16:05:18.739Z（构建号 15） */
+/* 构建信息：2026-10-03T16:11:06.801Z（构建号 16） */
 
 "use strict";
 (() => {
@@ -1804,9 +1804,66 @@ ${options.desc ?? ""}
     // 未实测
     MOOC: EP.PUBLIC_COURSE
   };
+  var tokenProvider = null;
+  function setTokenProvider(fn) {
+    tokenProvider = fn;
+  }
+
+  // src/common/core/bus.ts
+  var Bus = class {
+    handlers = /* @__PURE__ */ new Map();
+    /** 订阅一个事件，返回取消订阅函数 */
+    on(event, handler) {
+      let set = this.handlers.get(event);
+      if (set === void 0) {
+        set = /* @__PURE__ */ new Set();
+        this.handlers.set(event, set);
+      }
+      set.add(handler);
+      return () => {
+        set.delete(handler);
+      };
+    }
+    /** 订阅一次 */
+    once(event, handler) {
+      const off = this.on(event, (payload) => {
+        off();
+        handler(payload);
+      });
+      return off;
+    }
+    /**
+     * 广播。**监听器抛出的异常不会中断其它监听器**，而是落到 onError。
+     * 这一点很重要：一个坏掉的站点模块不该把整个悬浮窗带崩。
+     */
+    emit(event, payload) {
+      const set = this.handlers.get(event);
+      if (set === void 0) return;
+      for (const handler of [...set]) {
+        try {
+          handler(payload);
+        } catch (err) {
+          this.onError?.(event, err);
+        }
+      }
+    }
+    /** 监听器异常出口，由 main 装配时指向 logger */
+    onError;
+    /** 清空所有订阅（页面卸载前调用） */
+    clear() {
+      this.handlers.clear();
+    }
+  };
+
+  // src/sites/bkxk/bus.ts
+  var log7 = scoped("bkxk/bus");
+  var bkxkBus = new Bus();
+  bkxkBus.onError = (event, err) => {
+    log7.error(`事件 ${event} 的监听器抛错：${err instanceof Error ? err.message : String(err)}`);
+  };
 
   // src/sites/bkxk/settings.ts
-  var log7 = scoped("bkxk/settings");
+  var log8 = scoped("bkxk/settings");
   var SITE_ID = "bkxk";
   var TOGGLE = {
     /** 🔴 写接口总开关（抢课 / 退课）。旧仓库红线 R1：默认 false，不得改 */
@@ -1960,8 +2017,9 @@ ${options.desc ?? ""}
         if (!isBelowRecommended(key, ms)) return null;
         return `低于建议下限 ${spec.recommended}ms。校园站对高频请求零容忍，实测会被直接终止会话 —— 请自行确认风险。`;
       },
-      // 只有请求间隔现在就有消费方（http.ts 的串行队列）；
-      // 重试/轮询间隔要等批 4 的任务与监控模块，到那时再补 apply。
+      // 只有请求间隔需要 apply：它被 http.ts 的队列在**出队时**读取，改动必须立刻推进运行时。
+      // 重试 / 轮询间隔不用 —— tasks.retryIntervalMs() 与 monitor.intervalMs() 都是**每轮现读设置**，
+      // 用户改完下一轮就生效。
       ...key === "intervalMs" ? { apply: applyIntervalMs } : {}
     });
   }
@@ -1972,7 +2030,7 @@ ${options.desc ?? ""}
     const raw = getValue(SITE_ID, VALUE.INTERVAL_MS);
     const ms = clampLimit("intervalMs", raw);
     if (isBelowRecommended("intervalMs", ms)) {
-      log7.warn(`请求间隔被设为 ${ms}ms，低于建议下限 ${LIMITS.intervalMs.recommended}ms`);
+      log8.warn(`请求间隔被设为 ${ms}ms，低于建议下限 ${LIMITS.intervalMs.recommended}ms`);
     }
     setIntervalMs(ms);
   }
@@ -2000,7 +2058,7 @@ ${options.desc ?? ""}
   }
 
   // src/sites/bkxk/session.ts
-  var log8 = scoped("bkxk/session");
+  var log9 = scoped("bkxk/session");
   var DEFAULT_CAMPUS = "01";
   var EMPTY_SESSION = {
     studentCode: "",
@@ -2062,7 +2120,7 @@ ${options.desc ?? ""}
   function readSession() {
     const ss = pageSessionStorage();
     if (ss === null) {
-      log8.warn("读不到 sessionStorage，按未登录处理");
+      log9.warn("读不到 sessionStorage，按未登录处理");
       return EMPTY_SESSION;
     }
     try {
@@ -2072,7 +2130,7 @@ ${options.desc ?? ""}
         token: ss.getItem("token")
       });
     } catch (err) {
-      log8.warn("读取会话失败，按未登录处理", err);
+      log9.warn("读取会话失败，按未登录处理", err);
       return EMPTY_SESSION;
     }
   }
@@ -2083,7 +2141,7 @@ ${options.desc ?? ""}
   }
 
   // src/sites/bkxk/legacy.ts
-  var log9 = scoped("bkxk/legacy");
+  var log10 = scoped("bkxk/legacy");
   var LEGACY_SETTINGS_KEY = "szubkxk.settings.v2";
   var LEGACY_STORE_PREFIX = "szubkxk.v2.";
   var LEGACY_DATA_KEY = {
@@ -2249,7 +2307,7 @@ ${options.desc ?? ""}
     const lines = [];
     if (plan.empty && plan.notices.length === 0) {
       write(MIGRATION_FLAG_KEY, true);
-      log9.info("未发现旧版数据，跳过迁移");
+      log10.info("未发现旧版数据，跳过迁移");
       return [];
     }
     for (const e of plan.entries) {
@@ -2257,9 +2315,9 @@ ${options.desc ?? ""}
     }
     write(MIGRATION_FLAG_KEY, true);
     lines.push(...plan.report, ...plan.notices);
-    log9.info(`旧数据迁移完成：写入 ${plan.entries.length} 项`);
-    for (const line of plan.report) log9.info(`迁移 · ${line}`);
-    for (const line of plan.notices) log9.warn(`迁移 · ${line}`);
+    log10.info(`旧数据迁移完成：写入 ${plan.entries.length} 项`);
+    for (const line of plan.report) log10.info(`迁移 · ${line}`);
+    for (const line of plan.notices) log10.warn(`迁移 · ${line}`);
     return lines;
   }
 
@@ -2281,7 +2339,7 @@ ${options.desc ?? ""}
   };
 
   // src/sites/bkxk/index.ts
-  var log10 = scoped("site/bkxk");
+  var log11 = scoped("site/bkxk");
   var HOSTS2 = ["bkxk.szu.edu.cn"];
   var PAGES2 = ["*default/grablessons.do*", "*default/curriculum.do*"];
   var bkxkAdapter = {
@@ -2291,7 +2349,8 @@ ${options.desc ?? ""}
     pages: PAGES2,
     // 标签页分批补齐（用户拍板的五个：任务 / 监控 / 自定义 / 设置 / 日志）：
     //   本批只有【设置】—— 用户反馈「本科选课的设置都放在单独标签页更好」，
-    //   其余三个（任务 / 监控 / 自定义）在批 4 接入，【日志】是公共标签页、不用站点注册。
+    //   【任务】【监控】在 2d 接入，【自定义】随批 3 的自定义课程模块接入，
+    //   【日志】是公共标签页、不用站点注册。
     tabs: [BKXK_SETTINGS_TAB],
     toggles: BKXK_TOGGLES,
     /**
@@ -2301,22 +2360,31 @@ ${options.desc ?? ""}
     earlyInit(ctx) {
       const lines = runMigration();
       registerBkxkSettings();
+      setTokenProvider(() => readSession().token);
       if (lines.length > 0) {
-        log10.info(`已从旧版迁移 ${lines.length} 条内容，详情见日志页`);
+        log11.info(`已从旧版迁移 ${lines.length} 条内容，详情见日志页`);
       } else {
-        log10.debug(`无旧数据需要迁移（earlyInit @ ${ctx.url.pathname}）`);
+        log11.debug(`无旧数据需要迁移（earlyInit @ ${ctx.url.pathname}）`);
       }
     },
     /** 挂载期：DOM 已就绪，可以安全地把配置推给运行时并报登录态。 */
     init(ctx) {
       applyBkxkSettings();
+      bkxkBus.on("toast", ({ msg, kind }) => {
+        ctx.panel.toast(msg, kind);
+      });
+      bkxkBus.on("authExpired", ({ source }) => {
+        log11.error(`登录态失效（来源：${source}），相关任务已停止`);
+        ctx.panel.toast("登录态失效，请刷新页面重新登录", "error");
+        ctx.panel.activateTab(loginTab.id);
+      });
       const session = readSession();
       if (!session.loggedIn) {
-        log10.warn("未读到有效登录态：学号或 token 缺失，功能接口会失败。请先在站内完成登录。");
+        log11.warn("未读到有效登录态：学号或 token 缺失，功能接口会失败。请先在站内完成登录。");
       } else {
-        log10.info(`站点已就绪：${sessionSummary(session)}`);
+        log11.info(`站点已就绪：${sessionSummary(session)}`);
       }
-      log10.info(`功能页=${String(ctx.isFeaturePage)}（设置标签页已就绪，其余标签页在批 4 接入）`);
+      log11.info(`功能页=${String(ctx.isFeaturePage)}（设置 / 任务 / 监控 标签页已就绪）`);
     }
   };
 
@@ -2333,10 +2401,10 @@ ${options.desc ?? ""}
   }
 
   // src/main.ts
-  var log11 = scoped("main");
+  var log12 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-03T16:05:18.739Z" : null;
-  var BUILD_NO = true ? 15 : null;
+  var BUILD_TIME = true ? "2026-10-03T16:11:06.801Z" : null;
+  var BUILD_NO = true ? 16 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();
@@ -2376,7 +2444,7 @@ ${options.desc ?? ""}
       version: VERSION
     }));
     booted = { panel, adapterId: res.adapter?.id ?? null };
-    log11.info(
+    log12.info(
       `深大人工具箱 ${VERSION_LABEL} 已装载（host=${url.hostname}，分派=${res.reason}，站点=${res.adapter?.id ?? "无"}，功能页=${res.autoExpand ? "是" : "否"}）`
     );
     res.adapter?.init?.({
@@ -2396,10 +2464,10 @@ ${options.desc ?? ""}
         return;
       }
       if (!res.inject) {
-        log11.debug(`站内跳转后不再属于支持范围，保持现有悬浮窗`);
+        log12.debug(`站内跳转后不再属于支持范围，保持现有悬浮窗`);
         return;
       }
-      log11.info(`站内跳转导致重新分派：${bootedFor} → ${location.href}`);
+      log12.info(`站内跳转导致重新分派：${bootedFor} → ${location.href}`);
       bootedFor = location.href;
       boot(url, res);
     };
@@ -2426,9 +2494,9 @@ ${options.desc ?? ""}
     if (res.adapter?.earlyInit !== void 0) {
       try {
         res.adapter.earlyInit({ adapter: res.adapter, url });
-        log11.debug(`已执行启动期钩子：${res.adapter.id}`);
+        log12.debug(`已执行启动期钩子：${res.adapter.id}`);
       } catch (err) {
-        log11.error(`启动期钩子执行失败：${res.adapter.id}`, err);
+        log12.error(`启动期钩子执行失败：${res.adapter.id}`, err);
       }
     }
     whenDomReady(() => {

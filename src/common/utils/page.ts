@@ -42,3 +42,26 @@ export function pageSessionStorage(): Storage | null {
     return null;
   }
 }
+
+/**
+ * 页面 origin（`https://bkxk.szu.edu.cn` 这种，**不带**尾斜杠）。
+ *
+ * 为什么需要它：`sites/bkxk/api.ts` 保持纯函数、不碰 DOM，所有接口 URL 都由调用方
+ * 把 origin 传进 `endpointUrl(ep, origin)`。站点里不止一处要拼 URL（列表页、任务、监控），
+ * 所以取 origin 这件事统一放这里，不要各模块各写一份。
+ *
+ * 显式值优先（方便测试与跨域复用）；沙箱里取不到时返回空串，由调用方自己判断。
+ */
+export function pageOrigin(explicit?: string): string {
+  if (typeof explicit === 'string' && explicit !== '') return explicit;
+  try {
+    const loc = (globalThis as Record<string, unknown>)['location'];
+    if (loc !== null && typeof loc === 'object') {
+      const origin = (loc as { origin?: unknown }).origin;
+      if (typeof origin === 'string') return origin;
+    }
+  } catch {
+    /* 上层上下文（如 about:blank）访问 location 可能抛错 */
+  }
+  return '';
+}

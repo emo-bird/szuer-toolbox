@@ -403,16 +403,53 @@ export function dumpUnknown(input: UnknownDumpInput): string {
   return block;
 }
 
+// -------------------------------------------------------------- token 来源
+
+/**
+ * 会话 token 的**注入式**来源。
+ *
+ * 为什么要有它：旧仓库 `api.js:244` 写的是 `var token = o.token || API.sessionToken();`
+ * —— 调用方不传也能自动带上 token，于是 `tasks.js` / `monitor.js` 的每一处 send 都没传。
+ * 新框架的 `bkxkSend` 若不补回这个兜底，照抄调用点写出来的请求全部会缺 `token` 头，
+ * 服务端报 `value sent to redis cannot be null`，现象是「路径对、参数对、就是不返回」，极难排查。
+ *
+ * 为什么用注入而不是直接 `import { readSession }`：`api.ts` 必须保持无 DOM、无站点状态依赖，
+ * 且 `session.ts → settings.ts → api.ts` 已经构成一条链，`api.ts` 再反向 import 会成环。
+ *
+ * 适配器在 `earlyInit` 里注册一次：`setTokenProvider(() => readSession().token)`。
+ */
+let tokenProvider: (() => string) | null = null;
+
+/** 注册 / 注销 token 来源（传 null 注销） */
+export function setTokenProvider(fn: (() => string) | null): void {
+  tokenProvider = fn;
+}
+
+/**
+ * 取本次请求要用的 token：显式值 > provider > 空串。
+ * ⚠️ 返回值**包含凭证**，严禁写入日志或落盘（红线 R3）。
+ */
+export function resolveToken(explicit?: string): string {
+  if (typeof explicit === 'string' && explicit !== '') return explicit;
+  if (tokenProvider === null) return '';
+  try {
+    const t = tokenProvider();
+    return typeof t === 'string' ? t : '';
+  } catch {
+    return '';
+  }
+}
+
 // -------------------------------------------------------------- 发送
 
 export interface SendOptions {
-  /** 完整 URL；用 `endpointUrl(EP.X, origin())` 构造 */
+  /** 完整 URL；用 `endpointUrl(EP.X, pageOrigin())` 构造（`common/utils/page.ts`） */
   url: string;
   /** 请求动作名，只用于日志与落档（**不要**把参数塞进来） */
   action: string;
   method?: HttpRequest['method'];
   body?: string;
-  /** 会话 token；缺省时由 `session.ts` 提供 */
+  /** 会话 token；**一般不用传** —— 缺省时走 `setTokenProvider` 注册的来源（见上） */
   token?: string;
   /** 出队优先级 */
   priority?: number;
@@ -440,7 +477,7 @@ export interface SendResult {
  *   3. 未识别响应必须落档（红线 R4）。
  */
 export async function bkxkSend(o: SendOptions): Promise<SendResult> {
-  const token = o.token ?? '';
+  const token = resolveToken(o.token);
   const extra = o.extraHeaders ?? {};
   const requestHeaders: Record<string, string> = token !== '' ? { ...headers(token), ...extra } : { ...extra };
   if (o.body !== undefined) requestHeaders['Content-Type'] = 'application/x-www-form-urlencoded';

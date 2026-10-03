@@ -212,8 +212,9 @@ function registerInterval(
         '校园站对高频请求零容忍，实测会被直接终止会话 —— 请自行确认风险。'
       );
     },
-    // 只有请求间隔现在就有消费方（http.ts 的串行队列）；
-    // 重试/轮询间隔要等批 4 的任务与监控模块，到那时再补 apply。
+    // 只有请求间隔需要 apply：它被 http.ts 的队列在**出队时**读取，改动必须立刻推进运行时。
+    // 重试 / 轮询间隔不用 —— tasks.retryIntervalMs() 与 monitor.intervalMs() 都是**每轮现读设置**，
+    // 用户改完下一轮就生效。
     ...(key === 'intervalMs' ? { apply: applyIntervalMs } : {}),
   });
 }

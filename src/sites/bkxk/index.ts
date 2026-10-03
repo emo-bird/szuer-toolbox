@@ -12,15 +12,18 @@
  *   4. 危险开关不再自动打开 —— 旧版 `hijackTimetable: true` 这类默认值在本框架里
  *      被风险门禁强制成关闭，用户需手动勾一次。
  *
- * 交付节奏（用户已拍板分 4 批，每批一个可验证 commit）：
- *   批 1（本批）请求层 + 设置 + 风险门禁 + 旧数据迁移
- *   批 2 courses / time
- *   批 3 list / hijack / timetable
- *   批 4 tasks / monitor + 5 个标签页并入公共悬浮窗
+ * 交付节奏（用户已拍板分 4 批，每批一个可验证 commit；原「批 3」已取消并入批 2）：
+ *   批 1 请求层 + 设置 + 风险门禁 + 旧数据迁移
+ *   批 2 课程取数 + 抢课任务 + 容量监控 + 选课列表增强 + 三个站点标签页
+ *   批 3 课表（hijack / 自绘）+ 自定义课程 UI —— 待办
+ *   批 4 收尾
  */
 
 import { scoped } from '../../common/core/log.ts';
+import { loginTab } from '../../common/ui/tabs/login.ts';
 import type { SiteAdapter } from '../types.ts';
+import { setTokenProvider } from './api.ts';
+import { bkxkBus } from './bus.ts';
 import { BKXK_TOGGLES, applyBkxkSettings, registerBkxkSettings, SITE_ID } from './settings.ts';
 import { readSession, sessionSummary } from './session.ts';
 import { runMigration } from './legacy.ts';
@@ -50,7 +53,8 @@ export const bkxkAdapter: SiteAdapter = {
   pages: PAGES,
   // 标签页分批补齐（用户拍板的五个：任务 / 监控 / 自定义 / 设置 / 日志）：
   //   本批只有【设置】—— 用户反馈「本科选课的设置都放在单独标签页更好」，
-  //   其余三个（任务 / 监控 / 自定义）在批 4 接入，【日志】是公共标签页、不用站点注册。
+  //   【任务】【监控】在 2d 接入，【自定义】随批 3 的自定义课程模块接入，
+  //   【日志】是公共标签页、不用站点注册。
   tabs: [BKXK_SETTINGS_TAB],
   toggles: BKXK_TOGGLES,
 
@@ -61,6 +65,9 @@ export const bkxkAdapter: SiteAdapter = {
   earlyInit(ctx) {
     const lines = runMigration();
     registerBkxkSettings();
+    // 请求层的 token 来源（见 `api.ts` 的 `setTokenProvider`）。必须在任何请求之前注册：
+    // 页面刷新后模块会重新求值，所以每次 earlyInit 都要重挂一遍。
+    setTokenProvider(() => readSession().token);
     if (lines.length > 0) {
       log.info(`已从旧版迁移 ${lines.length} 条内容，详情见日志页`);
     } else {
@@ -72,12 +79,24 @@ export const bkxkAdapter: SiteAdapter = {
   init(ctx) {
     applyBkxkSettings();
 
+    // 模型层（tasks / monitor / custom）只广播事实，展示方式在这里统一决定。
+    bkxkBus.on('toast', ({ msg, kind }) => {
+      ctx.panel.toast(msg, kind);
+    });
+    // D3：登录态失效 = Toast + 日志 + 自动切到「登录态」标签页。
+    // 不停轮询在这里也是错的 —— 停轮询是发起方（tasks / monitor）自己的事，它更清楚该停什么。
+    bkxkBus.on('authExpired', ({ source }) => {
+      log.error(`登录态失效（来源：${source}），相关任务已停止`);
+      ctx.panel.toast('登录态失效，请刷新页面重新登录', 'error');
+      ctx.panel.activateTab(loginTab.id);
+    });
+
     const session = readSession();
     if (!session.loggedIn) {
       log.warn('未读到有效登录态：学号或 token 缺失，功能接口会失败。请先在站内完成登录。');
     } else {
       log.info(`站点已就绪：${sessionSummary(session)}`);
     }
-    log.info(`功能页=${String(ctx.isFeaturePage)}（设置标签页已就绪，其余标签页在批 4 接入）`);
+    log.info(`功能页=${String(ctx.isFeaturePage)}（设置 / 任务 / 监控 标签页已就绪）`);
   },
 };

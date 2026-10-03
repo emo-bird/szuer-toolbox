@@ -12,6 +12,7 @@
 
 import { scoped } from '../../common/core/log.ts';
 import { getValue, setValue } from '../../common/core/settings.ts';
+import { pageOrigin } from '../../common/utils/page.ts';
 import {
   CATEGORY_EP,
   EP,
@@ -159,8 +160,12 @@ export interface FetchCategoryOptions {
   category: CategoryCode;
   studentCode: string;
   batchCode: string;
-  /** 会话 token（红线 R3：只透传，不落盘不打日志） */
-  token: string;
+  /**
+   * 会话 token（红线 R3：只透传，不落盘不打日志）。
+   * **一般不用传** —— 缺省时由 `api.ts` 的 `setTokenProvider` 注册的来源提供
+   * （适配器在 `earlyInit` 里挂的就是 `readSession().token`）。
+   */
+  token?: string;
   pageNumber?: number;
   pageSize?: number;
   /** 接口 origin，缺省取当前页面 `location.origin`（Node 测试里必须显式传） */
@@ -174,11 +179,6 @@ export interface CategoryResult {
   readonly classes: TeachingClass[];
   /** 原始 JSON，供需要别的字段的调用方使用 */
   readonly raw: unknown;
-}
-
-function currentOrigin(explicit: string | undefined): string {
-  if (explicit !== undefined) return explicit;
-  return typeof location !== 'undefined' ? location.origin : '';
 }
 
 /**
@@ -201,7 +201,7 @@ export async function fetchCategory(o: FetchCategoryOptions): Promise<CategoryRe
 
   const r = await bkxkSend({
     action: `列表查询 ${o.category}`,
-    url: endpointUrl(ep, currentOrigin(o.origin)),
+    url: endpointUrl(ep, pageOrigin(o.origin)),
     method: 'POST',
     body,
     token: o.token,

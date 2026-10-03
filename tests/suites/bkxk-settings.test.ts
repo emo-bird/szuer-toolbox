@@ -100,9 +100,11 @@ describe('bkxk 配置项 —— 校验与生效', () => {
     }
   });
 
-  it('只有请求间隔带 apply 钩子（另两个要等批 4 才有消费方）', () => {
+  it('只有请求间隔带 apply 钩子（另两个每轮现读设置，不需要 apply）', () => {
     boot();
     assert(def(VALUE.INTERVAL_MS).apply !== undefined, '请求间隔必须能立刻生效');
+    // 重试 / 轮询间隔在模块里是「每轮循环现读设置」（tasks.retryIntervalMs / monitor.intervalMs），
+    // 所以故意不带 apply —— 换了值下一轮就生效，无需钩子。
     assertEqual(def(VALUE.RETRY_INTERVAL_MS).apply, undefined);
     assertEqual(def(VALUE.POLL_INTERVAL_MS).apply, undefined);
   });
