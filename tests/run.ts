@@ -14,6 +14,7 @@ import './suites/registry.test.ts';
 import './suites/sites-registered.test.ts';
 import './suites/storage.test.ts';
 import './suites/settings.test.ts';
+import './suites/tab-order.test.ts';
 import './suites/log.test.ts';
 import './suites/http.test.ts';
 import './suites/limits.test.ts';

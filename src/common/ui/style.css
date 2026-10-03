@@ -165,6 +165,16 @@
   font-weight: 600;
 }
 
+/* 站点标签页组与公共标签页组之间的分割线（由 TabView 在组边界插入） */
+.sztb-tab-sep {
+  flex: 0 0 auto;
+  align-self: center;
+  width: 1px;
+  height: 14px;
+  margin: 0 3px;
+  background: var(--sztb-border);
+}
+
 /* ---------------------------------------------------------- 内容区 */
 .sztb-body {
   flex: 1 1 auto;

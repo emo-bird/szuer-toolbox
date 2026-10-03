@@ -19,6 +19,39 @@ export interface TabViewOptions {
   onActivate?: (tabId: string) => void;
 }
 
+/**
+ * 标签页分组。
+ *
+ * 需求（用户已确认）：**站点自己的标签页排在前，公共标签页排在后，两组之间一条分割线**。
+ * 分组的顺序与分割线都在 `sortTabEntries` / `TabView.setTabs` 这一处实现，
+ * 各站点与 main 只负责声明自己属于哪一组。
+ */
+export type TabGroup = 'site' | 'common';
+
+/** 一个待挂载的标签页 + 它归属的站点 id（公共标签页用 'common'）+ 分组 */
+export interface TabEntry {
+  readonly siteId: string;
+  readonly tab: TabRegistration;
+  readonly group: TabGroup;
+}
+
+/** 分组排序权重：站点组在前 */
+const GROUP_RANK: Record<TabGroup, number> = { site: 0, common: 1 };
+
+/**
+ * 先按分组排（站点在前、公共在后），组内再按 `tab.order` 升序。
+ *
+ * ⚠️ 这里是「站点标签页在前」这条需求的**唯一实现处**。不能只靠 `order` 排 ——
+ * 公共标签页的 order 是 10/90/92/95、站点标签页是 100/200，
+ * 单看 order 公共页反而全排在前面，与需求正好相反。
+ */
+export function sortTabEntries(entries: readonly TabEntry[]): TabEntry[] {
+  return [...entries].sort(
+    (a, b) =>
+      GROUP_RANK[a.group] - GROUP_RANK[b.group] || (a.tab.order ?? 1000) - (b.tab.order ?? 1000),
+  );
+}
+
 export class TabView {
   readonly tabbar: HTMLElement;
   readonly body: HTMLElement;
@@ -42,22 +75,36 @@ export class TabView {
    * 重建全部标签页。先卸载旧的（调用其 dispose），再挂新的。
    * 骨架阶段沿用「整批重建」策略 —— 标签页数量是个位数，不值得做 diff。
    */
-  setTabs(tabs: readonly TabRegistration[], ctx: TabContext): void {
+  setTabs(entries: readonly TabEntry[], ctx: TabContext): void {
     this.destroyTabs();
 
-    const sorted = [...tabs].sort((a, b) => (a.order ?? 1000) - (b.order ?? 1000));
-    for (const tab of sorted) {
-      this.mountTab(tab, ctx);
+    const sorted = sortTabEntries(entries);
+    let prevGroup: TabGroup | null = null;
+    for (const entry of sorted) {
+      // 组边界处插一条分割线。分组只有两个，所以「与上一个不同」就是「进入公共组」。
+      // 没有站点标签页时 prevGroup 一直是 null，永远不会插 —— 这正是想要的。
+      if (prevGroup !== null && entry.group !== prevGroup) {
+        this.tabbar.appendChild(
+          el('span', {
+            class: 'sztb-tab-sep',
+            attrs: { role: 'separator', 'aria-orientation': 'vertical' },
+          }),
+        );
+      }
+      prevGroup = entry.group;
+      this.mountTab(entry, ctx);
     }
 
     const first = sorted[0];
     if (first !== undefined) {
-      const keep = this.current !== null && this.mounted.has(this.current) ? this.current : first.id;
+      const keep = this.current !== null && this.mounted.has(this.current) ? this.current : first.tab.id;
       this.activate(keep);
     }
   }
 
-  private mountTab(tab: TabRegistration, ctx: TabContext): void {
+  private mountTab(entry: TabEntry, ctx: TabContext): void {
+    const { tab, group } = entry;
+
     // 1) 样式：每个标签页一份 <style data-tab>，卸载时一并移除
     const style = document.createElement('style');
     style.dataset['tab'] = tab.id;
@@ -69,12 +116,17 @@ export class TabView {
       class: 'sztb-tab',
       text: tab.title,
       attrs: { type: 'button', role: 'tab', 'aria-selected': 'false', 'data-tab': tab.id },
+      data: { group },
       on: { click: () => this.activate(tab.id) },
     });
     this.tabbar.appendChild(button);
 
     // 3) 内容面板
-    const pane = el('div', { class: 'sztb-pane', attrs: { role: 'tabpanel' }, data: { tab: tab.id } });
+    const pane = el('div', {
+      class: 'sztb-pane',
+      attrs: { role: 'tabpanel' },
+      data: { tab: tab.id, group },
+    });
     this.body.appendChild(pane);
 
     let dispose: (() => void) | undefined;

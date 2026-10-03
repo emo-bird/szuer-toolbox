@@ -76,15 +76,20 @@ interface Booted {
 
 let booted: Booted | null = null;
 
-/** 公共标签页在前，站点专属标签页在后（顺序最终由 TabRegistration.order 决定） */
+/**
+ * 组装标签页集合：**站点专属标签页在前，公共标签页在后**。
+ *
+ * 顺序与两组之间的分割线都由 `common/ui/tabs.ts` 的 `sortTabEntries` 实现，
+ * 这里只负责声明各自属于哪一组（`group`）。
+ */
 function buildEntries(siteTabs: readonly TabEntry[]): TabEntry[] {
   const common: TabEntry[] = [
-    { siteId: 'common', tab: settingsTab },
-    { siteId: 'common', tab: logTab },
-    { siteId: 'common', tab: loginTab },
-    { siteId: 'common', tab: statusTab },
+    { siteId: 'common', group: 'common', tab: settingsTab },
+    { siteId: 'common', group: 'common', tab: logTab },
+    { siteId: 'common', group: 'common', tab: loginTab },
+    { siteId: 'common', group: 'common', tab: statusTab },
   ];
-  return [...common, ...siteTabs];
+  return [...siteTabs, ...common];
 }
 
 /** 依据分派结果装配（或重装）悬浮窗 */
@@ -95,7 +100,9 @@ function boot(url: URL, res: Resolution): void {
   }
 
   const siteTabs: TabEntry[] =
-    res.adapter !== null ? res.adapter.tabs.map((tab) => ({ siteId: res.adapter!.id, tab })) : [];
+    res.adapter !== null
+      ? res.adapter.tabs.map((tab) => ({ siteId: res.adapter!.id, group: 'site' as const, tab }))
+      : [];
 
   const panel = createPanel(baseCss, buildEntries(siteTabs), {
     siteName: res.adapter?.name ?? null,

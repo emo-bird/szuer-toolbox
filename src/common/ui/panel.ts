@@ -25,17 +25,18 @@ import { el, clamp } from '../utils/dom.ts';
 import { read, write } from '../core/storage.ts';
 import { scoped } from '../core/log.ts';
 import { TabView } from './tabs.ts';
+import type { TabEntry } from './tabs.ts';
 import { ToastStack } from './widgets/toast.ts';
 import { showConfirm } from './widgets/confirm.ts';
-import type { ConfirmOptions, PanelApi, TabContext, TabRegistration } from '../../sites/types.ts';
+import type { ConfirmOptions, PanelApi, TabContext } from '../../sites/types.ts';
 
 const log = scoped('ui/panel');
 
-/** 一个待挂载的标签页 + 它归属的站点 id（公共标签页用 'common'） */
-export interface TabEntry {
-  readonly siteId: string;
-  readonly tab: TabRegistration;
-}
+/**
+ * 一个待挂载的标签页（含归属站点与分组）。
+ * 定义在 `tabs.ts` —— 分组排序与分割线都由那一处实现，这里只做转发。
+ */
+export type { TabEntry } from './tabs.ts';
 
 export interface PanelOptions {
   /** 标题栏右侧显示的站点名；null 表示只显示「深大人工具箱」 */
@@ -387,10 +388,7 @@ export function createPanel(
     setTabs: (next: readonly TabEntry[]) => {
       const map = new Map<string, string>();
       for (const entry of next) map.set(entry.tab.id, entry.siteId);
-      tabView.setTabs(
-        next.map((e) => e.tab),
-        makeContext(map),
-      );
+      tabView.setTabs(next, makeContext(map));
     },
     destroy: () => {
       try {
