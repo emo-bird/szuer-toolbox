@@ -11,8 +11,14 @@
  *
  * 流程：
  *   main.ts + 全部依赖 ──esbuild.exe──> dist/.bundle.js
- *   userscript-header.txt（替换 {{VERSION}} / {{BUILD_TIME}}） + bundle
+ *   userscript-header.txt（替换 {{VERSION}} / {{BUILD_TIME}} / {{BUILD_NO}}） + bundle
  *                                        ──> dist/szuer-toolbox.user.js
+ *
+ * 构建号（BUILD_NO）：
+ *   版本号固定的阶段里，靠单调递增的构建号区分「装的是哪一次构建」。
+ *   计数持久化在 `dist/.build-no`（已 gitignore），每次正式构建读出来 +1 写回。
+ *   可用环境变量 `SZB_BUILD_NO=<n>` 显式指定（CI / 重放旧构建时用）。
+ *   注意：**只有真正要写产物的构建才自增**；`--check` 不动计数。
  *
  * 用法：
  *   node build.mjs            正式构建
@@ -31,6 +37,7 @@ const OUT_FILE = join(OUT_DIR, 'szuer-toolbox.user.js');
 const BUNDLE_FILE = join(TMP_DIR, 'bundle.js');
 const STDOUT_LOG = join(TMP_DIR, 'esbuild.out.log');
 const STDERR_LOG = join(TMP_DIR, 'esbuild.err.log');
+const BUILD_NO_FILE = join(OUT_DIR, '.build-no');
 
 // ------------------------------------------------------------------ 工具
 
@@ -54,6 +61,32 @@ function dim(msg) {
 
 function fmtSize(bytes) {
   return `${(bytes / 1024).toFixed(1)} KB`;
+}
+
+/**
+ * 读出并递增构建号。
+ * 计数文件放在 `dist/`（已 gitignore），首次运行不存在则从 1 开始。
+ * `SZB_BUILD_NO` 环境变量可显式覆盖，且**不写回**计数文件（便于重放旧构建）。
+ */
+function nextBuildNo() {
+  const forced = process.env.SZB_BUILD_NO;
+  if (forced !== undefined && forced !== '') {
+    const n = Number.parseInt(forced, 10);
+    if (Number.isFinite(n) && n >= 0) return n;
+    fail(`SZB_BUILD_NO 不是合法数字：${forced}`);
+    process.exit(1);
+  }
+
+  let current = 0;
+  if (existsSync(BUILD_NO_FILE)) {
+    const raw = readFileSync(BUILD_NO_FILE, 'utf8').trim();
+    const parsed = Number.parseInt(raw, 10);
+    if (Number.isFinite(parsed) && parsed >= 0) current = parsed;
+  }
+  const next = current + 1;
+  mkdirSync(OUT_DIR, { recursive: true });
+  writeFileSync(BUILD_NO_FILE, `${next}\n`, 'utf8');
+  return next;
 }
 
 /** 定位原生 esbuild 可执行文件（optionalDependencies 里的平台包） */
@@ -105,6 +138,9 @@ function main() {
     return;
   }
 
+  // 只有真正要写产物时才递增构建号（--check 不动计数）
+  const buildNo = nextBuildNo();
+
   mkdirSync(TMP_DIR, { recursive: true });
 
   const exe = resolveEsbuildExe();
@@ -123,6 +159,7 @@ function main() {
     `--outfile=${BUNDLE_FILE}`,
     `--define:__SZB_VERSION__=${JSON.stringify(version)}`,
     `--define:__SZB_BUILD_TIME__=${JSON.stringify(buildTime)}`,
+    `--define:__SZB_BUILD_NO__=${JSON.stringify(buildNo)}`,
   ];
 
   const res = runExe(exe, esbuildArgs);
@@ -144,7 +181,8 @@ function main() {
   const header = readFileSync(join(ROOT, 'src', 'userscript-header.txt'), 'utf8')
     .replace(/\r\n?/g, '\n')
     .replaceAll('{{VERSION}}', version)
-    .replaceAll('{{BUILD_TIME}}', buildTime);
+    .replaceAll('{{BUILD_TIME}}', buildTime)
+    .replaceAll('{{BUILD_NO}}', String(buildNo));
 
   const output = `${header}\n${bundle.replace(/\r\n?/g, '\n')}\n`;
   writeFileSync(OUT_FILE, output, 'utf8');
@@ -153,7 +191,7 @@ function main() {
   rmSync(TMP_DIR, { recursive: true, force: true });
 
   ok(`构建完成：${relative(ROOT, OUT_FILE)}`);
-  info(`  版本：${version}`);
+  info(`  版本：${version}（构建号 ${buildNo}）`);
   info(`  时间：${buildTime}`);
   info(`  体积：${fmtSize(Buffer.byteLength(output, 'utf8'))}`);
   info(`  行数：${output.split('\n').length}`);

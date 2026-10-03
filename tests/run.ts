@@ -11,6 +11,7 @@ import { run } from './harness.ts';
 // 纯函数冒烟（档1）—— 秒级，每次改完必跑
 import './suites/url.test.ts';
 import './suites/registry.test.ts';
+import './suites/sites-registered.test.ts';
 import './suites/storage.test.ts';
 import './suites/settings.test.ts';
 import './suites/log.test.ts';

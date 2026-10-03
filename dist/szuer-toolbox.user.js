@@ -52,7 +52,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-03T13:43:53.783Z */
+/* 构建信息：2026-10-03T14:00:05.416Z（构建号 4） */
 
 "use strict";
 (() => {
@@ -148,6 +148,56 @@
     }
   }
 
+  // src/common/utils/dom.ts
+  function el(tag, props = {}, ...children) {
+    const node = document.createElement(tag);
+    if (props.class !== void 0) {
+      for (const cls of props.class.split(/\s+/)) {
+        if (cls !== "") node.classList.add(cls);
+      }
+    }
+    if (props.text !== void 0) node.textContent = props.text;
+    if (props.attrs !== void 0) {
+      for (const [k, v] of Object.entries(props.attrs)) {
+        if (v === null || v === void 0 || v === false) continue;
+        node.setAttribute(k, v === true ? "" : String(v));
+      }
+    }
+    if (props.style !== void 0) {
+      for (const [k, v] of Object.entries(props.style)) {
+        if (v === void 0 || v === null) continue;
+        node.style.setProperty(kebab(k), String(v));
+      }
+    }
+    if (props.data !== void 0) {
+      for (const [k, v] of Object.entries(props.data)) node.dataset[k] = v;
+    }
+    if (props.on !== void 0) {
+      for (const [k, fn] of Object.entries(props.on)) {
+        if (typeof fn !== "function") continue;
+        node.addEventListener(k, fn);
+      }
+    }
+    append(node, children);
+    return node;
+  }
+  function append(parent, children) {
+    for (const child of children) {
+      if (child === null || child === void 0 || child === false) continue;
+      parent.appendChild(typeof child === "string" ? document.createTextNode(child) : child);
+    }
+  }
+  function clear2(node) {
+    while (node.firstChild !== null) node.removeChild(node.firstChild);
+  }
+  function kebab(prop) {
+    return prop.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
+  }
+  function clamp(value, min, max) {
+    if (max < min) return min;
+    return Math.min(max, Math.max(min, value));
+  }
+
   // src/common/core/storage.ts
   var NS_PREFIX = "sztb:";
   function nsKey(key) {
@@ -233,104 +283,6 @@
   }
   function write(key, value) {
     backend.set(nsKey(key), value);
-  }
-
-  // src/common/core/settings.ts
-  var toggleRegistry = /* @__PURE__ */ new Map();
-  function composite(siteId, toggleId) {
-    return `${siteId}\0${toggleId}`;
-  }
-  function storageKey(siteId, toggleId) {
-    return `toggle:${siteId}:${toggleId}`;
-  }
-  function registerToggles(siteId, siteName, defs) {
-    for (const def of defs) {
-      toggleRegistry.set(composite(siteId, def.id), { ...def, siteId, siteName });
-    }
-  }
-  function allToggles() {
-    return [...toggleRegistry.values()];
-  }
-  function isEnabled(siteId, toggleId) {
-    const def = toggleRegistry.get(composite(siteId, toggleId));
-    if (def === void 0) return false;
-    const stored = read(storageKey(siteId, toggleId), null);
-    if (stored === null) {
-      return def.risk === "safe" ? def.default : false;
-    }
-    return stored;
-  }
-  function setEnabled(siteId, toggleId, enabled) {
-    write(storageKey(siteId, toggleId), enabled);
-  }
-  function needsConfirm(risk) {
-    return risk === "irreversible";
-  }
-  var valueRegistry = /* @__PURE__ */ new Map();
-  function valuesOf(siteId) {
-    const out = [];
-    for (const item of valueRegistry.values()) {
-      if (item.siteId === siteId) out.push(item);
-    }
-    return out;
-  }
-  function getValue(siteId, id) {
-    const def = valueRegistry.get(composite(siteId, id));
-    const fallback = def?.default ?? void 0;
-    return read(`value:${siteId}:${id}`, fallback);
-  }
-  function setValue(siteId, id, value) {
-    write(`value:${siteId}:${id}`, value);
-  }
-
-  // src/common/utils/dom.ts
-  function el(tag, props = {}, ...children) {
-    const node = document.createElement(tag);
-    if (props.class !== void 0) {
-      for (const cls of props.class.split(/\s+/)) {
-        if (cls !== "") node.classList.add(cls);
-      }
-    }
-    if (props.text !== void 0) node.textContent = props.text;
-    if (props.attrs !== void 0) {
-      for (const [k, v] of Object.entries(props.attrs)) {
-        if (v === null || v === void 0 || v === false) continue;
-        node.setAttribute(k, v === true ? "" : String(v));
-      }
-    }
-    if (props.style !== void 0) {
-      for (const [k, v] of Object.entries(props.style)) {
-        if (v === void 0 || v === null) continue;
-        node.style.setProperty(kebab(k), String(v));
-      }
-    }
-    if (props.data !== void 0) {
-      for (const [k, v] of Object.entries(props.data)) node.dataset[k] = v;
-    }
-    if (props.on !== void 0) {
-      for (const [k, fn] of Object.entries(props.on)) {
-        if (typeof fn !== "function") continue;
-        node.addEventListener(k, fn);
-      }
-    }
-    append(node, children);
-    return node;
-  }
-  function append(parent, children) {
-    for (const child of children) {
-      if (child === null || child === void 0 || child === false) continue;
-      parent.appendChild(typeof child === "string" ? document.createTextNode(child) : child);
-    }
-  }
-  function clear2(node) {
-    while (node.firstChild !== null) node.removeChild(node.firstChild);
-  }
-  function kebab(prop) {
-    return prop.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
-  }
-  function clamp(value, min, max) {
-    if (max < min) return min;
-    return Math.min(max, Math.max(min, value));
   }
 
   // src/common/ui/tabs.ts
@@ -783,6 +735,54 @@
       `悬浮窗已装载：${entries2.length} 个标签页，初始${collapsed ? "折叠（沿用上次）" : "展开"}，面板=(${Math.round(panelPos.left)},${Math.round(panelPos.top)})，球=(${Math.round(ballPos.left)},${Math.round(ballPos.top)})`
     );
     return api;
+  }
+
+  // src/common/core/settings.ts
+  var toggleRegistry = /* @__PURE__ */ new Map();
+  function composite(siteId, toggleId) {
+    return `${siteId}\0${toggleId}`;
+  }
+  function storageKey(siteId, toggleId) {
+    return `toggle:${siteId}:${toggleId}`;
+  }
+  function registerToggles(siteId, siteName, defs) {
+    for (const def of defs) {
+      toggleRegistry.set(composite(siteId, def.id), { ...def, siteId, siteName });
+    }
+  }
+  function allToggles() {
+    return [...toggleRegistry.values()];
+  }
+  function isEnabled(siteId, toggleId) {
+    const def = toggleRegistry.get(composite(siteId, toggleId));
+    if (def === void 0) return false;
+    const stored = read(storageKey(siteId, toggleId), null);
+    if (stored === null) {
+      return def.risk === "safe" ? def.default : false;
+    }
+    return stored;
+  }
+  function setEnabled(siteId, toggleId, enabled) {
+    write(storageKey(siteId, toggleId), enabled);
+  }
+  function needsConfirm(risk) {
+    return risk === "irreversible";
+  }
+  var valueRegistry = /* @__PURE__ */ new Map();
+  function valuesOf(siteId) {
+    const out = [];
+    for (const item of valueRegistry.values()) {
+      if (item.siteId === siteId) out.push(item);
+    }
+    return out;
+  }
+  function getValue(siteId, id) {
+    const def = valueRegistry.get(composite(siteId, id));
+    const fallback = def?.default ?? void 0;
+    return read(`value:${siteId}:${id}`, fallback);
+  }
+  function setValue(siteId, id, value) {
+    write(`value:${siteId}:${id}`, value);
   }
 
   // src/common/ui/widgets/checkbox.ts
@@ -1493,19 +1493,42 @@ ${options.desc ?? ""}
     }
   };
 
-  // src/main.ts
-  var log5 = scoped("main");
-  var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-03T13:43:53.783Z" : null;
+  // src/sites/uooc/index.ts
+  var log5 = scoped("site/uooc");
+  var HOSTS = ["uooc.net.cn", "*.uooc.net.cn"];
+  var PAGES = [];
+  var uoocAdapter = {
+    id: "uooc",
+    name: "UOOC 优课联盟",
+    hosts: HOSTS,
+    pages: PAGES,
+    tabs: [],
+    init(ctx) {
+      log5.info(`UOOC 适配器已启用：isFeaturePage=${String(ctx.isFeaturePage)}（功能待阶段 3 接入）`);
+    }
+  };
+
+  // src/sites/index.ts
   function registerSites() {
     registerAdapter(demoAdapter);
-    setSiteNameResolver((siteId) => allAdapters().find((a) => a.id === siteId)?.name ?? siteId);
-    setCurrentSiteResolver(() => booted?.adapterId ?? null);
+    registerAdapter(uoocAdapter);
     for (const adapter of allAdapters()) {
       if (adapter.toggles !== void 0 && adapter.toggles.length > 0) {
         registerToggles(adapter.id, adapter.name, adapter.toggles);
       }
     }
+  }
+
+  // src/main.ts
+  var log6 = scoped("main");
+  var VERSION = true ? "0.1.0" : "0.0.0-dev";
+  var BUILD_TIME = true ? "2026-10-03T14:00:05.416Z" : null;
+  var BUILD_NO = true ? 4 : null;
+  var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
+  function wireSites() {
+    registerSites();
+    setSiteNameResolver((siteId) => allAdapters().find((a) => a.id === siteId)?.name ?? siteId);
+    setCurrentSiteResolver(() => booted?.adapterId ?? null);
   }
   var booted = null;
   function buildEntries(siteTabs) {
@@ -1539,8 +1562,8 @@ ${options.desc ?? ""}
       version: VERSION
     }));
     booted = { panel, adapterId: res.adapter?.id ?? null };
-    log5.info(
-      `深大人工具箱 v${VERSION} 已装载（host=${url.hostname}，分派=${res.reason}，站点=${res.adapter?.id ?? "无"}，功能页=${res.autoExpand ? "是" : "否"}）`
+    log6.info(
+      `深大人工具箱 ${VERSION_LABEL} 已装载（host=${url.hostname}，分派=${res.reason}，站点=${res.adapter?.id ?? "无"}，功能页=${res.autoExpand ? "是" : "否"}）`
     );
     res.adapter?.init?.({
       adapter: res.adapter,
@@ -1559,10 +1582,10 @@ ${options.desc ?? ""}
         return;
       }
       if (!res.inject) {
-        log5.debug(`站内跳转后不再属于支持范围，保持现有悬浮窗`);
+        log6.debug(`站内跳转后不再属于支持范围，保持现有悬浮窗`);
         return;
       }
-      log5.info(`站内跳转导致重新分派：${bootedFor} → ${location.href}`);
+      log6.info(`站内跳转导致重新分派：${bootedFor} → ${location.href}`);
       bootedFor = location.href;
       boot(url, res);
     };
@@ -1571,17 +1594,17 @@ ${options.desc ?? ""}
   }
   function main() {
     if (window.top !== window.self) {
-      console.debug("[深大人工具箱] 当前是子框架，跳过（@noframes 兜底）");
+      console.info("[深大人工具箱] 当前是子框架，跳过（@noframes 兜底）");
       return;
     }
-    console.debug(
-      `[深大人工具箱] v${VERSION} 启动，href=${location.href}，构建于 ${BUILD_TIME ?? "未知"}`
+    console.info(
+      `[深大人工具箱] ${VERSION_LABEL} 启动，href=${location.href}，构建于 ${BUILD_TIME ?? "未知"}`
     );
-    registerSites();
+    wireSites();
     const url = new URL(location.href);
     const res = resolve(url);
     if (!res.inject) {
-      console.debug(
+      console.info(
         `[深大人工具箱] 不注入：host=${url.hostname} 既不属于任何适配器（${allAdapters().map((a) => a.hosts.join("|")).join(" , ")}），也不在根域 ${SUPPORTED_ROOT_DOMAINS.join("/")} 下`
       );
       return;

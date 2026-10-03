@@ -2,8 +2,8 @@
  * 入口装配。
  *
  * 职责边界（刻意保持很窄）：
- *   1. 注册所有站点适配器
- *   2. 把站点声明的开关灌进设置注册表
+ *   1. 调用 sites/index 注册全部站点适配器
+ *   2. 把「站点名 / 当前站点」两个 resolver 接到入口的运行时状态
  *   3. 依据 sites/registry 的分派结果决定「注不注入 / 折没折叠」
  *   4. 组装悬浮窗（公共标签页 + 命中站点的专属标签页）
  *   5. 处理 SPA 站内跳转（hash 路由）导致的重新分派
@@ -14,7 +14,6 @@
 import baseCss from './common/ui/style.css';
 
 import { scoped } from './common/core/log.ts';
-import { registerToggles } from './common/core/settings.ts';
 import { createPanel } from './common/ui/panel.ts';
 import type { PanelHandle, TabEntry } from './common/ui/panel.ts';
 import { settingsTab, setSiteNameResolver } from './common/ui/tabs/settings.ts';
@@ -22,28 +21,35 @@ import { logTab } from './common/ui/tabs/log.ts';
 import { statusTab, setStatusProvider } from './common/ui/tabs/status.ts';
 import { loginTab, setCurrentSiteResolver } from './common/ui/tabs/login.ts';
 
-import { registerAdapter, allAdapters, resolve, SUPPORTED_ROOT_DOMAINS } from './sites/registry.ts';
+import { allAdapters, resolve, SUPPORTED_ROOT_DOMAINS } from './sites/registry.ts';
 import type { Resolution } from './sites/registry.ts';
-import { demoAdapter } from './sites/demo/index.ts';
+import { registerSites } from './sites/index.ts';
 
 const log = scoped('main');
 
 const VERSION = typeof __SZB_VERSION__ === 'string' ? __SZB_VERSION__ : '0.0.0-dev';
 const BUILD_TIME = typeof __SZB_BUILD_TIME__ === 'string' ? __SZB_BUILD_TIME__ : null;
+const BUILD_NO = typeof __SZB_BUILD_NO__ === 'number' ? __SZB_BUILD_NO__ : null;
+
+/** 形如 `v0.1.0#7`；构建号缺失时只显示版本 */
+const VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
 
 // ------------------------------------------------------------------ 注册
 
-function registerSites(): void {
-  registerAdapter(demoAdapter);
+/**
+ * 把站点适配器注册进 registry，并接上两个依赖注入的 resolver。
+ *
+ * ⚠️ 真正的适配器清单在 `sites/index.ts` 的 `registerSites()` 里 ——
+ * 它必须与 userscript header 的 `@match` 一一对应，且被
+ * `tests/suites/sites-registered.test.ts` 直接钉住。**不要**把适配器
+ * 直接 import 到这里注册：那样测试就抓不到「header 承诺了但没注册」
+ * 这类漏配，而它的表现是完全静默的（UOOC 曾因此毫无反应且不报错）。
+ */
+function wireSites(): void {
+  registerSites();
 
   setSiteNameResolver((siteId) => allAdapters().find((a) => a.id === siteId)?.name ?? siteId);
   setCurrentSiteResolver(() => booted?.adapterId ?? null);
-
-  for (const adapter of allAdapters()) {
-    if (adapter.toggles !== undefined && adapter.toggles.length > 0) {
-      registerToggles(adapter.id, adapter.name, adapter.toggles);
-    }
-  }
 }
 
 // ------------------------------------------------------------------ 分派
@@ -95,7 +101,7 @@ function boot(url: URL, res: Resolution): void {
 
   booted = { panel, adapterId: res.adapter?.id ?? null };
   log.info(
-    `深大人工具箱 v${VERSION} 已装载（host=${url.hostname}，分派=${res.reason}，` +
+    `深大人工具箱 ${VERSION_LABEL} 已装载（host=${url.hostname}，分派=${res.reason}，` +
       `站点=${res.adapter?.id ?? '无'}，功能页=${res.autoExpand ? '是' : '否'}）`,
   );
 
@@ -145,22 +151,24 @@ function watchNavigation(): void {
 function main(): void {
   // 只在顶层文档运行（userscript header 里另有 @noframes 兜底）
   if (window.top !== window.self) {
-    console.debug('[深大人工具箱] 当前是子框架，跳过（@noframes 兜底）');
+    console.info('[深大人工具箱] 当前是子框架，跳过（@noframes 兜底）');
     return;
   }
 
-  // 启动期无条件打一条：用于区分「脚本没注入」和「注入了但没渲染」
-  console.debug(
-    `[深大人工具箱] v${VERSION} 启动，href=${location.href}，构建于 ${BUILD_TIME ?? '未知'}`,
+  // 启动期无条件打一条：用于区分「脚本没注入」和「注入了但没渲染」。
+  // ⚠️ 必须用 console.info 而非 console.debug —— Edge DevTools 默认把 Verbose
+  //    级别过滤掉，debug 日志用户根本看不见（UOOC 排查因此绕了远路）。
+  console.info(
+    `[深大人工具箱] ${VERSION_LABEL} 启动，href=${location.href}，构建于 ${BUILD_TIME ?? '未知'}`,
   );
 
-  registerSites();
+  wireSites();
 
   const url = new URL(location.href);
   const res = resolve(url);
 
   if (!res.inject) {
-    console.debug(
+    console.info(
       `[深大人工具箱] 不注入：host=${url.hostname} 既不属于任何适配器` +
         `（${allAdapters().map((a) => a.hosts.join('|')).join(' , ')}），` +
         `也不在根域 ${SUPPORTED_ROOT_DOMAINS.join('/')} 下`,

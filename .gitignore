@@ -13,6 +13,8 @@ node_modules/
 # 产物会随 dist/ 发布（自动更新需要 raw 链接），但构建中间物不入库
 dist/*.map
 dist/.tmp/
+# 构建号计数器：本机自增，不同机器/不同 clone 各自计数，不该入库
+dist/.build-no
 build/
 *.tsbuildinfo
 .vite/

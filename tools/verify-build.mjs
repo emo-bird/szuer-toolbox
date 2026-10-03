@@ -23,11 +23,13 @@ const checks = [
   ],
   ['带免责声明', text.includes('免责声明')],
   ['注入构建时间', /构建信息：\d{4}-\d{2}-\d{2}T/.test(text)],
+  ['注入构建号', /构建信息：\d{4}-\d{2}-\d{2}T[^)]*（构建号 \d+）/.test(text)],
   ['无残留 ESM import', !/^import\s/m.test(text)],
   ['无 require(', !text.includes('require(')],
   ['是 IIFE（没有顶层 await/export）', !/^export\s/m.test(text) && text.includes('(() => {')],
   ['含公共标签页 id', text.includes('common:settings') && text.includes('common:log')],
   ['含演示适配器 id', text.includes('demo:playground')],
+  ['含 UOOC 适配器 id', text.includes("id: \"uooc\"") || text.includes("id: 'uooc'")],
   ['未把 .css 拆成单独文件', !text.includes('.sztb-panel{') || true],
 ];
 
