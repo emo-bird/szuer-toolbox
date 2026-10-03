@@ -52,7 +52,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-03T12:05:01.594Z */
+/* 构建信息：2026-10-03T12:47:27.336Z */
 
 "use strict";
 (() => {
@@ -525,28 +525,32 @@
 
   // src/common/ui/panel.ts
   var log2 = scoped("ui/panel");
-  var POS_KEY = "ui:pos";
   var SIZE_KEY = "ui:size";
   var COLLAPSED_KEY = "ui:collapsed";
   var DEFAULT_SIZE = { width: 344, height: 430 };
   var MIN_SIZE = { width: 260, height: 180 };
   var BALL_SIZE = 44;
   var VIEWPORT_MARGIN = 8;
-  function posKeyFor(collapsed) {
-    return `${POS_KEY}:${collapsed ? "ball" : "panel"}`;
+  var BALL_POS_KEY = "ui:ball-pos";
+  var PANEL_POS_KEY = "ui:panel-pos";
+  function isPos(v) {
+    return typeof v === "object" && v !== null && typeof v.left === "number" && typeof v.top === "number";
   }
-  function readPos(collapsed) {
-    const raw = read(posKeyFor(collapsed), null);
-    if (raw === null || typeof raw.left !== "number" || typeof raw.top !== "number") return null;
-    return raw;
+  function readPos(key) {
+    const raw = read(key, null);
+    return isPos(raw) ? raw : null;
   }
-  function writePos(collapsed, pos) {
-    write(posKeyFor(collapsed), pos);
-  }
-  function defaultPos() {
+  function defaultPanelPos() {
     return {
       left: Math.max(VIEWPORT_MARGIN, window.innerWidth - DEFAULT_SIZE.width - 16),
       top: 84
+    };
+  }
+  function ballPosFromPanel(panelPos, size) {
+    const headCenterY = panelPos.top + HEAD_HEIGHT / 2;
+    return {
+      left: panelPos.left + size.width - COLLAPSE_BTN_INSET - BALL_SIZE / 2,
+      top: headCenterY - BALL_SIZE / 2
     };
   }
   function readSize() {
@@ -564,6 +568,8 @@
       top: clamp(pos.top, VIEWPORT_MARGIN, maxTop)
     };
   }
+  var HEAD_HEIGHT = 37;
+  var COLLAPSE_BTN_INSET = 21;
   function startDrag(ev, onMove, onEnd) {
     ev.preventDefault();
     ev.stopPropagation();
@@ -624,36 +630,34 @@
     shadow.appendChild(root);
     const toasts = new ToastStack(shadow);
     const storedCollapsed = read(COLLAPSED_KEY, null);
-    let collapsed = storedCollapsed ?? options.startCollapsed;
+    let collapsed = storedCollapsed ?? false;
     let size = readSize();
-    let pos = readPos(collapsed) ?? defaultPos();
+    let panelPos = readPos(PANEL_POS_KEY) ?? defaultPanelPos();
+    let ballPos = readPos(BALL_POS_KEY) ?? ballPosFromPanel(panelPos, size);
     function applyGeometry() {
-      if (collapsed) {
-        pos = clampPosition(pos, BALL_SIZE, BALL_SIZE);
-        ball.style.setProperty("left", `${pos.left}px`);
-        ball.style.setProperty("top", `${pos.top}px`);
-      } else {
-        size = {
-          width: Math.max(MIN_SIZE.width, size.width),
-          height: Math.max(MIN_SIZE.height, size.height)
-        };
-        pos = clampPosition(pos, size.width, size.height);
-        panelEl.style.setProperty("left", `${pos.left}px`);
-        panelEl.style.setProperty("top", `${pos.top}px`);
-        panelEl.style.setProperty("width", `${size.width}px`);
-        panelEl.style.setProperty("height", `${size.height}px`);
-      }
+      size = {
+        width: Math.max(MIN_SIZE.width, size.width),
+        height: Math.max(MIN_SIZE.height, size.height)
+      };
+      panelPos = clampPosition(panelPos, size.width, size.height);
+      ballPos = clampPosition(ballPos, BALL_SIZE, BALL_SIZE);
+      panelEl.style.setProperty("left", `${panelPos.left}px`);
+      panelEl.style.setProperty("top", `${panelPos.top}px`);
+      panelEl.style.setProperty("width", `${size.width}px`);
+      panelEl.style.setProperty("height", `${size.height}px`);
+      ball.style.setProperty("left", `${ballPos.left}px`);
+      ball.style.setProperty("top", `${ballPos.top}px`);
       root.dataset["collapsed"] = String(collapsed);
     }
     function setCollapsed(next, persist = true) {
-      if (next === collapsed) {
-        applyGeometry();
-        return;
+      if (next !== collapsed) {
+        collapsed = next;
+        if (persist) write(COLLAPSED_KEY, collapsed);
       }
-      collapsed = next;
-      pos = readPos(collapsed) ?? pos;
+      if (collapsed && readPos(BALL_POS_KEY) === null) {
+        ballPos = ballPosFromPanel(panelPos, size);
+      }
       applyGeometry();
-      if (persist) write(COLLAPSED_KEY, collapsed);
     }
     let dragged = false;
     collapseBtn.addEventListener("click", (ev) => {
@@ -668,39 +672,60 @@
       }
       setCollapsed(false);
     });
-    function makeDraggable(handle, sizeOf) {
+    function makeDraggable(handle, read2, write2, sizeOf) {
       handle.addEventListener("pointerdown", (ev) => {
-        const origin = { ...pos };
+        const origin = read2();
         dragged = false;
         startDrag(
           ev,
           (dx, dy) => {
             if (Math.abs(dx) > 2 || Math.abs(dy) > 2) dragged = true;
             const { w, h } = sizeOf();
-            pos = clampPosition({ left: origin.left + dx, top: origin.top + dy }, w, h);
+            write2(clampPosition({ left: origin.left + dx, top: origin.top + dy }, w, h));
             applyGeometry();
           },
           () => {
-            if (dragged) {
-              writePos(collapsed, pos);
-              write(COLLAPSED_KEY, collapsed);
-            }
+            if (dragged) write2(read2());
           }
         );
       });
     }
-    makeDraggable(ball, () => ({ w: BALL_SIZE, h: BALL_SIZE }));
-    makeDraggable(head, () => ({ w: size.width, h: size.height }));
+    makeDraggable(
+      ball,
+      () => ballPos,
+      (p) => {
+        ballPos = p;
+        write(BALL_POS_KEY, p);
+      },
+      () => ({ w: BALL_SIZE, h: BALL_SIZE })
+    );
+    makeDraggable(
+      head,
+      () => panelPos,
+      (p) => {
+        panelPos = p;
+        write(PANEL_POS_KEY, p);
+      },
+      () => ({ w: size.width, h: size.height })
+    );
     resizeHandle.addEventListener("pointerdown", (ev) => {
       const origin = { ...size };
-      const startLeft = pos.left;
-      const startTop = pos.top;
+      const startLeft = panelPos.left;
+      const startTop = panelPos.top;
       startDrag(
         ev,
         (dx, dy) => {
           size = {
-            width: clamp(origin.width + dx, MIN_SIZE.width, Math.max(MIN_SIZE.width, window.innerWidth - startLeft - VIEWPORT_MARGIN)),
-            height: clamp(origin.height + dy, MIN_SIZE.height, Math.max(MIN_SIZE.height, window.innerHeight - startTop - VIEWPORT_MARGIN))
+            width: clamp(
+              origin.width + dx,
+              MIN_SIZE.width,
+              Math.max(MIN_SIZE.width, window.innerWidth - startLeft - VIEWPORT_MARGIN)
+            ),
+            height: clamp(
+              origin.height + dy,
+              MIN_SIZE.height,
+              Math.max(MIN_SIZE.height, window.innerHeight - startTop - VIEWPORT_MARGIN)
+            )
           };
           applyGeometry();
         },
@@ -748,7 +773,10 @@
     applyGeometry();
     api.setTabs(entries2);
     (document.documentElement ?? document.body).appendChild(host);
-    log2.info(`悬浮窗已装载：${entries2.length} 个标签页，初始${collapsed ? "折叠" : "展开"}`);
+    if (storedCollapsed === null) write(COLLAPSED_KEY, false);
+    log2.info(
+      `悬浮窗已装载：${entries2.length} 个标签页，初始${collapsed ? "折叠（沿用上次）" : "展开"}，面板=(${Math.round(panelPos.left)},${Math.round(panelPos.top)})，球=(${Math.round(ballPos.left)},${Math.round(ballPos.top)})`
+    );
     return api;
   }
 
@@ -910,6 +938,7 @@ ${options.desc ?? ""}
   var tabCss = `
 .sztb-log-wrap { display: flex; flex-direction: column; gap: 8px; height: 100%; min-height: 0; }
 .sztb-log { overflow: auto; flex: 1 1 auto; }
+.sztb-log-empty { padding: 20px 8px; text-align: center; color: var(--sztb-text-dim); font-size: 12.5px; }
 `;
   function renderTab2(root) {
     const levelSelect = el("select", { class: "sztb-input", style: { width: "auto" } });
@@ -944,11 +973,13 @@ ${options.desc ?? ""}
       }
     });
     const pre = el("div", { class: "sztb-log" });
+    const emptyHint = el("div", { class: "sztb-log-empty" });
     const wrap = el(
       "div",
       { class: "sztb-log-wrap" },
       el("div", { class: "sztb-toolbar" }, levelSelect, clearBtn, copyBtn),
-      pre
+      pre,
+      emptyHint
     );
     root.appendChild(wrap);
     let autoScroll = true;
@@ -962,18 +993,31 @@ ${options.desc ?? ""}
         data: { level: entry.level }
       });
     }
+    function syncEmptyHint() {
+      const count = pre.childElementCount;
+      pre.style.display = count === 0 ? "none" : "";
+      emptyHint.style.display = count === 0 ? "" : "none";
+      if (count > 0) return;
+      const buffered = entries().length;
+      emptyHint.textContent = buffered === 0 ? "暂无日志。" : `当前没有等级 ≥ ${getLevel()} 的日志（缓冲里还有 ${buffered} 条被过滤掉了）。`;
+    }
     function repaint() {
       clear2(pre);
       for (const entry of entries()) pre.appendChild(line(entry));
+      syncEmptyHint();
       pre.scrollTop = pre.scrollHeight;
     }
     repaint();
     const off = subscribe((entry) => {
+      if (pre.style.display === "none") pre.style.display = "";
+      emptyHint.style.display = "none";
       pre.appendChild(line(entry));
       if (pre.childElementCount > 520) pre.firstElementChild?.remove();
       if (autoScroll) pre.scrollTop = pre.scrollHeight;
     });
-    return off;
+    return () => {
+      off();
+    };
   }
   var logTab = {
     id: "common:log",
@@ -1167,6 +1211,99 @@ ${options.desc ?? ""}
     }
   };
 
+  // src/common/ui/tabs/login.ts
+  var providers = /* @__PURE__ */ new Map();
+  var currentSite = () => null;
+  function setCurrentSiteResolver(fn) {
+    currentSite = fn;
+  }
+  function maskValue(value) {
+    const chars = [...value];
+    if (chars.length <= 2) return "•".repeat(chars.length);
+    if (chars.length <= 6) return `${chars[0]}${"•".repeat(chars.length - 2)}${chars[chars.length - 1]}`;
+    return `${chars.slice(0, 2).join("")}${"•".repeat(4)}${chars.slice(-2).join("")}`;
+  }
+  function row2(label, value) {
+    return el(
+      "div",
+      { class: "sztb-row" },
+      el(
+        "div",
+        { class: "sztb-row-main" },
+        el("span", { class: "sztb-row-label", text: label }),
+        el("span", { class: "sztb-row-desc", text: value })
+      )
+    );
+  }
+  function renderState(root, state) {
+    const badge = state.loggedIn === true ? "已登录" : state.loggedIn === false ? "未登录" : "未知（尚不支持该站点）";
+    root.appendChild(el("div", { class: "sztb-group-title", text: `状态：${badge}` }));
+    if (state.source !== void 0) root.appendChild(row2("探测手段", state.source));
+    for (const f of state.fields ?? []) {
+      root.appendChild(row2(f.label, f.secret === true ? maskValue(f.value) : f.value));
+    }
+    if (state.error !== void 0) root.appendChild(row2("失败原因", state.error));
+  }
+  function renderTab4(root) {
+    let seq2 = 0;
+    let disposed = false;
+    async function repaint() {
+      const mine = ++seq2;
+      clear2(root);
+      const siteId = currentSite();
+      if (siteId === null) {
+        root.appendChild(
+          el("div", {
+            class: "sztb-empty",
+            text: "当前页面未命中任何站点适配器，没有登录态可探测。"
+          })
+        );
+        return;
+      }
+      const provider2 = providers.get(siteId);
+      if (provider2 === void 0) {
+        root.appendChild(
+          el("div", {
+            class: "sztb-empty",
+            text: `站点「${siteId}」尚未提供登录态探测器。
+登录态形态依赖站点接口（UOOC 需抓包确认，见需求文档 Q-M），将在该站点适配器落地时接入。`
+          })
+        );
+        return;
+      }
+      root.appendChild(el("div", { class: "sztb-empty", text: "探测中…" }));
+      try {
+        const state = await provider2();
+        if (disposed || mine !== seq2) return;
+        clear2(root);
+        renderState(root, state);
+      } catch (err) {
+        if (disposed || mine !== seq2) return;
+        clear2(root);
+        renderState(root, { loggedIn: "unknown", error: String(err) });
+      }
+    }
+    void repaint();
+    const refresh = el("button", {
+      class: "sztb-btn",
+      text: "重新探测",
+      attrs: { type: "button" },
+      on: { click: () => void repaint() }
+    });
+    root.appendChild(refresh);
+    return () => {
+      disposed = true;
+    };
+  }
+  var loginTab = {
+    id: "common:login",
+    title: "登录态",
+    order: 92,
+    mount(root) {
+      return renderTab4(root);
+    }
+  };
+
   // src/common/utils/url.ts
   function compileGlob(pattern) {
     const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
@@ -1344,10 +1481,11 @@ ${options.desc ?? ""}
   // src/main.ts
   var log5 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-03T12:05:01.594Z" : null;
+  var BUILD_TIME = true ? "2026-10-03T12:47:27.336Z" : null;
   function registerSites() {
     registerAdapter(demoAdapter);
     setSiteNameResolver((siteId) => allAdapters().find((a) => a.id === siteId)?.name ?? siteId);
+    setCurrentSiteResolver(() => booted?.adapterId ?? null);
     for (const adapter of allAdapters()) {
       if (adapter.toggles !== void 0 && adapter.toggles.length > 0) {
         registerToggles(adapter.id, adapter.name, adapter.toggles);
@@ -1359,25 +1497,19 @@ ${options.desc ?? ""}
     const common = [
       { siteId: "common", tab: settingsTab },
       { siteId: "common", tab: logTab },
+      { siteId: "common", tab: loginTab },
       { siteId: "common", tab: statusTab }
     ];
     return [...common, ...siteTabs];
   }
-  function boot() {
-    const url = new URL(location.href);
-    const res = resolve(url);
-    if (!res.inject) {
-      log5.debug(`不注入：${url.host} 既不属于任何适配器，也不在 ${SUPPORTED_ROOT_DOMAINS.join("/")} 下`);
-      return false;
-    }
+  function boot(url, res) {
     if (booted !== null) {
       booted.panel.destroy();
       booted = null;
     }
     const siteTabs = res.adapter !== null ? res.adapter.tabs.map((tab) => ({ siteId: res.adapter.id, tab })) : [];
     const panel = createPanel(style_default, buildEntries(siteTabs), {
-      siteName: res.adapter?.name ?? null,
-      startCollapsed: !res.autoExpand
+      siteName: res.adapter?.name ?? null
     });
     setStatusProvider(() => ({
       href: location.href,
@@ -1386,19 +1518,20 @@ ${options.desc ?? ""}
       adapterId: res.adapter?.id ?? null,
       inject: res.inject,
       autoExpand: res.autoExpand,
-      tabCount: siteTabs.length + 3,
+      tabCount: siteTabs.length + 4,
       registeredAdapters: allAdapters().map((a) => a.id),
       buildTime: BUILD_TIME,
       version: VERSION
     }));
     booted = { panel, adapterId: res.adapter?.id ?? null };
-    log5.info(`深大人工具箱 v${VERSION} 已装载（分派=${res.reason}，站点=${res.adapter?.id ?? "无"}）`);
+    log5.info(
+      `深大人工具箱 v${VERSION} 已装载（host=${url.hostname}，分派=${res.reason}，站点=${res.adapter?.id ?? "无"}，功能页=${res.autoExpand ? "是" : "否"}）`
+    );
     res.adapter?.init?.({
       adapter: res.adapter,
       isFeaturePage: res.autoExpand,
       panel
     });
-    return true;
   }
   function watchNavigation() {
     let bootedFor = location.href;
@@ -1416,15 +1549,29 @@ ${options.desc ?? ""}
       }
       log5.info(`站内跳转导致重新分派：${bootedFor} → ${location.href}`);
       bootedFor = location.href;
-      boot();
+      boot(url, res);
     };
     window.addEventListener("hashchange", onNavigate);
     window.addEventListener("popstate", onNavigate);
   }
   function main() {
-    if (window.top !== window.self) return;
+    if (window.top !== window.self) {
+      console.debug("[深大人工具箱] 当前是子框架，跳过（@noframes 兜底）");
+      return;
+    }
+    console.debug(
+      `[深大人工具箱] v${VERSION} 启动，href=${location.href}，构建于 ${BUILD_TIME ?? "未知"}`
+    );
     registerSites();
-    if (!boot()) return;
+    const url = new URL(location.href);
+    const res = resolve(url);
+    if (!res.inject) {
+      console.debug(
+        `[深大人工具箱] 不注入：host=${url.hostname} 既不属于任何适配器（${allAdapters().map((a) => a.hosts.join("|")).join(" , ")}），也不在根域 ${SUPPORTED_ROOT_DOMAINS.join("/")} 下`
+      );
+      return;
+    }
+    boot(url, res);
     watchNavigation();
   }
   try {

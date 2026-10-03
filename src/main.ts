@@ -20,8 +20,10 @@ import type { PanelHandle, TabEntry } from './common/ui/panel.ts';
 import { settingsTab, setSiteNameResolver } from './common/ui/tabs/settings.ts';
 import { logTab } from './common/ui/tabs/log.ts';
 import { statusTab, setStatusProvider } from './common/ui/tabs/status.ts';
+import { loginTab, setCurrentSiteResolver } from './common/ui/tabs/login.ts';
 
 import { registerAdapter, allAdapters, resolve, SUPPORTED_ROOT_DOMAINS } from './sites/registry.ts';
+import type { Resolution } from './sites/registry.ts';
 import { demoAdapter } from './sites/demo/index.ts';
 
 const log = scoped('main');
@@ -35,6 +37,7 @@ function registerSites(): void {
   registerAdapter(demoAdapter);
 
   setSiteNameResolver((siteId) => allAdapters().find((a) => a.id === siteId)?.name ?? siteId);
+  setCurrentSiteResolver(() => booted?.adapterId ?? null);
 
   for (const adapter of allAdapters()) {
     if (adapter.toggles !== undefined && adapter.toggles.length > 0) {
@@ -57,21 +60,14 @@ function buildEntries(siteTabs: readonly TabEntry[]): TabEntry[] {
   const common: TabEntry[] = [
     { siteId: 'common', tab: settingsTab },
     { siteId: 'common', tab: logTab },
+    { siteId: 'common', tab: loginTab },
     { siteId: 'common', tab: statusTab },
   ];
   return [...common, ...siteTabs];
 }
 
-/** 依据当前 URL 装配（或重装）悬浮窗；不应注入时返回 false */
-function boot(): boolean {
-  const url = new URL(location.href);
-  const res = resolve(url);
-
-  if (!res.inject) {
-    log.debug(`不注入：${url.host} 既不属于任何适配器，也不在 ${SUPPORTED_ROOT_DOMAINS.join('/')} 下`);
-    return false;
-  }
-
+/** 依据分派结果装配（或重装）悬浮窗 */
+function boot(url: URL, res: Resolution): void {
   if (booted !== null) {
     booted.panel.destroy();
     booted = null;
@@ -82,7 +78,6 @@ function boot(): boolean {
 
   const panel = createPanel(baseCss, buildEntries(siteTabs), {
     siteName: res.adapter?.name ?? null,
-    startCollapsed: !res.autoExpand,
   });
 
   setStatusProvider(() => ({
@@ -92,22 +87,23 @@ function boot(): boolean {
     adapterId: res.adapter?.id ?? null,
     inject: res.inject,
     autoExpand: res.autoExpand,
-    tabCount: siteTabs.length + 3,
+    tabCount: siteTabs.length + 4,
     registeredAdapters: allAdapters().map((a) => a.id),
     buildTime: BUILD_TIME,
     version: VERSION,
   }));
 
   booted = { panel, adapterId: res.adapter?.id ?? null };
-  log.info(`深大人工具箱 v${VERSION} 已装载（分派=${res.reason}，站点=${res.adapter?.id ?? '无'}）`);
+  log.info(
+    `深大人工具箱 v${VERSION} 已装载（host=${url.hostname}，分派=${res.reason}，` +
+      `站点=${res.adapter?.id ?? '无'}，功能页=${res.autoExpand ? '是' : '否'}）`,
+  );
 
   res.adapter?.init?.({
     adapter: res.adapter,
     isFeaturePage: res.autoExpand,
     panel,
   });
-
-  return true;
 }
 
 // ---------------------------------------------------------- SPA 站内跳转
@@ -137,7 +133,7 @@ function watchNavigation(): void {
 
     log.info(`站内跳转导致重新分派：${bootedFor} → ${location.href}`);
     bootedFor = location.href;
-    boot();
+    boot(url, res);
   };
 
   window.addEventListener('hashchange', onNavigate);
@@ -148,10 +144,31 @@ function watchNavigation(): void {
 
 function main(): void {
   // 只在顶层文档运行（userscript header 里另有 @noframes 兜底）
-  if (window.top !== window.self) return;
+  if (window.top !== window.self) {
+    console.debug('[深大人工具箱] 当前是子框架，跳过（@noframes 兜底）');
+    return;
+  }
+
+  // 启动期无条件打一条：用于区分「脚本没注入」和「注入了但没渲染」
+  console.debug(
+    `[深大人工具箱] v${VERSION} 启动，href=${location.href}，构建于 ${BUILD_TIME ?? '未知'}`,
+  );
 
   registerSites();
-  if (!boot()) return;
+
+  const url = new URL(location.href);
+  const res = resolve(url);
+
+  if (!res.inject) {
+    console.debug(
+      `[深大人工具箱] 不注入：host=${url.hostname} 既不属于任何适配器` +
+        `（${allAdapters().map((a) => a.hosts.join('|')).join(' , ')}），` +
+        `也不在根域 ${SUPPORTED_ROOT_DOMAINS.join('/')} 下`,
+    );
+    return;
+  }
+
+  boot(url, res);
   watchNavigation();
 }
 
