@@ -60,7 +60,13 @@ export interface TabRegistration {
   readonly id: string;
   /** 标签按钮上显示的文字 */
   readonly title: string;
-  /** 排序权重，小的靠前；公共标签页占用 0–99，站点标签页建议从 100 起 */
+  /**
+   * 组内排序权重，小的靠前。
+   *
+   * ⚠️ `order` **只在组内生效**：站点标签页永远排在公共标签页之前，
+   * 两组先后由 `common/ui/tab-order.ts` 决定，写多大的数字都翻不过去
+   * （早期这里靠「公共占 0–99、站点从 100 起」的约定，一旦有人写错就静默错位）。
+   */
   readonly order?: number;
   /** 该标签页专属样式（会被注入 shadow root） */
   readonly css?: string;

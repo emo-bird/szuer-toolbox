@@ -25,6 +25,7 @@ import { el, clamp } from '../utils/dom.ts';
 import { read, write } from '../core/storage.ts';
 import { scoped } from '../core/log.ts';
 import { TabView } from './tabs.ts';
+import { COMMON_SITE_ID } from './tab-order.ts';
 import { ToastStack } from './widgets/toast.ts';
 import { showConfirm } from './widgets/confirm.ts';
 import type { ConfirmOptions, PanelApi, TabContext, TabRegistration } from '../../sites/types.ts';
@@ -387,10 +388,8 @@ export function createPanel(
     setTabs: (next: readonly TabEntry[]) => {
       const map = new Map<string, string>();
       for (const entry of next) map.set(entry.tab.id, entry.siteId);
-      tabView.setTabs(
-        next.map((e) => e.tab),
-        makeContext(map),
-      );
+      // 整条 entries 交给 TabView：分组要用 siteId，丢掉了就只能全局按 order 平铺
+      tabView.setTabs(next, makeContext(map));
     },
     destroy: () => {
       try {
@@ -408,7 +407,7 @@ export function createPanel(
     return {
       get siteId(): string {
         const active = tabView.activeTabId();
-        return active !== null ? (siteToId.get(active) ?? 'common') : 'common';
+        return active !== null ? (siteToId.get(active) ?? COMMON_SITE_ID) : COMMON_SITE_ID;
       },
       host: api,
     };

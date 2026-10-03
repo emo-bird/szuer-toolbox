@@ -165,6 +165,25 @@
   font-weight: 600;
 }
 
+/**
+ * 站点组与公共组之间的分组竖线。
+ *
+ * - `align-self: center` 而不是 `stretch`：标签按钮自带上下内边距，
+ *   竖线只有它们高度的一部分才像「分组线」而不是「分割框」。
+ * - 用固定 px 高度（约标签按钮高度的 60%）而不是百分比：
+ *   `flex-wrap` 换行后每行的行高由内容决定，百分比会跟着抖。
+ * - `flex: 0 0 auto` 防止它在窄面板里被压扁。
+ * - 标签栏本身有 `gap: 2px`，所以左右各留 4px 即可得到 6px 的视觉间距。
+ */
+.sztb-tab-sep {
+  align-self: center;
+  flex: 0 0 auto;
+  width: 1px;
+  height: 14px;
+  margin: 0 4px;
+  background: var(--sztb-border);
+}
+
 /* ---------------------------------------------------------- 内容区 */
 .sztb-body {
   flex: 1 1 auto;

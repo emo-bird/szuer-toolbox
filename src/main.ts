@@ -27,6 +27,7 @@ import { scoped } from './common/core/log.ts';
 import { whenDomReady } from './common/utils/dom.ts';
 import { createPanel } from './common/ui/panel.ts';
 import type { PanelHandle, TabEntry } from './common/ui/panel.ts';
+import { COMMON_SITE_ID } from './common/ui/tab-order.ts';
 import { settingsTab, setSiteNameResolver, setOwnSettingsTabResolver } from './common/ui/tabs/settings.ts';
 import { logTab } from './common/ui/tabs/log.ts';
 import { statusTab, setStatusProvider } from './common/ui/tabs/status.ts';
@@ -76,15 +77,23 @@ interface Booted {
 
 let booted: Booted | null = null;
 
-/** 公共标签页在前，站点专属标签页在后（顺序最终由 TabRegistration.order 决定） */
+/**
+ * 公共标签页。
+ *
+ * 这里**只管有哪些**，不管先后 —— 最终顺序由 `common/ui/tab-order.ts` 钉死
+ * （站点组在前、公共组在后，两组之间一条竖线），
+ * 所以两边数组怎么拼都不影响渲染结果。
+ */
+const COMMON_TABS: readonly TabEntry[] = [
+  { siteId: COMMON_SITE_ID, tab: settingsTab },
+  { siteId: COMMON_SITE_ID, tab: logTab },
+  { siteId: COMMON_SITE_ID, tab: loginTab },
+  { siteId: COMMON_SITE_ID, tab: statusTab },
+];
+
+/** 公共标签页 + 命中站点的专属标签页（顺序见 COMMON_TABS 的注释） */
 function buildEntries(siteTabs: readonly TabEntry[]): TabEntry[] {
-  const common: TabEntry[] = [
-    { siteId: 'common', tab: settingsTab },
-    { siteId: 'common', tab: logTab },
-    { siteId: 'common', tab: loginTab },
-    { siteId: 'common', tab: statusTab },
-  ];
-  return [...common, ...siteTabs];
+  return [...COMMON_TABS, ...siteTabs];
 }
 
 /** 依据分派结果装配（或重装）悬浮窗 */
@@ -108,7 +117,7 @@ function boot(url: URL, res: Resolution): void {
     adapterId: res.adapter?.id ?? null,
     inject: res.inject,
     autoExpand: res.autoExpand,
-    tabCount: siteTabs.length + 4,
+    tabCount: siteTabs.length + COMMON_TABS.length,
     registeredAdapters: allAdapters().map((a) => a.id),
     buildTime: BUILD_TIME,
     version: VERSION,
