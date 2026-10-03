@@ -3,6 +3,19 @@
  *
  * 红线 R3：**任何情况下不要把请求头、cookie、token、学号写进日志**。
  * 需要记录请求时只记 方法 / 路径 / 状态码 / 耗时 / 响应摘要。
+ *
+ * ## 等级语义（v0.9 修正）
+ *
+ * 等级**只作为「显示过滤」**，不作为「写入过滤」：
+ *   - `push()` **一律入缓冲**（不管等级多低），所以切到更低的等级能看到**过去的**日志；
+ *   - `entries()` 按当前等级过滤后返回，供日志标签页显示；
+ *   - `dump()` 同样按当前等级过滤，保证「复制全文」和屏幕上看到的一致。
+ *
+ * 为什么改：v0.8 之前 `push()` 里就直接丢弃低等级日志，导致
+ *   (a) 把等级调低看不到任何历史日志 —— 与用户直觉相反；
+ *   (b) 日志页无法得知「有多少条被过滤掉了」，只能瞎猜。
+ * 代价：debug 日志多的时候会把老信息挤出 500 条环形缓冲。
+ * 这是刻意取舍 —— 用户切等级的动作本身就表达了「我想看更多」。
  */
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
@@ -30,10 +43,11 @@ let minLevel: LogLevel = 'info';
 const listeners = new Set<LogListener>();
 
 function push(level: LogLevel, scope: string, message: string, detail?: unknown): void {
-  if (LEVEL_RANK[level] < LEVEL_RANK[minLevel]) return;
   const entry: LogEntry = { seq: (seq += 1), time: Date.now(), level, scope, message, detail };
   buffer.push(entry);
   if (buffer.length > CAPACITY) buffer = buffer.slice(buffer.length - CAPACITY);
+  // 订阅者一律收到（含低于当前等级的条目）——由订阅方决定要不要显示，
+  // 否则「先把等级调低、再复现问题」这条最常用的排查路径会失效。
   for (const listener of [...listeners]) {
     // 日志本身绝不能因为监听器抛错而中断
     try {
@@ -53,9 +67,19 @@ export function getLevel(): LogLevel {
   return minLevel;
 }
 
-/** 取当前缓冲快照（浅拷贝，调用方随便改） */
+/** 某个等级是否达到当前显示门槛 */
+export function passesLevel(level: LogLevel): boolean {
+  return LEVEL_RANK[level] >= LEVEL_RANK[minLevel];
+}
+
+/** 取当前缓冲快照（浅拷贝，调用方随便改）。**已按当前等级过滤。** */
 export function entries(): LogEntry[] {
-  return [...buffer];
+  return buffer.filter((e) => passesLevel(e.level));
+}
+
+/** 缓冲里的原始条数（含被等级过滤掉的），供空态文案显示真实的数量 */
+export function rawCount(): number {
+  return buffer.length;
 }
 
 /** 清空缓冲 */
@@ -103,9 +127,9 @@ export function formatEntry(entry: LogEntry): string {
   return `${head} ${safeStringify(entry.detail)}`;
 }
 
-/** 把整个缓冲导出成文本（日志标签页的「复制/下载」用） */
+/** 把整个缓冲导出成文本（日志标签页的「复制/下载」用）。与屏幕所见一致（按等级过滤）。 */
 export function dump(): string {
-  return buffer.map(formatEntry).join('\n');
+  return entries().map(formatEntry).join('\n');
 }
 
 /** 安全序列化：循环引用、函数、DOM 节点都不会炸 */

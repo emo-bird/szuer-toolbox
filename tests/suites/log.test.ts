@@ -13,6 +13,8 @@ import {
   formatEntry,
   safeStringify,
   dump,
+  rawCount,
+  passesLevel,
 } from '../../src/common/core/log.ts';
 
 describe('common/core/log —— 缓冲与过滤', () => {
@@ -29,7 +31,7 @@ describe('common/core/log —— 缓冲与过滤', () => {
     assertEqual(list[0]?.seq, 1, 'seq 应从 1 开始自增');
   });
 
-  it('等级过滤：低于当前等级的条目直接丢弃', () => {
+  it('等级过滤：低于当前等级的条目不出现在 entries()，但**留在缓冲里**（v0.9）', () => {
     clear();
     setLevel('warn');
     const log = scoped('t');
@@ -37,9 +39,53 @@ describe('common/core/log —— 缓冲与过滤', () => {
     log.info('i');
     log.warn('w');
     log.error('e');
+    // entries() 按等级过滤
     const levels = entries().map((e) => e.level);
     assertEqual(levels.join(','), 'warn,error');
+    // 但四条全在缓冲里 —— 这是 v0.9 的核心语义变更
+    assertEqual(rawCount(), 4, '低等级条目也必须入缓冲');
+    // 把等级调低后能看到**过去的**日志（旧实现下这里只会剩 2 条）
     setLevel('debug');
+    assertEqual(
+      entries().map((e) => e.level).join(','),
+      'debug,info,warn,error',
+      '调低等级必须能回看历史日志',
+    );
+  });
+
+  it('passesLevel 与 entries() 过滤口径一致', () => {
+    clear();
+    setLevel('info');
+    const log = scoped('t');
+    log.debug('d');
+    log.warn('w');
+    assertEqual(passesLevel('debug'), false);
+    assertEqual(passesLevel('info'), true);
+    assertEqual(passesLevel('warn'), true);
+    assertEqual(passesLevel('error'), true);
+    assertEqual(entries().length, 1);
+    setLevel('debug');
+  });
+
+  it('dump() 与 entries() 口径一致（复制出来的和屏幕上看到的一样）', () => {
+    clear();
+    setLevel('debug');
+    const log = scoped('t');
+    log.error('err-line');
+    log.info('info-line');
+    // debug 门槛下两条都可见，dump 也都要有
+    assertEqual(entries().length, 2);
+    assertEqual(dump().includes('err-line'), true);
+    assertEqual(dump().includes('info-line'), true);
+    // 抬到 error 门槛：entries 与 dump 必须同步收缩到只剩 error 那条
+    setLevel('error');
+    assertEqual(entries().length, 1, 'entries 应只留 error');
+    assertEqual(dump().includes('info-line'), false, 'dump 必须跟着过滤掉 info');
+    assertEqual(dump().includes('err-line'), true);
+    // 降回 debug 门槛：两条都回来 —— 证明过滤是读取期的，不是写入期的
+    setLevel('debug');
+    assertEqual(entries().length, 2, '降级后必须能回看被过滤的日志');
+    assertEqual(dump().includes('info-line'), true);
   });
 
   it('setLevel / getLevel 往返', () => {

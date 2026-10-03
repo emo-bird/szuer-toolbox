@@ -6,7 +6,16 @@
  */
 
 import { el, clear } from '../../utils/dom.ts';
-import { entries, formatEntry, subscribe, setLevel, getLevel, clear as clearLog } from '../../core/log.ts';
+import {
+  entries,
+  formatEntry,
+  subscribe,
+  setLevel,
+  getLevel,
+  clear as clearLog,
+  passesLevel,
+  rawCount,
+} from '../../core/log.ts';
 import type { LogEntry, LogLevel } from '../../core/log.ts';
 import type { TabRegistration } from '../../../sites/types.ts';
 
@@ -79,10 +88,23 @@ function renderTab(root: HTMLElement): () => void {
   );
   root.appendChild(wrap);
 
+  /**
+   * 「粘底」判定：滚动条在底部（留 8px 容差）。
+   * 用户往上翻看历史时 autoScroll 变 false，新日志就不会把他拽回底部。
+   */
+  const AT_BOTTOM_SLACK = 8;
   let autoScroll = true;
+  const atBottom = (): boolean =>
+    pre.scrollTop + pre.clientHeight >= pre.scrollHeight - AT_BOTTOM_SLACK;
+
   pre.addEventListener('scroll', () => {
-    autoScroll = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 8;
+    autoScroll = atBottom();
   });
+
+  /** 滚到底（新日志到达且用户本来就在底部时调用） */
+  function scrollToBottom(): void {
+    pre.scrollTop = pre.scrollHeight;
+  }
 
   function line(entry: LogEntry): HTMLElement {
     return el('div', {
@@ -94,7 +116,7 @@ function renderTab(root: HTMLElement): () => void {
 
   /**
    * 空态文案：让用户分得清「真的没日志」和「被等级过滤了」。
-   * 这一条是手测第 19 项暴露出来的 —— 原来清空后什么都不显示，看着像坏了。
+   * v0.9 起 core/log 一律入缓冲，所以「被过滤掉几条」是真实可算的。
    */
   function syncEmptyHint(): void {
     const count = pre.childElementCount;
@@ -102,30 +124,38 @@ function renderTab(root: HTMLElement): () => void {
     emptyHint.style.display = count === 0 ? '' : 'none';
     if (count > 0) return;
 
-    const buffered = entries().length;
+    const buffered = rawCount();
+    const shown = entries().length;
+    const filtered = buffered - shown;
     emptyHint.textContent =
       buffered === 0
         ? '暂无日志。'
-        : `当前没有等级 ≥ ${getLevel()} 的日志（缓冲里还有 ${buffered} 条被过滤掉了）。`;
+        : `当前没有等级 ≥ ${getLevel()} 的日志（缓冲里另有 ${filtered} 条被过滤掉了）。`;
   }
 
   function repaint(): void {
+    // 重绘前先记录用户是否停在底部 —— 切等级 / 清空都走这里，
+    // 只有本来就在底部才滚下去，否则会把正在翻历史的用户拽走。
+    const stick = autoScroll || atBottom();
     clear(pre);
     for (const entry of entries()) pre.appendChild(line(entry));
     syncEmptyHint();
-    pre.scrollTop = pre.scrollHeight;
+    if (stick) scrollToBottom();
+    autoScroll = stick;
   }
 
   repaint();
   const off = subscribe((entry) => {
-    // subscribe 只在等级通过时才会回调（core/log 已在 push 里过滤），
-    // 所以这里无需再判等级；但清空 / 过滤后需要重算空态。
+    // core/log 现在一律入缓冲（v0.9），所以这里必须自己判等级：
+    // 低于当前显示门槛的条目不进 DOM，但**留在缓冲里**，切回低等级能看到。
+    if (!passesLevel(entry.level)) return;
     if (pre.style.display === 'none') pre.style.display = '';
     emptyHint.style.display = 'none';
     pre.appendChild(line(entry));
     // 缓冲满了之后 core/log 会丢最老的，这里同步保证 DOM 不会无限增长
     if (pre.childElementCount > 520) pre.firstElementChild?.remove();
-    if (autoScroll) pre.scrollTop = pre.scrollHeight;
+    // 新需求：停在底部时新日志自动到底；正在往上翻则不动
+    if (autoScroll) scrollToBottom();
   });
 
   return () => {
