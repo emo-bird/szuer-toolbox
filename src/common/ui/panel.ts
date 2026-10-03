@@ -180,6 +180,25 @@ export function createPanel(
   baseStyle.textContent = baseCss;
   shadow.appendChild(baseStyle);
 
+  // ------------------------------------------------------------ 按键盾
+  //
+  // bkxk 站点自己挂了「禁止后退键」（抓包原文，见 docs/开发文档.md §4.3）：
+  //   document.onkeydown = BH_UTILS.banBackSpace;
+  //   // 事件源 type 不是 text/textarea/password/... 就吞掉 Backspace
+  // 而 Shadow DOM 会把内部事件的 target **重定向为宿主元素**（.sztb-host，
+  // 没有 type 属性）⇒ 站点判定「不是输入框」⇒ 面板内所有输入框的 Backspace
+  // 被 preventDefault 掉。表现就是「退格删不掉前一个字符，只有 Delete 能用」。
+  //
+  // 对策：在 shadow root 的**冒泡阶段**把键盘事件截住，让它根本不出 shadow 树。
+  //   ⚠️ 必须是冒泡阶段 —— 捕获阶段截会连输入框自己都收不到按键；
+  //   ⚠️ 只 stopPropagation，**不要** preventDefault，否则输入框的编辑行为也没了。
+  //   ⚠️ 用捕获阶段挂在 document 上的代码（如 confirm.ts 的 Esc 关闭）执行更早，不受影响。
+  const blockKeyLeak = (ev: Event): void => {
+    ev.stopPropagation();
+  };
+  shadow.addEventListener('keydown', blockKeyLeak);
+  shadow.addEventListener('keypress', blockKeyLeak);
+
   const ball = el('div', {
     class: 'sztb-ball',
     text: '深',

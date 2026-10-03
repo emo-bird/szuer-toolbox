@@ -41,6 +41,23 @@ export function getAdapter(id: string): SiteAdapter | undefined {
   return adapters.find((a) => a.id === id);
 }
 
+/**
+ * 约定：站点若要把自己的设置渲染进**自己的标签页**，标签 id 必须是 `<siteId>:settings`。
+ *
+ * 有这个约定的原因：公共【设置】标签页需要知道「这个站点自己管设置了」，
+ * 才能跳过它、只留一行指引 —— 否则同一个开关会在面板里出现两遍。
+ */
+export function settingsTabId(siteId: string): string {
+  return `${siteId}:settings`;
+}
+
+/** 该站点是否自己注册了设置标签页 */
+export function hasOwnSettingsTab(siteId: string): boolean {
+  const adapter = getAdapter(siteId);
+  if (adapter === undefined) return false;
+  return adapter.tabs.some((t) => t.id === settingsTabId(siteId));
+}
+
 export interface Resolution {
   /** 是否应该在本页注入悬浮窗 */
   readonly inject: boolean;

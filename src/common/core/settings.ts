@@ -90,14 +90,78 @@ export function needsConfirm(risk: RiskLevel): boolean {
 
 // ------------------------------------------------------------- 普通配置项
 
+/** `kind: 'select'` 用的可选项 */
+export interface SelectOption {
+  readonly value: string;
+  readonly label: string;
+}
+
 export interface ValueDef<T> {
   readonly siteId: string;
   readonly id: string;
   readonly label: string;
+  /** 补充说明。渲染在标签**下方的独立一行**（不是塞在输入框里） */
   readonly desc?: string;
   readonly default: T;
-  /** 输入框类型，供设置页渲染 */
-  readonly kind: 'text' | 'password' | 'number' | 'url';
+  /** 渲染成什么控件。`select` 必须一并给出 `options` */
+  readonly kind: 'text' | 'password' | 'number' | 'url' | 'select';
+  /** `kind === 'select'` 时的可选项；其它 kind 忽略 */
+  readonly options?: readonly SelectOption[];
+  /**
+   * 校验钩子。返回非空字符串 = 这个值有问题（UI 把它渲染成输入框下方的一行黄字）。
+   *
+   * ⚠️ 必须是**纯函数**：不碰 DOM、不写日志、不写存储。这样 node 下能直接测。
+   * ⚠️ 只做「提示」，**不要**在这里偷偷把值改掉 —— 改值会让用户以为填进去了。
+   */
+  readonly validate?: (value: T) => string | null;
+  /**
+   * 写入后立刻生效的钩子（可选）。
+   *
+   * 没有它的代价：用户改了配置项，要等下一次页面初始化才生效 ——
+   * 填完数值界面上一点反应都没有，用户会以为没保存。
+   */
+  readonly apply?: (value: T) => void;
+}
+
+/**
+ * 把输入框里的原始字符串转成要存的值（纯函数）。
+ *
+ * 规则（需求已确认）：
+ *   - 首尾空白一律去掉；
+ *   - **空串视为「没填」⇒ 回落 `def.default`**（这就是「失焦为空则自动填入默认值」的实现点）；
+ *   - `kind === 'number'` 时校验能不能解析成数字，解析不出来也回落默认值。
+ *
+ * 注意返回的是**字符串**：`kind` 描述的是「用哪个控件渲染」，不代表存储类型。
+ * 各站点自己的配置项都是按字符串存的（数字由消费方用 `clampLimit` 之类去转），
+ * 这样 `formatValue(coerceInput(...))` 回到输入框时与用户敲的写法一致。
+ *
+ * 为什么空串不能原样存下去：`Number('') === 0`，
+ * 用户清空输入框会把「请求间隔」静默变成 0。
+ */
+export function coerceInput(def: ValueDef<unknown>, raw: string): unknown {
+  const text = raw.trim();
+  if (text === '') return def.default;
+  if (def.kind === 'number' && !Number.isFinite(Number(text))) return def.default;
+  return text;
+}
+
+/**
+ * 校验输入框里的原始字符串（纯函数）。返回提示文本，没问题返回 null。
+ *
+ * 与 `coerceInput` 配对使用：先转成真实值，再交给 `def.validate`。
+ */
+export function checkInput(def: ValueDef<unknown>, raw: string): string | null {
+  const value = coerceInput(def, raw);
+  if (def.kind === 'select' && def.options !== undefined) {
+    const ok = def.options.some((o) => o.value === String(value));
+    if (!ok) return `只能选：${def.options.map((o) => o.label).join(' / ')}`;
+  }
+  return def.validate?.(value) ?? null;
+}
+
+/** 把值渲染成输入框里的字符串（纯函数）。null / undefined 一律渲染成空串。 */
+export function formatValue(value: unknown): string {
+  return value === null || value === undefined ? '' : String(value);
 }
 
 const valueRegistry = new Map<string, ValueDef<unknown>>();
@@ -114,6 +178,30 @@ export function valuesOf(siteId: string): ValueDef<unknown>[] {
   return out;
 }
 
+/**
+ * 注册过开关或配置项的站点 id。
+ *
+ * 先按**开关的注册顺序**（= 适配器注册顺序），再补上「只有配置项、没有开关」的站点。
+ * 公共设置页需要这个清单才能遍历站点 —— 它不该去 import sites/registry（依赖方向铁律）。
+ */
+export function registeredSiteIds(): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const item of toggleRegistry.values()) {
+    if (!seen.has(item.siteId)) {
+      seen.add(item.siteId);
+      out.push(item.siteId);
+    }
+  }
+  for (const item of valueRegistry.values()) {
+    if (!seen.has(item.siteId)) {
+      seen.add(item.siteId);
+      out.push(item.siteId);
+    }
+  }
+  return out;
+}
+
 export function getValue<T>(siteId: string, id: string): T {
   const def = valueRegistry.get(composite(siteId, id));
   const fallback = (def?.default ?? undefined) as T;
@@ -122,6 +210,14 @@ export function getValue<T>(siteId: string, id: string): T {
 
 export function setValue(siteId: string, id: string, value: unknown): void {
   write(`value:${siteId}:${id}`, value);
+  // 立刻生效（可选钩子）。钩子抛错不能连累「值已经写进去了」这个事实，
+  // 但也不能静默 —— 所以只吞掉异常，交由调用方的 UI 继续走。
+  const def = valueRegistry.get(composite(siteId, id));
+  try {
+    (def?.apply as ((v: unknown) => void) | undefined)?.(value);
+  } catch {
+    /* 生效钩子失败不影响已保存的值 */
+  }
 }
 
 // ---------------------------------------------------------------- 维护

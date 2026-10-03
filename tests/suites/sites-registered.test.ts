@@ -18,7 +18,14 @@
  */
 
 import { describe, it, assert, assertEqual } from '../harness.ts';
-import { resolve, resetRegistry, SUPPORTED_ROOT_DOMAINS, allAdapters } from '../../src/sites/registry.ts';
+import {
+  resolve,
+  resetRegistry,
+  SUPPORTED_ROOT_DOMAINS,
+  allAdapters,
+  settingsTabId,
+  hasOwnSettingsTab,
+} from '../../src/sites/registry.ts';
 import { registerSites } from '../../src/sites/index.ts';
 
 /** 每个用例都从干净注册表 + 真实注册函数开始 */
@@ -141,5 +148,47 @@ describe('sites 真实注册表 —— 与 userscript header 的 @match 对齐',
     assertEqual(uooc!.pages.length, 0, '阶段 3 接入功能后应改为精确路径通配');
     const r = resolve(new URL('https://www.uooc.net.cn/league/union'));
     assertEqual(r.autoExpand, true);
+  });
+});
+
+/**
+ * 设置标签页归属（用户反馈驱动：「本科选课的设置都放在单独标签页更好」）。
+ *
+ * 公共【设置】页靠 `hasOwnSettingsTab` 跳过「自己管设置」的站点 —— 不一致的话
+ * 同一个开关会在面板里出现两遍，还能从两个入口改，风险门禁就形同虚设。
+ * 这里把「标签 id 必须等于约定式」钉死。
+ */
+describe('sites 真实注册表 —— 站点设置标签页归属', () => {
+  it('settingsTabId 的约定形如 <siteId>:settings', () => {
+    assertEqual(settingsTabId('bkxk'), 'bkxk:settings');
+    assertEqual(settingsTabId('uooc'), 'uooc:settings');
+  });
+
+  it('bkxk 已注册自己的设置标签页，且 id 与约定式一致', () => {
+    bootReal();
+    const bkxk = allAdapters().find((a) => a.id === 'bkxk');
+    assert(bkxk !== undefined, 'bkxk 适配器应已注册');
+    const tab = bkxk!.tabs.find((t) => t.id === settingsTabId('bkxk'));
+    assert(tab !== undefined, 'bkxk 应注册 id 为 bkxk:settings 的标签页');
+    assertEqual(tab!.title, '设置');
+    assertEqual(hasOwnSettingsTab('bkxk'), true, '公共设置页据此跳过 bkxk');
+  });
+
+  it('UOOC 目前没有自己的设置标签页 ⇒ 设置仍由公共页渲染', () => {
+    bootReal();
+    assertEqual(hasOwnSettingsTab('uooc'), false);
+  });
+
+  it('未注册的站点一律报 false（不能因为查不到适配器就抛错）', () => {
+    bootReal();
+    assertEqual(hasOwnSettingsTab('ghost'), false);
+  });
+
+  it('bkxk 的站点标签页 id 都带站点前缀，不会与公共标签页撞号', () => {
+    bootReal();
+    const bkxk = allAdapters().find((a) => a.id === 'bkxk');
+    for (const tab of bkxk!.tabs) {
+      assert(tab.id.startsWith('bkxk:'), `站点标签页 id 应带前缀，实际=${tab.id}`);
+    }
   });
 });

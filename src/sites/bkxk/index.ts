@@ -24,6 +24,7 @@ import type { SiteAdapter } from '../types.ts';
 import { BKXK_TOGGLES, applyBkxkSettings, registerBkxkSettings, SITE_ID } from './settings.ts';
 import { readSession, sessionSummary } from './session.ts';
 import { runMigration } from './legacy.ts';
+import { BKXK_SETTINGS_TAB } from './tabs/settings.ts';
 
 const log = scoped('site/bkxk');
 
@@ -47,8 +48,10 @@ export const bkxkAdapter: SiteAdapter = {
   name: '本科选课',
   hosts: HOSTS,
   pages: PAGES,
-  // 标签页在批 4 补齐（任务 / 监控 / 自定义 / 设置 / 日志），本批先不加。
-  tabs: [],
+  // 标签页分批补齐（用户拍板的五个：任务 / 监控 / 自定义 / 设置 / 日志）：
+  //   本批只有【设置】—— 用户反馈「本科选课的设置都放在单独标签页更好」，
+  //   其余三个（任务 / 监控 / 自定义）在批 4 接入，【日志】是公共标签页、不用站点注册。
+  tabs: [BKXK_SETTINGS_TAB],
   toggles: BKXK_TOGGLES,
 
   /**
@@ -75,6 +78,6 @@ export const bkxkAdapter: SiteAdapter = {
     } else {
       log.info(`站点已就绪：${sessionSummary(session)}`);
     }
-    log.info(`功能页=${String(ctx.isFeaturePage)}（标签页待批 4 接入）`);
+    log.info(`功能页=${String(ctx.isFeaturePage)}（设置标签页已就绪，其余标签页在批 4 接入）`);
   },
 };

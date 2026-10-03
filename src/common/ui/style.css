@@ -247,15 +247,25 @@
   display: flex;
   flex-direction: column;
   gap: 3px;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
+  padding: 0 8px;
 }
 
-.sztb-field > span {
+.sztb-field-label {
+  font-size: 13px;
+  color: var(--sztb-text);
+}
+
+/* 配置项提示：单独一行，紧跟在标签下面（不塞进输入框里） */
+.sztb-field-desc {
   font-size: 12px;
+  line-height: 1.45;
   color: var(--sztb-text-dim);
+  word-break: break-word;
 }
 
-.sztb-input {
+.sztb-input,
+.sztb-select {
   width: 100%;
   padding: 5px 8px;
   border: 1px solid var(--sztb-border);
@@ -264,11 +274,39 @@
   font-family: inherit;
   color: var(--sztb-text);
   background: var(--sztb-bg);
+  box-sizing: border-box;
 }
 
-.sztb-input:focus {
+.sztb-input:focus,
+.sztb-select:focus {
   outline: none;
   border-color: var(--sztb-accent);
+}
+
+/* 空值时显示的灰色默认值 */
+.sztb-input::placeholder {
+  color: var(--sztb-text-dim);
+  opacity: 0.8;
+}
+
+.sztb-select {
+  cursor: pointer;
+}
+
+/* 校验提示：校验通过时用 hidden 收起来，不占高度 */
+.sztb-field-hint {
+  font-size: 12px;
+  line-height: 1.45;
+  color: #b3730a;
+}
+
+.sztb-field-hint[hidden] {
+  display: none;
+}
+
+.sztb-field[data-invalid="true"] .sztb-input,
+.sztb-field[data-invalid="true"] .sztb-select {
+  border-color: #d9a340;
 }
 
 .sztb-btn {
@@ -318,6 +356,18 @@
   text-align: center;
   color: var(--sztb-text-dim);
   font-size: 12.5px;
+}
+
+/* 段首说明文字：站点自己的设置标签页用它交代门禁规则 */
+.sztb-note {
+  margin: 0 0 8px;
+  padding: 7px 9px;
+  border-left: 2px solid var(--sztb-border);
+  border-radius: 0 5px 5px 0;
+  background: var(--sztb-bg-alt);
+  color: var(--sztb-text-dim);
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 /* ---------------------------------------------------------- 日志面板 */

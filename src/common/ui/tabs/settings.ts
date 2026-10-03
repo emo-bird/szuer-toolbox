@@ -1,95 +1,60 @@
 /**
  * 公共标签页「设置」。
  *
- * 渲染所有已注册站点声明的功能开关（每功能一个复选框）与普通配置项。
+ * 渲染**没有自己设置标签页**的站点的功能开关与配置项。
+ * 站点若自己注册了 `<siteId>:settings` 标签页（见 sites/registry.ts 的约定），
+ * 这里就不重复列，只画一行指引 —— 同一个开关在面板里出现两遍是最容易出不一致的做法。
  *
- * ⚠️ 站点自身**不注册标签页来做设置** —— 一律把 `toggles` / `values` 声明出来，
- * 由这里统一渲染。这样风险门禁只有一处实现，不会各写各的。
+ * ⚠️ 站点自身**不注册标签页来做设置**时，一律把 `toggles` / `values` 声明出来就够了，
+ * 由本页或站点标签页统一渲染。风险门禁只有一处实现（core/settings + widgets/settings-form）。
  */
 
-import { el, clear } from '../../utils/dom.ts';
-import { allToggles, valuesOf, isEnabled, setEnabled, needsConfirm, getValue, setValue } from '../../core/settings.ts';
-import type { ValueDef } from '../../core/settings.ts';
-import { createToggleRow } from '../widgets/checkbox.ts';
+import { clear } from '../../utils/dom.ts';
+import { registeredSiteIds } from '../../core/settings.ts';
+import {
+  renderSiteSettings,
+  siteHasSettings,
+  emptyHint,
+  movedHint,
+} from '../widgets/settings-form.ts';
 import type { TabContext, TabRegistration } from '../../../sites/types.ts';
 
 /** 站点名映射由 main 装配时注入（settings 模块不反向依赖 registry） */
 let siteNameOf: (siteId: string) => string = (id) => id;
 
+/** 「该站点有没有自己的设置标签页」同样由 main 注入 */
+let ownsSettingsTabOf: (siteId: string) => boolean = () => false;
+
 export function setSiteNameResolver(fn: (siteId: string) => string): void {
   siteNameOf = fn;
 }
 
-function renderValue(siteId: string, def: ValueDef<unknown>): HTMLElement {
-  const input = el('input', {
-    class: 'sztb-input',
-    attrs: { type: def.kind, placeholder: def.desc ?? '' },
-  });
-  input.value = String(getValue(siteId, def.id) ?? '');
-  input.addEventListener('change', () => {
-    setValue(siteId, def.id, input.value);
-  });
-  return el('div', { class: 'sztb-field' }, el('span', { text: def.label }), input);
+export function setOwnSettingsTabResolver(fn: (siteId: string) => boolean): void {
+  ownsSettingsTabOf = fn;
 }
 
 function renderTab(root: HTMLElement, ctx: TabContext): void {
   clear(root);
 
-  const toggles = allToggles();
-  if (toggles.length === 0) {
-    root.appendChild(el('div', { class: 'sztb-empty', text: '当前没有已注册的功能开关' }));
+  const sites = registeredSiteIds().filter((id) => siteHasSettings(id));
+  if (sites.length === 0) {
+    root.appendChild(emptyHint('当前没有已注册的功能开关'));
     return;
   }
 
-  const bySite = new Map<string, typeof toggles>();
-  for (const item of toggles) {
-    const list = bySite.get(item.siteId);
-    if (list === undefined) bySite.set(item.siteId, [item]);
-    else list.push(item);
+  let rendered = 0;
+  for (const siteId of sites) {
+    const name = siteNameOf(siteId);
+    if (ownsSettingsTabOf(siteId)) {
+      root.appendChild(movedHint(name));
+      continue;
+    }
+    root.appendChild(renderSiteSettings(siteId, name, ctx));
+    rendered += 1;
   }
 
-  for (const [siteId, list] of bySite) {
-    root.appendChild(el('div', { class: 'sztb-group-title', text: `${list[0]?.siteName ?? siteNameOf(siteId)}` }));
-
-    const byGroup = new Map<string, typeof list>();
-    for (const item of list) {
-      const g = item.group ?? '';
-      const arr = byGroup.get(g);
-      if (arr === undefined) byGroup.set(g, [item]);
-      else arr.push(item);
-    }
-
-    for (const [group, items] of byGroup) {
-      if (group !== '') {
-        root.appendChild(el('div', { class: 'sztb-group-title', text: group }));
-      }
-      for (const item of items) {
-        root.appendChild(
-          createToggleRow({
-            id: `${item.siteId}-${item.id}`,
-            label: item.label,
-            ...(item.desc !== undefined ? { desc: item.desc } : {}),
-            checked: isEnabled(item.siteId, item.id),
-            risk: item.risk,
-            confirm: (opts) => ctx.host.confirm(opts),
-            onChange: (checked) => {
-              setEnabled(item.siteId, item.id, checked);
-              ctx.host.toast(
-                `${item.label} 已${checked ? '开启' : '关闭'}${
-                  checked && needsConfirm(item.risk) ? '（不可逆功能，请谨慎使用）' : ''
-                }`,
-                checked ? 'success' : 'info',
-              );
-            },
-          }),
-        );
-      }
-    }
-
-    // 普通配置项（API URL / API Key 之类）
-    for (const def of valuesOf(siteId)) {
-      root.appendChild(renderValue(siteId, def));
-    }
+  if (rendered === 0) {
+    root.appendChild(emptyHint('所有站点的设置都在它们自己的标签页里'));
   }
 }
 

@@ -20,5 +20,6 @@ import './suites/limits.test.ts';
 import './suites/bkxk-api.test.ts';
 import './suites/bkxk-session.test.ts';
 import './suites/bkxk-migrate.test.ts';
+import './suites/bkxk-settings.test.ts';
 
 await run();

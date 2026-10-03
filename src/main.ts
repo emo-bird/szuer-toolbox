@@ -27,12 +27,12 @@ import { scoped } from './common/core/log.ts';
 import { whenDomReady } from './common/utils/dom.ts';
 import { createPanel } from './common/ui/panel.ts';
 import type { PanelHandle, TabEntry } from './common/ui/panel.ts';
-import { settingsTab, setSiteNameResolver } from './common/ui/tabs/settings.ts';
+import { settingsTab, setSiteNameResolver, setOwnSettingsTabResolver } from './common/ui/tabs/settings.ts';
 import { logTab } from './common/ui/tabs/log.ts';
 import { statusTab, setStatusProvider } from './common/ui/tabs/status.ts';
 import { loginTab, setCurrentSiteResolver } from './common/ui/tabs/login.ts';
 
-import { allAdapters, resolve, SUPPORTED_ROOT_DOMAINS } from './sites/registry.ts';
+import { allAdapters, hasOwnSettingsTab, resolve, SUPPORTED_ROOT_DOMAINS } from './sites/registry.ts';
 import type { Resolution } from './sites/registry.ts';
 import { registerSites } from './sites/index.ts';
 
@@ -61,6 +61,10 @@ function wireSites(): void {
 
   setSiteNameResolver((siteId) => allAdapters().find((a) => a.id === siteId)?.name ?? siteId);
   setCurrentSiteResolver(() => booted?.adapterId ?? null);
+
+  // 公共【设置】页要靠它跳过「自己管设置」的站点（如 bkxk），否则同一个开关会出现两遍、
+  // 还能从两个入口改。判定规则由 sites/registry 的 settingsTabId 约定给出。
+  setOwnSettingsTabResolver(hasOwnSettingsTab);
 }
 
 // ------------------------------------------------------------------ 分派
