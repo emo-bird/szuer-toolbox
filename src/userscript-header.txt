@@ -1,0 +1,55 @@
+// ==UserScript==
+// @name         深大人工具箱
+// @name:en      SZUer Toolbox
+// @namespace    https://github.com/emo-bird/szuer-toolbox
+// @version      {{VERSION}}
+// @description  深大校园站工具箱：UOOC 课程助手 + 本科选课助手。完全自研 UI，无外部运行时依赖。
+// @description:en  Toolbox for SZU campus sites: UOOC course helper + undergraduate course-selection helper.
+// @author       一门鸽鸽 (emo_bird) & DeepSeek
+// @homepageURL  https://github.com/emo-bird/szuer-toolbox
+// @supportURL   https://github.com/emo-bird/szuer-toolbox/issues
+// @updateURL    https://raw.githubusercontent.com/emo-bird/szuer-toolbox/master/dist/szuer-toolbox.user.js
+// @downloadURL  https://raw.githubusercontent.com/emo-bird/szuer-toolbox/master/dist/szuer-toolbox.user.js
+// @match        *://*.szu.edu.cn/*
+// @match        *://*.uooc.net.cn/*
+// @match        *://localhost/*
+// @match        *://127.0.0.1/*
+// @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iNyIgZmlsbD0iIzFlNmZmZiIvPjxyZWN0IHg9IjciIHk9IjkiIHdpZHRoPSIxOCIgaGVpZ2h0PSIzIiByeD0iMS4yIiBmaWxsPSIjZmZmIi8+PHJlY3QgeD0iNyIgeT0iMTUiIHdpZHRoPSIxOCIgaGVpZ2h0PSIzIiByeD0iMS4yIiBmaWxsPSIjZmZmIi8+PHJlY3QgeD0iNyIgeT0iMjEiIHdpZHRoPSIxMCIgaGVpZ2h0PSIzIiByeD0iMS4yIiBmaWxsPSIjZmZmIi8+PC9zdmc+
+// @grant        GM_xmlhttpRequest
+// @grant        GM_setValue
+// @grant        GM_getValue
+// @grant        GM_deleteValue
+// @grant        GM_listValues
+// @grant        GM_addValueChangeListener
+// @grant        GM_removeValueChangeListener
+// @grant        GM_setClipboard
+// @grant        GM_registerMenuCommand
+// @connect      szu.edu.cn
+// @connect      uooc.net.cn
+// @connect      *
+// @run-at       document-idle
+// @noframes
+// ==/UserScript==
+
+/*
+ * ============================================================================
+ *  深大人工具箱 —— 免责声明
+ * ============================================================================
+ *
+ *  1. 本脚本仅供学习与研究使用，使用者应自行承担使用风险。
+ *  2. 作者不对使用本脚本造成的任何直接或间接后果负责，包括但不限于
+ *     课程成绩、选课结果、账号状态、学业处分等。
+ *  3. 本脚本不会自动执行任何不可逆操作（提交选课 / 提交答案 / 交卷）。
+ *     所有此类功能默认关闭，必须由使用者在设置面板中显式勾选，
+ *     且每次执行前都会弹出二次确认。
+ *  4. 本脚本不会上传、不落盘任何凭证（cookie / token / 学号 / 密码）。
+ *     配置的第三方大模型 API Key 仅保存在你本机的油猴脚本存储中。
+ *  5. 请遵守深圳大学及各站点的用户协议。若站点明令禁止自动化访问，
+ *     请立即停止使用并卸载本脚本。
+ *
+ *  项目地址：https://github.com/emo-bird/szuer-toolbox
+ *  开源许可：见仓库 README（当前未附带 LICENSE 文件，保留所有权利）
+ * ============================================================================
+ */
+
+/* 构建信息：{{BUILD_TIME}} */
