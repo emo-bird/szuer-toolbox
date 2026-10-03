@@ -1,0 +1,26 @@
+# 统一换行符为 LF。
+#
+# 为什么需要这个文件：
+#   本机 git 配置 core.autocrlf=true，会在 checkout 时把所有文本文件转成 CRLF。
+#   这带来两个问题：
+#     1. userscript 头模板被转成 CRLF 后，构建产物首行变成 "// ==UserScript==\r"，
+#        导致 tools/verify-build.mjs 的「首行是 ==UserScript==」自检误报失败；
+#     2. 每次提交都刷一屏 "LF will be replaced by CRLF" 警告。
+#   Tampermonkey 本身能容忍 CRLF 头，但我们的自检工具不该被它骗到。
+#
+# 强制 LF 后，工作区、索引、产物三者一致。
+* text=auto eol=lf
+
+# Windows 专用脚本保留 CRLF（若将来添加）
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# 二进制文件不做任何转换
+*.png binary
+*.jpg binary
+*.ico binary
+*.exe binary
+*.flow binary
+*.har binary
+*.woff binary
+*.woff2 binary

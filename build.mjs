@@ -138,11 +138,15 @@ function main() {
   }
 
   const bundle = readFileSync(BUNDLE_FILE, 'utf8');
+  // 换行符防御：本机 core.autocrlf=true 会把头模板 checkout 成 CRLF，
+  // 产物首行于是变成 "// ==UserScript==\r"，把 verify-build 的自检骗到。
+  // .gitattributes 已强制 LF，但构建不该依赖别人的 git 配置 —— 这里再兜一层。
   const header = readFileSync(join(ROOT, 'src', 'userscript-header.txt'), 'utf8')
+    .replace(/\r\n?/g, '\n')
     .replaceAll('{{VERSION}}', version)
     .replaceAll('{{BUILD_TIME}}', buildTime);
 
-  const output = `${header}\n${bundle}\n`;
+  const output = `${header}\n${bundle.replace(/\r\n?/g, '\n')}\n`;
   writeFileSync(OUT_FILE, output, 'utf8');
 
   // 清理中间产物
