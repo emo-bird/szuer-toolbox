@@ -52,7 +52,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-03T13:19:41.187Z */
+/* 构建信息：2026-10-03T13:43:53.783Z */
 
 "use strict";
 (() => {
@@ -1496,7 +1496,7 @@ ${options.desc ?? ""}
   // src/main.ts
   var log5 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-03T13:19:41.187Z" : null;
+  var BUILD_TIME = true ? "2026-10-03T13:43:53.783Z" : null;
   function registerSites() {
     registerAdapter(demoAdapter);
     setSiteNameResolver((siteId) => allAdapters().find((a) => a.id === siteId)?.name ?? siteId);
