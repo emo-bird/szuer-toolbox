@@ -6,10 +6,13 @@ local/*
 
 # ---- 依赖 ----
 node_modules/
+# npm 缓存（见 .npmrc：本机默认缓存目录在沙箱外，被迫落到工作区）
+.npm-cache/
 
 # ---- 构建产物 ----
 # 产物会随 dist/ 发布（自动更新需要 raw 链接），但构建中间物不入库
 dist/*.map
+dist/.tmp/
 build/
 *.tsbuildinfo
 .vite/

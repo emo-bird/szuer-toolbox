@@ -1,0 +1,20 @@
+{
+  "name": "szuer-toolbox",
+  "version": "0.1.0",
+  "private": true,
+  "description": "深大人工具箱 —— 面向深圳大学校园站点的一体化油猴脚本（框架 + 站点适配层 + 统一悬浮窗）",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node tests/run.ts",
+    "verify": "node tools/verify-build.mjs",
+    "check": "npm run typecheck && npm test && npm run build && npm run verify"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.1",
+    "@types/tampermonkey": "^5.5.0",
+    "esbuild": "^0.28.0",
+    "typescript": "^7.0.0"
+  }
+}
