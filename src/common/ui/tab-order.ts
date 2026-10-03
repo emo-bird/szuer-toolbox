@@ -87,35 +87,51 @@ function orderOf(entry: TabOrderInput): number {
 // ------------------------------------------------------ 「上次停留的标签」
 
 /**
- * 记忆键，**按站点分键**：`ui:active-tab:<siteId>`。
+ * 记忆键，**按页面分键**：`ui:active-tab:<scope>`，scope 由 `pageScopeOf()` 给出。
  *
  * 为什么不跟 `ui:size` 它们一样用一个全局键：位置是「我的面板在哪」（跨站共用才合理），
- * 而标签是「我在这个站点看哪一页」。bkxk 将来有任务 / 监控 / 自定义 / 设置 / 日志
- * **五个**专属标签页，共用一个键意味着「在 bkxk 停在站点设置，去一趟 UOOC，
- * 回来记忆就没了」。
+ * 而标签是「我在**这个页面**看哪一页」。
  *
- * `siteId` 已经过校验，所以这里不需要再转义：适配器 id 的格式有测试钉住
+ * ⚠️ 这里曾经按「标签页自己归属的站点」分键（v0.12），读的时候又让站点组优先（v0.13）——
+ * 那套口径在用户实测里当场翻车：在本科选课页面点【日志】（公共标签页）后，
+ * 值写进 `ui:active-tab:common`，而站点组里的旧值还躺在 `ui:active-tab:bkxk`，
+ * 刷新时「站点组优先」把它抢了回来 ⇒ 永远回不到【日志】。
+ * 现在的语义是「**这个页面**上最后看的标签页」，站点组与公共组一视同仁（用户 m00593）。
+ *
+ * `scope` 已经过校验，所以这里不需要再转义：适配器 id 的格式有测试钉住
  * （`tests/suites/registry.test.ts`），冒号与 `sztb:` 前缀都不会出现。
  */
-export function activeTabKey(siteId: string): string {
-  return `ui:active-tab:${siteId}`;
+export function activeTabKey(scope: string): string {
+  return `ui:active-tab:${scope}`;
+}
+
+/**
+ * 一份标签集属于哪个**页面** —— 也就是记忆键的 scope。
+ *
+ * 取第一个站点组的 siteId（一个页面通常只有一个适配器注册标签页；真的多站点同时命中时
+ * 按 `planTabOrder` 的先后取第一个 —— 是个确定性的选择，不随注册顺序抖动）；
+ * 一个站点标签页都没有（UOOC 现状、普通网页）就是 `COMMON_SITE_ID`。
+ *
+ * ⚠️ 不许改成「按标签页自己的 siteId」：那样点公共标签页会写到公共键上去，
+ * 站点组里那份旧记忆下次刷新就会把用户抢回去（见 `activeTabKey` 的注释）。
+ */
+export function pageScopeOf<T extends TabOrderInput>(entries: readonly T[]): string {
+  for (const item of planTabOrder(entries)) {
+    if (item.entry.siteId !== COMMON_SITE_ID) return item.entry.siteId;
+  }
+  return COMMON_SITE_ID;
 }
 
 /**
  * 重新打开面板时该选中哪个标签页 —— **纯函数**，`stored` 是「按 key 取值」的查询函数
  * （调用方传 `storage.read`，测试传一个查表的闭包）。
  *
- * ## 恢复优先级（用户拍板：站点组优先）
+ * 规则只有两条：
+ *   1. 读本页面那个键（`pageScopeOf(entries)`）；
+ *   2. 值是本页标签集里真实存在的 id 才采用，否则返回 `null`（调用方回退第一个标签页）。
  *
- * 一次加载可能**同时存在多个有效键**：bkxk 页面上 `ui:active-tab:bkxk`
- * 与 `ui:active-tab:common` 都可能存着值。规则是：
- *
- *   1. 按 `planTabOrder` 的顺序看**站点组**的键（多个站点按组内先后）；
- *   2. 站点组的键都没值（或值已失效）⇒ 看公共键 `ui:active-tab:common`；
- *   3. 全都没值 / 值已失效 ⇒ 返回 `null`，调用方回退到第一个标签页。
- *
- * 「站点组优先」的理由：站点自己的标签页是这个站点的主场（bkxk 页面的默认落地页
- * 就该是【本科选课设置】），与「站点标签页排在前面」的偏好一致。
+ * 为什么没有「多键排序」「站点组优先」之类的东西：一次只有**一个**键属于本页面，
+ * 出现多个就说明分键口径又错了 —— 见 `activeTabKey` 的注释。
  *
  * ## 「值已失效」为什么返回 `null` 而不是"就地修好"
  *
@@ -127,19 +143,10 @@ export function resolveActiveTab<T extends TabOrderInput>(
   entries: readonly T[],
   stored: (key: string) => string | null,
 ): string | null {
-  const planned = planTabOrder(entries);
-  const mounted = new Set<string>();
-  const scopes: string[] = [];
-  for (const item of planned) {
-    mounted.add(item.entry.tab.id);
-    if (item.entry.siteId === COMMON_SITE_ID) continue;
-    if (!scopes.includes(item.entry.siteId)) scopes.push(item.entry.siteId);
-  }
-  scopes.push(COMMON_SITE_ID); // 公共组兜底，永远最后一个看
-
-  for (const scope of scopes) {
-    const id = stored(activeTabKey(scope));
-    if (id !== null && mounted.has(id)) return id;
+  const id = stored(activeTabKey(pageScopeOf(entries)));
+  if (id === null) return null;
+  for (const item of planTabOrder(entries)) {
+    if (item.entry.tab.id === id) return id;
   }
   return null;
 }

@@ -49,7 +49,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-03T17:17:05.745Z（构建号 21） */
+/* 构建信息：2026-10-03T17:28:29.123Z（构建号 22） */
 
 "use strict";
 (() => {
@@ -319,22 +319,20 @@
   function orderOf(entry) {
     return entry.tab.order ?? DEFAULT_ORDER;
   }
-  function activeTabKey(siteId) {
-    return `ui:active-tab:${siteId}`;
+  function activeTabKey(scope) {
+    return `ui:active-tab:${scope}`;
+  }
+  function pageScopeOf(entries2) {
+    for (const item of planTabOrder(entries2)) {
+      if (item.entry.siteId !== COMMON_SITE_ID) return item.entry.siteId;
+    }
+    return COMMON_SITE_ID;
   }
   function resolveActiveTab(entries2, stored) {
-    const planned = planTabOrder(entries2);
-    const mounted = /* @__PURE__ */ new Set();
-    const scopes = [];
-    for (const item of planned) {
-      mounted.add(item.entry.tab.id);
-      if (item.entry.siteId === COMMON_SITE_ID) continue;
-      if (!scopes.includes(item.entry.siteId)) scopes.push(item.entry.siteId);
-    }
-    scopes.push(COMMON_SITE_ID);
-    for (const scope of scopes) {
-      const id = stored(activeTabKey(scope));
-      if (id !== null && mounted.has(id)) return id;
+    const id = stored(activeTabKey(pageScopeOf(entries2)));
+    if (id === null) return null;
+    for (const item of planTabOrder(entries2)) {
+      if (item.entry.tab.id === id) return id;
     }
     return null;
   }
@@ -451,6 +449,37 @@
     });
   }
 
+  // src/common/ui/panel-geometry.ts
+  var BALL_SIZE = 44;
+  var VIEWPORT_MARGIN = 8;
+  var DEFAULT_SIZE = { width: 344, height: 430 };
+  var MIN_SIZE = { width: 260, height: 180 };
+  var HEAD_HEIGHT = 37;
+  var COLLAPSE_BTN_INSET = 21;
+  function isPos(v) {
+    return typeof v === "object" && v !== null && typeof v.left === "number" && typeof v.top === "number";
+  }
+  function ballPosFromPanel(panelPos, size) {
+    return {
+      left: panelPos.left + size.width - COLLAPSE_BTN_INSET - BALL_SIZE / 2,
+      top: panelPos.top + HEAD_HEIGHT / 2 - BALL_SIZE / 2
+    };
+  }
+  function panelPosFromBall(ballPos, size) {
+    return {
+      left: ballPos.left + BALL_SIZE / 2 + COLLAPSE_BTN_INSET - size.width,
+      top: ballPos.top + BALL_SIZE / 2 - HEAD_HEIGHT / 2
+    };
+  }
+  function clampToViewport(pos, width, height, viewportWidth, viewportHeight) {
+    const maxLeft = Math.max(VIEWPORT_MARGIN, viewportWidth - width - VIEWPORT_MARGIN);
+    const maxTop = Math.max(VIEWPORT_MARGIN, viewportHeight - height - VIEWPORT_MARGIN);
+    return {
+      left: Math.min(Math.max(pos.left, VIEWPORT_MARGIN), maxLeft),
+      top: Math.min(Math.max(pos.top, VIEWPORT_MARGIN), maxTop)
+    };
+  }
+
   // src/common/ui/widgets/toast.ts
   var DEFAULT_DURATION = 2600;
   var ToastStack = class {
@@ -552,14 +581,7 @@
   var log2 = scoped("ui/panel");
   var SIZE_KEY = "ui:size";
   var COLLAPSED_KEY = "ui:collapsed";
-  var DEFAULT_SIZE = { width: 344, height: 430 };
-  var MIN_SIZE = { width: 260, height: 180 };
-  var BALL_SIZE = 44;
-  var VIEWPORT_MARGIN = 8;
   var PANEL_POS_KEY = "ui:panel-pos";
-  function isPos(v) {
-    return typeof v === "object" && v !== null && typeof v.left === "number" && typeof v.top === "number";
-  }
   function readPos(key) {
     const raw = read(key, null);
     return isPos(raw) ? raw : null;
@@ -570,13 +592,6 @@
       top: 84
     };
   }
-  function ballPosFromPanel(panelPos, size) {
-    const headCenterY = panelPos.top + HEAD_HEIGHT / 2;
-    return {
-      left: panelPos.left + size.width - COLLAPSE_BTN_INSET - BALL_SIZE / 2,
-      top: headCenterY - BALL_SIZE / 2
-    };
-  }
   function readSize() {
     const raw = read(SIZE_KEY, null);
     if (raw === null || typeof raw.width !== "number" || typeof raw.height !== "number") {
@@ -585,15 +600,8 @@
     return raw;
   }
   function clampPosition(pos, width, height) {
-    const maxLeft = Math.max(VIEWPORT_MARGIN, window.innerWidth - width - VIEWPORT_MARGIN);
-    const maxTop = Math.max(VIEWPORT_MARGIN, window.innerHeight - height - VIEWPORT_MARGIN);
-    return {
-      left: clamp(pos.left, VIEWPORT_MARGIN, maxLeft),
-      top: clamp(pos.top, VIEWPORT_MARGIN, maxTop)
-    };
+    return clampToViewport(pos, width, height, window.innerWidth, window.innerHeight);
   }
-  var HEAD_HEIGHT = 37;
-  var COLLAPSE_BTN_INSET = 21;
   function startDrag(ev, onMove, onEnd) {
     ev.preventDefault();
     ev.stopPropagation();
@@ -653,8 +661,8 @@
       collapseBtn
     );
     const tabView = new TabView(shadow, {
-      // 记住「用户上次停留的标签页」需要知道它属于哪个站点。
-      // 这里只把 id 转交给 setTabs 装的闭包（它手上有 id → siteId 映射），
+      // 记住「用户上次停留的标签页」需要知道本页面属于哪个 scope。
+      // 这里只把 id 转交给 setTabs 装的闭包（它手上有 scope），
       // 不在这里直接读 storage —— 落盘时机对顺序很敏感，原因见 setTabs 里的注释。
       onActivate: (tabId) => {
         currentTabId = tabId;
@@ -696,6 +704,9 @@
         if (persist) write(COLLAPSED_KEY, collapsed);
       }
       if (collapsed) {
+        ballPos = ballPosFromPanel(panelPos, size);
+      } else {
+        panelPos = clampPosition(panelPosFromBall(ballPos, size), size.width, size.height);
         ballPos = ballPosFromPanel(panelPos, size);
       }
       applyGeometry();
@@ -786,10 +797,10 @@
       setTabs: (next) => {
         const siteToId = /* @__PURE__ */ new Map();
         for (const entry of next) siteToId.set(entry.tab.id, entry.siteId);
+        const scope = pageScopeOf(next);
         const preferred = currentTabId ?? resolveActiveTab(next, (key) => read(key, null));
         remember = (tabId) => {
           if (!tabView.has(tabId)) return;
-          const scope = siteToId.get(tabId) ?? COMMON_SITE_ID;
           write(activeTabKey(scope), tabId);
         };
         restoring = true;
@@ -1138,7 +1149,7 @@ ${options.desc ?? ""}
   }
   var settingsTab = {
     id: "common:settings",
-    title: "设置",
+    title: "全局设置",
     order: 10,
     mount(root, ctx) {
       renderTab(root, ctx);
@@ -2383,8 +2394,8 @@ ${options.desc ?? ""}
   // src/main.ts
   var log11 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-03T17:17:05.745Z" : null;
-  var BUILD_NO = true ? 21 : null;
+  var BUILD_TIME = true ? "2026-10-03T17:28:29.123Z" : null;
+  var BUILD_NO = true ? 22 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();

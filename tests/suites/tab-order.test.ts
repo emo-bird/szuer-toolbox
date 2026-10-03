@@ -17,6 +17,7 @@ import { describe, it, assert, assertEqual, assertDeepEqual } from '../harness.t
 import {
   planTabOrder,
   activeTabKey,
+  pageScopeOf,
   resolveActiveTab,
   COMMON_SITE_ID,
   DEFAULT_ORDER,
@@ -150,15 +151,30 @@ function bkxkPage(): TabOrderInput[] {
   return [common('settings', 10), site('bkxk', 'bkxk:settings', 200), common('log', 90)];
 }
 
-describe('common/ui/tab-order —— 记忆键与恢复优先级', () => {
-  it('记忆键按站点分键，且共用 storage 的 sztb: 命名空间前缀', () => {
-    // storage.write 会自己加 sztb: 前缀，这里只给不带前缀的键
+/** 一个纯公共页面（UOOC 现状：适配器是空壳、零个站点标签页） */
+function commonOnlyPage(): TabOrderInput[] {
+  return [common('settings', 10), common('log', 90)];
+}
+
+describe('common/ui/tab-order —— 记忆键与恢复', () => {
+  it('记忆键按页面分键，且不带 storage 的 sztb: 前缀（由 storage 自己加）', () => {
     assertEqual(activeTabKey('bkxk'), 'ui:active-tab:bkxk');
     assertEqual(activeTabKey('uooc'), 'ui:active-tab:uooc');
   });
 
-  it('两个站点的键互不相同 —— 这正是「按站点分键」要防的覆写', () => {
-    assert(activeTabKey('bkxk') !== activeTabKey('uooc'), 'bkxk 与 uooc 的记忆必须是两个键');
+  it('两个页面的键互不相同 —— 这正是「按页面分键」要防的互相覆写', () => {
+    assert(activeTabKey('bkxk') !== activeTabKey('uooc'), 'bkxk 页与 uooc 页的记忆必须是两个键');
+  });
+
+  it('页面 scope：有站点标签页就取第一个站点组；纯公共页面取 common', () => {
+    assertEqual(pageScopeOf(bkxkPage()), 'bkxk');
+    assertEqual(pageScopeOf(commonOnlyPage()), COMMON_SITE_ID);
+    assertEqual(pageScopeOf([]), COMMON_SITE_ID, '空标签集也不抛错');
+  });
+
+  it('同页面存在多个站点组时取 planTabOrder 里靠前的那个（确定性，不随注册顺序抖）', () => {
+    const twoSites = [site('uooc', 'uooc:settings', 300), site('bkxk', 'bkxk:settings', 200)];
+    assertEqual(pageScopeOf(twoSites), 'bkxk', 'order=200 的 bkxk 排在 order=300 的 uooc 之前');
   });
 
   it('站点 id 里不含冒号（键结构不会被撑破），也没有空白', () => {
@@ -168,88 +184,66 @@ describe('common/ui/tab-order —— 记忆键与恢复优先级', () => {
     }
   });
 
-  it('站点键命中 ⇒ 恢复那个站点标签页（用户拍板：站点组优先）', () => {
+  it('恢复站点标签页：本页键里存着 bkxk:settings', () => {
     assertEqual(
       resolveActiveTab(bkxkPage(), store({ 'ui:active-tab:bkxk': 'bkxk:settings' })),
       'bkxk:settings',
     );
   });
 
-  it('两个键都有值时仍以站点键为准 —— 这就是「站点组优先」的全部含义', () => {
+  it('恢复公共标签页：本页键里存着 common:log ⇒ 就回到【日志】（用户 m00593 的核心诉求）', () => {
+    // 旧口径（按标签页所属站点分键 + 站点组优先）在这里当场翻车：
+    // 公共标签页的值被写进另一个键，站点组那份旧值每次刷新都把用户抢回去。
     assertEqual(
-      resolveActiveTab(
-        bkxkPage(),
-        store({ 'ui:active-tab:bkxk': 'bkxk:settings', 'ui:active-tab:common': 'common:log' }),
-      ),
-      'bkxk:settings',
-    );
-  });
-
-  it('站点键没值（没存过）⇒ 退到公共键', () => {
-    assertEqual(
-      resolveActiveTab(bkxkPage(), store({ 'ui:active-tab:common': 'common:log' })),
+      resolveActiveTab(bkxkPage(), store({ 'ui:active-tab:bkxk': 'common:log' })),
       'common:log',
+      '在本科选课页面停在【日志】，刷新后必须还在【日志】',
     );
   });
 
-  it('站点键的值已不在当前标签集里（失效）⇒ 退到公共键', () => {
-    assertEqual(
-      resolveActiveTab(
-        bkxkPage(),
-        store({ 'ui:active-tab:bkxk': 'bkxk:tasks', 'ui:active-tab:common': 'common:log' }),
-      ),
-      'common:log',
-      'bkxk:tasks 将来被删掉后，不该因为一条失效记忆就卡在回退值上',
-    );
-  });
-
-  it('两个键都失效 / 都没存过 ⇒ null（调用方回退第一个标签页，且**不写盘**）', () => {
-    assertEqual(resolveActiveTab(bkxkPage(), store({})), null, '从没存过');
-    assertEqual(
-      resolveActiveTab(
-        bkxkPage(),
-        store({ 'ui:active-tab:bkxk': 'bkxk:gone', 'ui:active-tab:common': 'common:gone' }),
-      ),
-      null,
-      '两个键都失效',
-    );
-  });
-
-  it('纯公共页面（UOOC 现状：零个站点标签页）⇒ 只可能读到公共键', () => {
-    const uoocPage = [common('settings', 10), common('log', 90)];
-    assertEqual(
-      resolveActiveTab(uoocPage, store({ 'ui:active-tab:common': 'common:log' })),
-      'common:log',
-    );
-    assertEqual(
-      resolveActiveTab(uoocPage, store({ 'ui:active-tab:uooc': 'uooc:settings' })),
-      null,
-      'uooc 键里的 id 不在本页标签集里，不能采用',
-    );
-  });
-
-  it('查询顺序：先站点键、后公共键（公共键只在站点组全军覆没后才读）', () => {
+  it('一次只读本页面的那一个键（多读就说明分键口径又错了）', () => {
     const seen: string[] = [];
     const spy = (key: string): string | null => {
       seen.push(key);
       return null;
     };
     resolveActiveTab(bkxkPage(), spy);
-    assertDeepEqual(seen, ['ui:active-tab:bkxk', 'ui:active-tab:common']);
+    assertDeepEqual(seen, ['ui:active-tab:bkxk']);
   });
 
-  it('多个站点组时按 planTabOrder 的先后查（bkxk 在 uooc 之前）', () => {
-    const twoSites = [site('uooc', 'uooc:settings', 300), site('bkxk', 'bkxk:settings', 200)];
+  it('别的页面的键不参与本页面 —— 公共键里就算有值也不读', () => {
     assertEqual(
       resolveActiveTab(
-        twoSites,
-        store({ 'ui:active-tab:uooc': 'uooc:settings', 'ui:active-tab:bkxk': 'bkxk:settings' }),
+        bkxkPage(),
+        store({ 'ui:active-tab:bkxk': 'bkxk:settings', 'ui:active-tab:common': 'common:log' }),
       ),
       'bkxk:settings',
+      '两个键都有值时，本页面的键说了算',
     );
   });
 
-  it('空标签集 ⇒ null（不抛错）', () => {
+  it('值已不在本页标签集里（失效）⇒ null，调用方回退第一个标签页且**不写盘**', () => {
+    assertEqual(
+      resolveActiveTab(bkxkPage(), store({ 'ui:active-tab:bkxk': 'bkxk:tasks' })),
+      null,
+      'bkxk:tasks 将来被删掉后，不该因为一条失效记忆就卡在回退值上',
+    );
+  });
+
+  it('纯公共页面（UOOC 现状：零个站点标签页）⇒ 只读公共键', () => {
+    assertEqual(
+      resolveActiveTab(commonOnlyPage(), store({ 'ui:active-tab:common': 'common:log' })),
+      'common:log',
+    );
+    assertEqual(
+      resolveActiveTab(commonOnlyPage(), store({ 'ui:active-tab:uooc': 'uooc:settings' })),
+      null,
+      'uooc 键不属于这个页面，不能采用',
+    );
+  });
+
+  it('没存过 / 空标签集 ⇒ null（不抛错）', () => {
+    assertEqual(resolveActiveTab(bkxkPage(), store({})), null, '从没存过');
     assertEqual(resolveActiveTab([], store({ 'ui:active-tab:common': 'common:settings' })), null);
   });
 });

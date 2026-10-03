@@ -20,19 +20,32 @@
  *   ui:size        { width, height }
  *   ui:collapsed   boolean
  *
- * 例外是「上次停留的标签页」`ui:active-tab:<siteId>` —— 它**按站点分键**：
- * 位置是「我的面板在哪」（跨站共用才合理），标签是「我在这个站点看哪一页」，两者语义不同。
- * bkxk 将来有 5 个专属标签页，共用一个键会让跨站访问互相覆写记忆。
+ * 例外是「上次停留的标签页」`ui:active-tab:<页面>` —— 它**按页面分键**（scope 见
+ * `tab-order.ts` 的 `pageScopeOf`）：位置是「我的面板在哪」（跨站共用才合理），
+ * 标签是「我在这个页面看哪一页」，两者语义不同 —— bkxk 页面停在哪一页
+ * 与 UOOC 页面停在哪一页必须互不干扰。
  *
- * 悬浮球**没有自己的坐标**（v0.13 改）：每次折叠都对齐到标题栏折叠按钮的中心，
- * 那个位置由面板位置 + 尺寸算得，所以「球在哪」不构成第三份状态。
+ * 悬浮球**没有自己的坐标**（v0.13 改）：收起时球对齐到标题栏折叠按钮的中心，
+ * 展开时反过来把面板挪到球那里（用户 m00593）—— 两个方向都走 `panel-geometry.ts`
+ * 里的互逆函数，所以「球在哪」始终不构成第三份状态。
  */
 
 import { el, clamp } from '../utils/dom.ts';
 import { read, write } from '../core/storage.ts';
 import { scoped } from '../core/log.ts';
 import { TabView } from './tabs.ts';
-import { COMMON_SITE_ID, activeTabKey, resolveActiveTab } from './tab-order.ts';
+import { COMMON_SITE_ID, activeTabKey, pageScopeOf, resolveActiveTab } from './tab-order.ts';
+import {
+  BALL_SIZE,
+  DEFAULT_SIZE,
+  MIN_SIZE,
+  VIEWPORT_MARGIN,
+  ballPosFromPanel,
+  clampToViewport,
+  isPos,
+  panelPosFromBall,
+} from './panel-geometry.ts';
+import type { Pos } from './panel-geometry.ts';
 import { ToastStack } from './widgets/toast.ts';
 import { showConfirm } from './widgets/confirm.ts';
 import type { ConfirmOptions, PanelApi, TabContext, TabRegistration } from '../../sites/types.ts';
@@ -62,31 +75,12 @@ export interface PanelHandle extends PanelApi {
 const SIZE_KEY = 'ui:size';
 const COLLAPSED_KEY = 'ui:collapsed';
 
-const DEFAULT_SIZE = { width: 344, height: 430 };
-const MIN_SIZE = { width: 260, height: 180 };
-const BALL_SIZE = 44;
-const VIEWPORT_MARGIN = 8;
-
 /**
  * 面板位置。**球没有自己的键了**（v0.13）：球每次折叠都对齐到关闭键中心，
  * 那个坐标由面板位置 + 尺寸算出来，没有第三份状态可存。
  * 旧安装留下的 `ui:ball-pos` 已停用 —— 不再读取，也不主动删除（留着无害）。
  */
 const PANEL_POS_KEY = 'ui:panel-pos';
-
-interface Pos {
-  left: number;
-  top: number;
-}
-
-function isPos(v: unknown): v is Pos {
-  return (
-    typeof v === 'object' &&
-    v !== null &&
-    typeof (v as Pos).left === 'number' &&
-    typeof (v as Pos).top === 'number'
-  );
-}
 
 function readPos(key: string): Pos | null {
   const raw = read<Pos | null>(key, null);
@@ -100,15 +94,6 @@ function defaultPanelPos(): Pos {
   };
 }
 
-/** 面板右上角折叠按钮的位置 = 球的位置 */
-function ballPosFromPanel(panelPos: Pos, size: { width: number; height: number }): Pos {
-  const headCenterY = panelPos.top + HEAD_HEIGHT / 2;
-  return {
-    left: panelPos.left + size.width - COLLAPSE_BTN_INSET - BALL_SIZE / 2,
-    top: headCenterY - BALL_SIZE / 2,
-  };
-}
-
 function readSize(): { width: number; height: number } {
   const raw = read<{ width: number; height: number } | null>(SIZE_KEY, null);
   if (raw === null || typeof raw.width !== 'number' || typeof raw.height !== 'number') {
@@ -117,20 +102,13 @@ function readSize(): { width: number; height: number } {
   return raw;
 }
 
-/** 把左上角约束在视口内（元素尺寸参与计算） */
+/**
+ * 把元素左上角约束在视口内。
+ * 视口尺寸只有这里能拿到（`window`），几何算法本身在 `panel-geometry.ts`（纯函数、有档 1 测试）。
+ */
 function clampPosition(pos: Pos, width: number, height: number): Pos {
-  const maxLeft = Math.max(VIEWPORT_MARGIN, window.innerWidth - width - VIEWPORT_MARGIN);
-  const maxTop = Math.max(VIEWPORT_MARGIN, window.innerHeight - height - VIEWPORT_MARGIN);
-  return {
-    left: clamp(pos.left, VIEWPORT_MARGIN, maxLeft),
-    top: clamp(pos.top, VIEWPORT_MARGIN, maxTop),
-  };
+  return clampToViewport(pos, width, height, window.innerWidth, window.innerHeight);
 }
-
-/** 标题栏高度（与 style.css 的 .sztb-head 保持一致） */
-const HEAD_HEIGHT = 37;
-/** 折叠按钮中心到面板右边缘的距离（与 .sztb-head padding + 按钮宽度推算） */
-const COLLAPSE_BTN_INSET = 21;
 
 
 /** 指针拖拽的通用封装：pointerdown 之后跟到 pointerup 为止 */
@@ -230,8 +208,8 @@ export function createPanel(
   );
 
   const tabView = new TabView(shadow, {
-    // 记住「用户上次停留的标签页」需要知道它属于哪个站点。
-    // 这里只把 id 转交给 setTabs 装的闭包（它手上有 id → siteId 映射），
+    // 记住「用户上次停留的标签页」需要知道本页面属于哪个 scope。
+    // 这里只把 id 转交给 setTabs 装的闭包（它手上有 scope），
     // 不在这里直接读 storage —— 落盘时机对顺序很敏感，原因见 setTabs 里的注释。
     onActivate: (tabId) => {
       // 内存态的「当前标签页」：重建标签集时（适配器二次注册）用它，
@@ -303,10 +281,18 @@ export function createPanel(
       collapsed = next;
       if (persist) write(COLLAPSED_KEY, collapsed);
     }
-    // 每次折叠都把球对齐到标题栏折叠按钮的**中心**（用户拍板：两者同坐标，
-    // 收起 / 展开看上去是在同一个点上的「缩 / 放」而不是「移动」）。
-    // 展开时不重算：折叠期间用户可能顺手把球拖开，那次拖动只在本次会话内有效。
     if (collapsed) {
+      // 收起：球落到标题栏折叠按钮的**中心**（用户拍板：两者同坐标，
+      // 收起 / 展开看上去是在同一个点上的「缩 / 放」而不是「移动」）。
+      ballPos = ballPosFromPanel(panelPos, size);
+    } else {
+      // 展开（用户 m00593 要求）：把面板挪到**球**的位置 —— 关闭键中心对齐球心，
+      // 于是「球拖到哪，面板就在哪展开」。若这么算出来的面板会越出视口，
+      // 先把它钳回视口内，再让球跟进到钳制后的关闭键处：
+      // 「球与关闭键同坐标」这条不变量任何情况下都成立，代价是球的落点可能被边界拉回。
+      // ⚠️ 这里**不落盘**：球的位置本就是会话内的临时落点（拖动球不记忆），
+      //    落盘会把一次临时拖动升级成永久记忆。
+      panelPos = clampPosition(panelPosFromBall(ballPos, size), size.width, size.height);
       ballPos = ballPosFromPanel(panelPos, size);
     }
     applyGeometry();
@@ -423,16 +409,21 @@ export function createPanel(
       const siteToId = new Map<string, string>();
       for (const entry of next) siteToId.set(entry.tab.id, entry.siteId);
 
-      // 记忆的**读**：只在首次建标签集时发生。站点组键优先、公共键兜底，
-      // 值失效则返回 null（细节见 tab-order.ts）。之后一律用内存里的当前标签页。
+      // 记忆是**按页面分键**的：`ui:active-tab:<scope>`，scope = 本页面的站点
+      // （有适配器就是它的 id，纯公共页面是 'common'）。记的是「我在这个页面上最后
+      // 看的是哪个标签页」—— 站点标签页与公共标签页一视同仁（用户 m00593 要求：
+      // 在本科选课页面停在【日志】，刷新后必须还在【日志】，不能被站点组抢回去）。
+      const scope = pageScopeOf(next);
+
+      // 记忆的**读**：只在首次建标签集时发生。之后一律用内存里的当前标签页 ——
+      // 否则适配器二次注册时会又去读一遍 storage，把用户拽回本页旧值。
       const preferred =
         currentTabId ?? resolveActiveTab(next, (key) => read<string | null>(key, null));
 
       // 记忆的**写**：只在用户真的点了标签页时发生（restoring 闸门在 onActivate 里）。
-      // ⚠️ 必须每次重建都换掉这个闭包：它捕获了本轮的 id → siteId 映射。
+      // ⚠️ 必须每次重建都换掉这个闭包：它捕获了本轮的 scope。
       remember = (tabId) => {
         if (!tabView.has(tabId)) return; // 理论上不会走到：activate 对未知 id 直接返回
-        const scope = siteToId.get(tabId) ?? COMMON_SITE_ID;
         write(activeTabKey(scope), tabId);
       };
 

@@ -174,7 +174,7 @@ export function renderSiteSettings(
   return frag;
 }
 
-/** 该站点有没有任何可渲染的设置（公共设置页用它决定要不要画一行指引） */
+/** 该站点有没有任何可渲染的设置（全局设置页用它决定要不要画一行指引） */
 export function siteHasSettings(siteId: string): boolean {
   return togglesOf(siteId).length > 0 || valuesOf(siteId).length > 0;
 }

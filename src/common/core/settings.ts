@@ -182,7 +182,7 @@ export function valuesOf(siteId: string): ValueDef<unknown>[] {
  * 注册过开关或配置项的站点 id。
  *
  * 先按**开关的注册顺序**（= 适配器注册顺序），再补上「只有配置项、没有开关」的站点。
- * 公共设置页需要这个清单才能遍历站点 —— 它不该去 import sites/registry（依赖方向铁律）。
+ * 全局设置页需要这个清单才能遍历站点 —— 它不该去 import sites/registry（依赖方向铁律）。
  */
 export function registeredSiteIds(): string[] {
   const out: string[] = [];
