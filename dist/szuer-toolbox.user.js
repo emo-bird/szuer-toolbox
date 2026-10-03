@@ -49,7 +49,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-03T17:28:29.123Z（构建号 22） */
+/* 构建信息：2026-10-03T18:21:27.570Z（构建号 23） */
 
 "use strict";
 (() => {
@@ -2322,6 +2322,554 @@ ${options.desc ?? ""}
     return lines;
   }
 
+  // src/sites/bkxk/list-style.ts
+  var LIST_STYLE_ID = "sztb-bkxk-list-style";
+  var LIST_CSS = `
+.sztb-bkxk-block {
+  display: block;
+  margin: 2px 0;
+  padding: 2px 6px;
+  border-left: 2px solid #2a6df4;
+  border-radius: 3px;
+  background: rgba(42, 109, 244, 0.06);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.sztb-bkxk-id {
+  display: block;
+  font-family: ui-monospace, Consolas, "Courier New", monospace;
+  font-size: 11px;
+  color: #1b4fd8;
+  white-space: nowrap;
+  cursor: pointer;
+  /* 一整块可选中：复制失败时用户可以手动拖选，不用一个字符一个字符点 */
+  user-select: all;
+}
+
+.sztb-bkxk-id:hover {
+  text-decoration: underline;
+}
+
+.sztb-bkxk-ops {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.sztb-bkxk-btn {
+  padding: 1px 6px;
+  border: 1px solid #c9d4e6;
+  border-radius: 3px;
+  background: #fff;
+  color: #333;
+  font-size: 11px;
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.sztb-bkxk-btn:hover {
+  border-color: #2a6df4;
+  color: #2a6df4;
+}
+
+/* 已入队 / 已监控 */
+.sztb-bkxk-btn-on {
+  border-color: #2a6df4;
+  background: #2a6df4;
+  color: #fff;
+}
+
+.sztb-bkxk-btn-on:hover {
+  color: #fff;
+}
+
+/* 新加的那一列：占满剩余宽度，最小宽度兜住两个按钮不换行 */
+.sztb-bkxk-col {
+  flex: 1 1 auto;
+  min-width: 150px;
+  box-sizing: border-box;
+}
+
+.sztb-bkxk-head {
+  font-weight: bold;
+}
+
+/* ---- 只在被我们加过列的容器上改布局 ---- */
+
+.cv-body:has(> .cv-row > .sztb-bkxk-col) > .cv-row {
+  display: flex;
+  align-items: center;
+}
+
+.cv-body:has(> .cv-row > .sztb-bkxk-col) > .cv-row > div {
+  float: none;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.cv-head:has(> .sztb-bkxk-col) {
+  display: flex;
+  align-items: center;
+}
+
+.cv-head:has(> .sztb-bkxk-col) > * {
+  float: none;
+  flex: 0 1 auto;
+}
+
+.cv-head:has(> .sztb-bkxk-col) > .sztb-bkxk-col {
+  flex: 1 1 auto;
+}
+`;
+
+  // src/sites/bkxk/list-model.ts
+  var TC_ID_RE = /^\d{15,24}$/;
+  function isTcId(value) {
+    return typeof value === "string" && TC_ID_RE.test(value);
+  }
+  function cleanText(raw) {
+    if (raw === null || raw === void 0) return "";
+    return raw.replace(/\s+/g, " ").replace(/^[·\s]+/, "").trim();
+  }
+  function pickTcId(candidates) {
+    for (const c of candidates) {
+      if (isTcId(c)) return c;
+    }
+    return null;
+  }
+  var BODY_CATEGORY = {
+    programBody: "FANKC",
+    unProgramBody: "FAWKC",
+    recommendBody: "TJKC",
+    publicBody: "XGXK",
+    retakeBody: "CXKC",
+    sportBody: "TYKC",
+    minorBody: "FXKC",
+    moocBody: "MOOC",
+    // 全校课程没有独立类别码，旧仓库按校公选处理（旧仓库自己标了「未实测」）
+    schoolBody: "XGXK"
+  };
+  function categoryOfBodyId(id) {
+    if (id === null || id === void 0) return "";
+    const hit = BODY_CATEGORY[id];
+    return hit === void 0 ? "" : hit;
+  }
+  var TASK_STATUS_PENDING = "pending";
+  function asRecord2(v) {
+    if (v === null || typeof v !== "object" || Array.isArray(v)) return null;
+    return v;
+  }
+  function str(v) {
+    if (typeof v === "string") return v;
+    if (typeof v === "number" && Number.isFinite(v)) return String(v);
+    return "";
+  }
+  function num(v, fallback) {
+    return typeof v === "number" && Number.isFinite(v) ? v : fallback;
+  }
+  function bool(v, fallback) {
+    return typeof v === "boolean" ? v : fallback;
+  }
+  function readTaskStore(raw) {
+    const rec = asRecord2(raw);
+    const rawItems = rec === null ? null : rec["items"];
+    if (!Array.isArray(rawItems)) return { seq: 0, items: [] };
+    const items2 = [];
+    for (const it of rawItems) {
+      const o = asRecord2(it);
+      if (o === null) continue;
+      const teachingClassID = str(o["teachingClassID"]);
+      if (teachingClassID === "") continue;
+      items2.push({
+        id: str(o["id"]),
+        seq: num(o["seq"], 0),
+        teachingClassID,
+        courseName: str(o["courseName"]),
+        teacherName: str(o["teacherName"]),
+        category: str(o["category"]),
+        priority: num(o["priority"], 0),
+        enabled: bool(o["enabled"], true),
+        status: str(o["status"]) === "" ? TASK_STATUS_PENDING : str(o["status"]),
+        retryMode: str(o["retryMode"]),
+        attempts: num(o["attempts"], 0),
+        lastMsg: str(o["lastMsg"]),
+        lastKind: str(o["lastKind"]),
+        addedAt: num(o["addedAt"], 0)
+      });
+    }
+    return { seq: num(rec?.["seq"], items2.length), items: items2 };
+  }
+  function readMonitorStore(raw) {
+    const rec = asRecord2(raw);
+    const rawItems = rec === null ? null : rec["items"];
+    if (!Array.isArray(rawItems)) return { items: [], hitCount: 0 };
+    const items2 = [];
+    for (const it of rawItems) {
+      const o = asRecord2(it);
+      if (o === null) continue;
+      const teachingClassID = str(o["teachingClassID"]);
+      if (teachingClassID === "") continue;
+      items2.push({
+        teachingClassID,
+        courseName: str(o["courseName"]),
+        teacherName: str(o["teacherName"]),
+        teachingPlace: str(o["teachingPlace"]),
+        category: str(o["category"]),
+        remain: typeof o["remain"] === "number" && Number.isFinite(o["remain"]) ? o["remain"] : null,
+        checkedAt: typeof o["checkedAt"] === "number" && Number.isFinite(o["checkedAt"]) ? o["checkedAt"] : null,
+        hits: num(o["hits"], 0),
+        lastMsg: str(o["lastMsg"])
+      });
+    }
+    return { items: items2, hitCount: num(rec?.["hitCount"], 0) };
+  }
+  function hasTask(store, tcId) {
+    return store.items.some((t) => t.teachingClassID === tcId);
+  }
+  function hasMonitor(store, tcId) {
+    return store.items.some((m) => m.teachingClassID === tcId);
+  }
+  function addTask(store, input) {
+    if (hasTask(store, input.tcId)) return { store, added: false };
+    const seq3 = store.seq + 1;
+    const item = {
+      id: `t${seq3}`,
+      seq: seq3,
+      teachingClassID: input.tcId,
+      courseName: cleanText(input.courseName),
+      teacherName: cleanText(input.teacherName),
+      category: input.category,
+      priority: 0,
+      enabled: true,
+      status: TASK_STATUS_PENDING,
+      retryMode: input.retryMode,
+      attempts: 0,
+      lastMsg: "",
+      lastKind: "",
+      addedAt: input.now
+    };
+    return { store: { seq: seq3, items: [...store.items, item] }, added: true };
+  }
+  function addMonitor(store, input) {
+    if (hasMonitor(store, input.tcId)) return { store, added: false };
+    const item = {
+      teachingClassID: input.tcId,
+      courseName: cleanText(input.courseName),
+      teacherName: cleanText(input.teacherName),
+      teachingPlace: cleanText(input.teachingPlace),
+      category: input.category,
+      remain: null,
+      checkedAt: null,
+      hits: 0,
+      lastMsg: ""
+    };
+    return { store: { ...store, items: [...store.items, item] }, added: true };
+  }
+  function removeMonitor(store, tcId) {
+    const items2 = store.items.filter((m) => m.teachingClassID !== tcId);
+    if (items2.length === store.items.length) return { store, removed: false };
+    return { store: { ...store, items: items2 }, removed: true };
+  }
+  function grabButtonLabel(on) {
+    return on ? "已加抢课" : "添加抢课";
+  }
+  function monitorButtonLabel(on) {
+    return on ? "移除监控" : "添加监控";
+  }
+  function teacherFromTitle(raw) {
+    if (raw === null || raw === void 0) return "";
+    return cleanText(raw.replace(/^\s*\[\d+\]\s*/, ""));
+  }
+  function idLineText(tcId) {
+    return `教学班ID ${tcId}`;
+  }
+  function placeFromTimeText(raw) {
+    const first = cleanText(raw).split(",")[0] ?? "";
+    const tokens = first.split(" ").filter((t) => t !== "");
+    const last = tokens[tokens.length - 1];
+    if (last === void 0) return "";
+    if (last.endsWith("节") || last.endsWith("周")) return "";
+    return last;
+  }
+
+  // src/sites/bkxk/list.ts
+  var log10 = scoped("site/bkxk/list");
+  var LIST_PAGE_MARK = "grablessons.do";
+  var RESCAN_DELAY_MS = 120;
+  var MAX_BLOCKS_PER_SCAN = 400;
+  var HEAD_TEXT = "抢课模块";
+  var CARD_SELECTOR = ".cv-course-card";
+  var INFO_SELECTOR = ".cv-info";
+  var ROW_SELECTOR = ".cv-row";
+  var BODY_SELECTOR = ".cv-body";
+  var SETTING_COL_SELECTOR = ".cv-setting-col";
+  var CAPTION_RED_SELECTOR = ".cv-caption-red";
+  var TITLE_CELL_SELECTOR = ".cv-title-col, .cv-course";
+  function swallow(ev) {
+    ev.preventDefault();
+    ev.stopPropagation();
+  }
+  function textOf(node) {
+    return cleanText(node === null ? "" : node.textContent);
+  }
+  function ownDescendant(unit, selector) {
+    for (const node of unit.querySelectorAll(selector)) {
+      if (node.closest(INFO_SELECTOR) === unit) return node;
+    }
+    return null;
+  }
+  function ownsBlock(unit) {
+    return ownDescendant(unit, ".sztb-bkxk-block") !== null;
+  }
+  function attr(node, name) {
+    const v = node.getAttribute(name);
+    return v === null ? "" : v.trim();
+  }
+  function tcIdIn(unit) {
+    const candidates = [];
+    for (const node of unit.querySelectorAll("[tcid]")) {
+      if (node.closest(INFO_SELECTOR) !== unit) continue;
+      candidates.push(attr(node, "tcid"));
+    }
+    return pickTcId(candidates);
+  }
+  function tcIdsIn(node) {
+    const out = [];
+    for (const node2 of node.querySelectorAll("[tcid]")) {
+      const id = attr(node2, "tcid");
+      if (!isTcId(id)) continue;
+      if (!out.includes(id)) out.push(id);
+    }
+    return out;
+  }
+  function categoryFor(node) {
+    let cur = node;
+    for (let i = 0; i < 10 && cur !== null; i++) {
+      if (cur.classList.contains("cv-body")) return categoryOfBodyId(cur.id);
+      cur = cur.parentElement;
+    }
+    return "";
+  }
+  function courseNameOf(row3) {
+    if (row3 === null) return "";
+    return textOf(row3.querySelector(TITLE_CELL_SELECTOR));
+  }
+  function placeOfUnit(unit) {
+    const timeEl = ownDescendant(unit, "div[title]");
+    return placeFromTimeText(timeEl === null ? "" : timeEl.getAttribute("title"));
+  }
+  function infoForUnit(unit, tcId) {
+    const titleEl = ownDescendant(unit, ".cv-info-title");
+    const rawTitle = titleEl === null ? "" : titleEl.getAttribute("title") ?? titleEl.textContent;
+    const row3 = unit.closest(".cv-row");
+    return {
+      tcId,
+      courseName: courseNameOf(row3),
+      teacherName: teacherFromTitle(rawTitle),
+      category: categoryFor(unit),
+      teachingPlace: placeOfUnit(unit)
+    };
+  }
+  function infoForRow(row3, tcId) {
+    return {
+      tcId,
+      courseName: courseNameOf(row3),
+      teacherName: textOf(row3.querySelector(".cv-teacher-col")),
+      category: categoryFor(row3),
+      teachingPlace: textOf(row3.querySelector(".cv-time-col"))
+    };
+  }
+  function targetText(info) {
+    const parts = [info.courseName, info.teacherName].filter((s) => s !== "");
+    const label = parts.length === 0 ? info.tcId : parts.join(" / ");
+    return info.category === "" ? `${label}（类别未识别）` : label;
+  }
+  async function copyId(tcId, panel) {
+    try {
+      if (navigator.clipboard === void 0) throw new Error("当前环境没有 navigator.clipboard");
+      await navigator.clipboard.writeText(tcId);
+      log10.info(`已复制教学班ID ${tcId} 到剪贴板`);
+      panel.toast("已复制教学班ID", "success");
+    } catch (err) {
+      log10.warn(`复制教学班ID 失败：${String(err)}（可手动选中那一行复制）`);
+      panel.toast("复制失败，请手动选中复制", "warn");
+    }
+  }
+  function onGrab(info, ctx, btn) {
+    if (hasTask(ctx.tasks, info.tcId)) {
+      ctx.panel.toast("这个教学班已经在抢课队列里了（不重复添加）", "info");
+      return;
+    }
+    const res = addTask(ctx.tasks, {
+      ...info,
+      now: Date.now(),
+      retryMode: getValue(SITE_ID, VALUE.RETRY_MODE)
+    });
+    if (!res.added) return;
+    ctx.tasks = res.store;
+    write(BKXK_STORE_KEY.TASKS, ctx.tasks);
+    btn.textContent = grabButtonLabel(true);
+    btn.classList.add("sztb-bkxk-btn-on");
+    log10.info(`已加入抢课队列：${targetText(info)}（本轮只入队，不会发送任何请求）`);
+    ctx.panel.toast(`已加入抢课队列：${info.courseName === "" ? info.tcId : info.courseName}`, "success");
+  }
+  function onMonitorToggle(info, ctx, btn) {
+    const wasOn = hasMonitor(ctx.monitor, info.tcId);
+    if (wasOn) {
+      ctx.monitor = removeMonitor(ctx.monitor, info.tcId).store;
+      log10.info(`已移出监控列表：${targetText(info)}`);
+      ctx.panel.toast("已移出监控", "info");
+    } else {
+      ctx.monitor = addMonitor(ctx.monitor, { ...info, now: Date.now() }).store;
+      log10.info(`已加入监控列表：${targetText(info)}（本轮只入队，不会轮询）`);
+      ctx.panel.toast("已加入监控", "success");
+    }
+    write(BKXK_STORE_KEY.MONITOR, ctx.monitor);
+    btn.textContent = monitorButtonLabel(!wasOn);
+    btn.classList.toggle("sztb-bkxk-btn-on", !wasOn);
+  }
+  function buildBlock(info, ctx) {
+    const idLine = el("div", {
+      class: "sztb-bkxk-id",
+      text: idLineText(info.tcId),
+      attrs: { title: `点击复制：${info.tcId}` },
+      on: {
+        click: (ev) => {
+          swallow(ev);
+          void copyId(info.tcId, ctx.panel);
+        }
+      }
+    });
+    const queued = hasTask(ctx.tasks, info.tcId);
+    const grab = el("button", {
+      class: `sztb-bkxk-btn${queued ? " sztb-bkxk-btn-on" : ""}`,
+      text: grabButtonLabel(queued),
+      attrs: { type: "button" },
+      on: {
+        click: (ev) => {
+          swallow(ev);
+          onGrab(info, ctx, grab);
+        }
+      }
+    });
+    const monitored = hasMonitor(ctx.monitor, info.tcId);
+    const mon = el("button", {
+      class: `sztb-bkxk-btn${monitored ? " sztb-bkxk-btn-on" : ""}`,
+      text: monitorButtonLabel(monitored),
+      attrs: { type: "button" },
+      on: {
+        click: (ev) => {
+          swallow(ev);
+          onMonitorToggle(info, ctx, mon);
+        }
+      }
+    });
+    const block = el("div", {
+      class: "sztb-bkxk-block",
+      attrs: { "data-sztb-tcid": info.tcId }
+    }, idLine, el("div", { class: "sztb-bkxk-ops" }, grab, mon));
+    block.addEventListener("click", swallow);
+    return block;
+  }
+  function injectStyle() {
+    if (document.getElementById(LIST_STYLE_ID) !== null) return;
+    const style = el("style", { attrs: { id: LIST_STYLE_ID } });
+    style.textContent = LIST_CSS;
+    (document.head ?? document.documentElement).appendChild(style);
+  }
+  function enhanceUnit(unit, ctx) {
+    if (ctx.budget >= MAX_BLOCKS_PER_SCAN) return;
+    if (ownsBlock(unit)) return;
+    const tcId = tcIdIn(unit);
+    if (tcId === null) {
+      log10.debug("卡片 .cv-info 未取到教学班 id，跳过（站点结构可能已变）");
+      return;
+    }
+    const info = infoForUnit(unit, tcId);
+    const block = buildBlock(info, ctx);
+    const anchor = ownDescendant(unit, CAPTION_RED_SELECTOR);
+    if (anchor !== null) anchor.insertAdjacentElement("afterend", block);
+    else unit.appendChild(block);
+    ctx.budget += 1;
+  }
+  function enhanceRow(row3, ctx) {
+    if (ctx.budget >= MAX_BLOCKS_PER_SCAN) return;
+    if (row3.querySelector(CARD_SELECTOR) !== null) return;
+    if (row3.querySelector(`:scope > .sztb-bkxk-col`) !== null) return;
+    const cell = row3.querySelector(SETTING_COL_SELECTOR);
+    if (cell === null) return;
+    const ids = tcIdsIn(cell);
+    if (ids.length === 0) {
+      log10.debug("列表行未取到教学班 id，跳过（站点结构可能已变）");
+      return;
+    }
+    const col = el("div", { class: "sztb-bkxk-col" });
+    for (const tcId of ids) {
+      col.appendChild(buildBlock(infoForRow(row3, tcId), ctx));
+      ctx.budget += 1;
+    }
+    row3.appendChild(col);
+  }
+  function syncHeads() {
+    for (const body of document.querySelectorAll(BODY_SELECTOR)) {
+      if (body.querySelector(`:scope > ${ROW_SELECTOR} > .sztb-bkxk-col`) === null) continue;
+      const head = body.parentElement?.querySelector(":scope > .cv-head") ?? null;
+      if (head === null) continue;
+      if (head.querySelector(":scope > .sztb-bkxk-col") !== null) continue;
+      head.appendChild(el("div", { class: "sztb-bkxk-col sztb-bkxk-head", text: HEAD_TEXT }));
+    }
+  }
+  function scan(ctx) {
+    ctx.budget = 0;
+    for (const unit of document.querySelectorAll(`${CARD_SELECTOR} ${INFO_SELECTOR}`)) {
+      enhanceUnit(unit, ctx);
+    }
+    for (const row3 of document.querySelectorAll(`${BODY_SELECTOR} > ${ROW_SELECTOR}`)) {
+      enhanceRow(row3, ctx);
+    }
+    syncHeads();
+  }
+  function startListInjection(panel) {
+    if (!location.pathname.includes(LIST_PAGE_MARK)) {
+      log10.debug(`当前不是选课页（${location.pathname}），跳过列表注入`);
+      return () => void 0;
+    }
+    const ctx = {
+      panel,
+      tasks: readTaskStore(read(BKXK_STORE_KEY.TASKS, null)),
+      monitor: readMonitorStore(read(BKXK_STORE_KEY.MONITOR, null)),
+      budget: 0
+    };
+    let observer = null;
+    let timer2 = null;
+    const schedule2 = () => {
+      if (timer2 !== null) return;
+      timer2 = window.setTimeout(() => {
+        timer2 = null;
+        scan(ctx);
+      }, RESCAN_DELAY_MS);
+    };
+    whenDomReady(() => {
+      injectStyle();
+      scan(ctx);
+      observer = new MutationObserver(schedule2);
+      observer.observe(document.body, { childList: true, subtree: true });
+      log10.info(
+        `选课列表注入已就绪：抢课队列 ${String(ctx.tasks.items.length)} 条 / 监控 ${String(ctx.monitor.items.length)} 条（本轮点击只入队，不发请求）`
+      );
+    });
+    return () => {
+      observer?.disconnect();
+      observer = null;
+      if (timer2 !== null) {
+        window.clearTimeout(timer2);
+        timer2 = null;
+      }
+    };
+  }
+
   // src/sites/bkxk/tabs/settings.ts
   var BKXK_SETTINGS_TAB_ID = settingsTabId("bkxk");
   var BKXK_SETTINGS_TAB = {
@@ -2340,7 +2888,7 @@ ${options.desc ?? ""}
   };
 
   // src/sites/bkxk/index.ts
-  var log10 = scoped("site/bkxk");
+  var log11 = scoped("site/bkxk");
   var HOSTS2 = ["bkxk.szu.edu.cn"];
   var PAGES2 = ["*default/grablessons.do*", "*default/curriculum.do*"];
   var bkxkAdapter = {
@@ -2361,9 +2909,9 @@ ${options.desc ?? ""}
       const lines = runMigration();
       registerBkxkSettings();
       if (lines.length > 0) {
-        log10.info(`已从旧版迁移 ${lines.length} 条内容，详情见日志页`);
+        log11.info(`已从旧版迁移 ${lines.length} 条内容，详情见日志页`);
       } else {
-        log10.debug(`无旧数据需要迁移（earlyInit @ ${ctx.url.pathname}）`);
+        log11.debug(`无旧数据需要迁移（earlyInit @ ${ctx.url.pathname}）`);
       }
     },
     /** 挂载期：DOM 已就绪，可以安全地把配置推给运行时并报登录态。 */
@@ -2371,11 +2919,12 @@ ${options.desc ?? ""}
       applyBkxkSettings();
       const session = readSession();
       if (!session.loggedIn) {
-        log10.warn("未读到有效登录态：学号或 token 缺失，功能接口会失败。请先在站内完成登录。");
+        log11.warn("未读到有效登录态：学号或 token 缺失，功能接口会失败。请先在站内完成登录。");
       } else {
-        log10.info(`站点已就绪：${sessionSummary(session)}`);
+        log11.info(`站点已就绪：${sessionSummary(session)}`);
       }
-      log10.info(`功能页=${String(ctx.isFeaturePage)}（设置标签页已就绪，其余标签页在批 4 接入）`);
+      log11.info(`功能页=${String(ctx.isFeaturePage)}（设置标签页已就绪，其余标签页在批 4 接入）`);
+      startListInjection(ctx.panel);
     }
   };
 
@@ -2392,10 +2941,10 @@ ${options.desc ?? ""}
   }
 
   // src/main.ts
-  var log11 = scoped("main");
+  var log12 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-03T17:28:29.123Z" : null;
-  var BUILD_NO = true ? 22 : null;
+  var BUILD_TIME = true ? "2026-10-03T18:21:27.570Z" : null;
+  var BUILD_NO = true ? 23 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();
@@ -2435,7 +2984,7 @@ ${options.desc ?? ""}
       version: VERSION
     }));
     booted = { panel, adapterId: res.adapter?.id ?? null };
-    log11.info(
+    log12.info(
       `深大人工具箱 ${VERSION_LABEL} 已装载（host=${url.hostname}，分派=${res.reason}，站点=${res.adapter?.id ?? "无"}，功能页=${res.autoExpand ? "是" : "否"}）`
     );
     res.adapter?.init?.({
@@ -2455,10 +3004,10 @@ ${options.desc ?? ""}
         return;
       }
       if (!res.inject) {
-        log11.debug(`站内跳转后不再属于支持范围，保持现有悬浮窗`);
+        log12.debug(`站内跳转后不再属于支持范围，保持现有悬浮窗`);
         return;
       }
-      log11.info(`站内跳转导致重新分派：${bootedFor} → ${location.href}`);
+      log12.info(`站内跳转导致重新分派：${bootedFor} → ${location.href}`);
       bootedFor = location.href;
       boot(url, res);
     };
@@ -2485,9 +3034,9 @@ ${options.desc ?? ""}
     if (res.adapter?.earlyInit !== void 0) {
       try {
         res.adapter.earlyInit({ adapter: res.adapter, url });
-        log11.debug(`已执行启动期钩子：${res.adapter.id}`);
+        log12.debug(`已执行启动期钩子：${res.adapter.id}`);
       } catch (err) {
-        log11.error(`启动期钩子执行失败：${res.adapter.id}`, err);
+        log12.error(`启动期钩子执行失败：${res.adapter.id}`, err);
       }
     }
     whenDomReady(() => {

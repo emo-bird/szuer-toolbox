@@ -23,5 +23,6 @@ import './suites/bkxk-api.test.ts';
 import './suites/bkxk-session.test.ts';
 import './suites/bkxk-migrate.test.ts';
 import './suites/bkxk-settings.test.ts';
+import './suites/bkxk-list.test.ts';
 
 await run();
