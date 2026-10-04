@@ -6,8 +6,9 @@
  * ⇒ 它不属于 bkxk，键也不带站点前缀（`custom:courses`，storage 层再加 `sztb:`）。
  * bkxk 的冲突追加 / 课表注入要用它，将来 ehall 的「我的课程表」也要读它。
  *
- * 【本模块只做「存 + 清洗 + 读」】增删改与界面是批 4（阶段 4 的「自定义」标签页）的事。
- * 现在做数据层是因为批 3 的 `hijack` / `timetable` 没有它就没东西可注入。
+ * 【本模块做「存 + 清洗 + 读写」】增删改的**界面**在 `sites/bkxk/tabs/custom.ts`
+ * （原定批 4，用户提前到本轮做，理由是批 3 的 `hijack` / `timetable` 没数据可验）。
+ * 但写入规则留在本模块：`custom:courses` 是跨站点通用数据，将来 ehall 也要加课。
  *
  * 【为什么不存 `segs`】与旧仓库 `custom.js:85-94` 同款理由：**不存派生数据**。
  * 只落 `place` 原文，时段一律现场解析 —— 解析口径变了（例如 `time.ts` 修了正则）
@@ -15,7 +16,7 @@
  * 见 `sites/bkxk/custom.ts`。
  */
 
-import { read } from '../core/storage.ts';
+import { read, write } from '../core/storage.ts';
 
 /** 存储键（`storage` 层会自动补 `sztb:` 前缀 ⇒ 实际全名 `sztb:custom:courses`） */
 export const CUSTOM_COURSES_KEY = 'custom:courses';
@@ -118,4 +119,93 @@ export function readCustomCourses(): readonly CustomCourse[] {
 /** 从库里挑出启用中的课程（`hijack` / `timetable` 只用这些） */
 export function enabledCourses(courses: readonly CustomCourse[]): readonly CustomCourse[] {
   return courses.filter((c) => c.enabled);
+}
+
+// ------------------------------------------------------------------ 写入层
+//
+// 【设计口径】这里是**纯变换 + 一个写盘出口**，不碰 DOM、不弹提示：
+//   - 纯变换（`makeCourseId` / `appendCourse` / `updateCourse` / `removeCourse` /
+//     `setCourseEnabled`）一律**返回新数组、不改入参**，方便档 1 测与界面回滚；
+//   - 唯一的 IO 是 `writeCustomCourses`，界面每次改完调它一次。
+// 为什么不把 CRUD 写进界面文件：`custom:courses` 是**跨站点通用数据**，
+// 将来 ehall 的「我的课程表」也要能加课 —— 写入规则不能长在 bkxk 的标签页里。
+
+/** 新建 / 修改一门课程时的用户输入（`id` 与 `color` 由数据层补，不让界面编） */
+export interface CustomCourseDraft {
+  readonly name: string;
+  readonly teacher: string;
+  readonly place: string;
+}
+
+/**
+ * 生成一个课程 id。
+ *
+ * 形态沿用旧仓库 `custom.js` 的 `'c' + Date.now() + 三位随机`，但用 `-` 隔开两段，
+ * 免得「时间戳尾数 + 随机数」粘成一个看不出边界的数字串。
+ * `now` / `rand` **可注入**：档 1 才能钉住生成结果（不用假计时器）。
+ */
+export function makeCourseId(now: number, rand: number): string {
+  const ms = Number.isFinite(now) ? Math.floor(now) : 0;
+  const r = Number.isFinite(rand) ? Math.floor(Math.abs(rand) * 1000) % 1000 : 0;
+  return `c${String(ms)}-${String(r).padStart(3, '0')}`;
+}
+
+/**
+ * 追加一门课程：配色按**当前门数**轮转（删掉中间某门不会重排已有配色），
+ * `name` / `place` 去首尾空白，`enabled` 默认开。
+ */
+export function appendCourse(
+  courses: readonly CustomCourse[],
+  draft: CustomCourseDraft,
+  id: string,
+): readonly CustomCourse[] {
+  const created: CustomCourse = {
+    id,
+    name: draft.name.trim(),
+    teacher: draft.teacher.trim(),
+    place: draft.place.trim(),
+    color: colorAt(courses.length),
+    enabled: true,
+  };
+  return [...courses, created];
+}
+
+/**
+ * 改一门课程（`id` 与 `color` 保持不变，`enabled` 也不动 —— 改文字不该顺手把它打开）。
+ * `id` 不在库里时原样返回（不新插入，避免界面拿着过期 id 造出重复条目）。
+ */
+export function updateCourse(
+  courses: readonly CustomCourse[],
+  id: string,
+  patch: CustomCourseDraft,
+): readonly CustomCourse[] {
+  return courses.map((c) =>
+    c.id === id
+      ? {
+          ...c,
+          name: patch.name.trim(),
+          teacher: patch.teacher.trim(),
+          place: patch.place.trim(),
+        }
+      : c,
+  );
+}
+
+/** 删一门课程（`id` 不在库里时原样返回） */
+export function removeCourse(courses: readonly CustomCourse[], id: string): readonly CustomCourse[] {
+  return courses.filter((c) => c.id !== id);
+}
+
+/** 开关一门课程（关掉的仍留在列表里，只是不参与冲突计算与课表注入） */
+export function setCourseEnabled(
+  courses: readonly CustomCourse[],
+  id: string,
+  enabled: boolean,
+): readonly CustomCourse[] {
+  return courses.map((c) => (c.id === id ? { ...c, enabled } : c));
+}
+
+/** 唯一的写盘出口（界面每次改完调它一次；`[]` 会真的写空数组，不是删除键） */
+export function writeCustomCourses(courses: readonly CustomCourse[]): void {
+  write(CUSTOM_COURSES_KEY, courses);
 }

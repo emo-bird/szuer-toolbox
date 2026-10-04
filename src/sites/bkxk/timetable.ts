@@ -174,13 +174,17 @@ export function clearInjected(table: HTMLElement | null): number {
 // ------------------------------------------------------------ 渲染与扫描
 
 /**
- * 渲染一轮。返回注入的节次数。
- *
  * `writing` 闸门：我们自己的 appendChild 也会触发 MutationObserver，若不设防就会
  * 「注入 → 触发回调 → 清掉再注入」无限循环。写 DOM 期间置位，回调看到它就跳过。
+ *
+ * 放在模块级（而不是 `startTimetableInjection` 的局部）是因为【自定义课程】标签页
+ * 增删改之后要立刻重画一次 —— 那时站点 DOM 没有任何变化，观察器不会触发，
+ * 只能由 `refreshTimetable()` 主动调，两边必须共用同一个闸门对象。
  */
-export function render(table: HTMLElement, writing: { busy: boolean }): number {
-  writing.busy = true;
+const writing = { busy: false };
+
+export function render(table: HTMLElement, gate: { busy: boolean }): number {
+  gate.busy = true;
   try {
     clearInjected(table);
     const cards = readExistingCards(readRawCards(table));
@@ -195,20 +199,38 @@ export function render(table: HTMLElement, writing: { busy: boolean }): number {
     log.info(`课表注入自定义课程段 ${String(count)} 个（已选课程 ${String(cards.length)} 门）`);
     return count;
   } finally {
-    writing.busy = false;
+    gate.busy = false;
   }
 }
 
-function scan(writing: { busy: boolean }): void {
+/**
+ * 扫一遍并按需重画；返回注入的节次数。
+ *
+ * 开关关着时**顺手清掉**已注入的节点（用户拨开关不用刷新页面）。
+ */
+function scan(gate: { busy: boolean }): number {
   const table = findTable();
-  if (table === null) return;
+  if (table === null) return 0;
   if (!isEnabled(SITE_ID, TOGGLE.TIMETABLE_SELF_DRAW)) {
     const n = clearInjected(table);
     if (n > 0) log.info(`自绘课表开关已关闭：移除 ${String(n)} 个注入节点`);
-    return;
+    return 0;
   }
   injectStyle();
-  render(table, writing);
+  return render(table, gate);
+}
+
+/**
+ * 让外部（【自定义课程】标签页）在改完课程后**立即**重画一次。
+ *
+ * 为什么必须主动调：增删课程只改 storage，站点 DOM 一个字节都没动 ⇒
+ * MutationObserver 不会触发，用户在课表页会以为「加了课却没出现」。
+ * 旧仓库 `ui.js:485,508,523,534` 每处改完都调一次 `NS.timetable.render()`，同一原因。
+ *
+ * 不在课表页（找不到表）时返回 0，静默无事 —— 调用方不必自己判页面。
+ */
+export function refreshTimetable(): number {
+  return scan(writing);
 }
 
 /**
@@ -223,7 +245,6 @@ export function startTimetableInjection(): () => void {
     return () => undefined;
   }
 
-  const writing = { busy: false };
   let observer: MutationObserver | null = null;
   let timer: number | null = null;
   let retry: number | null = null;

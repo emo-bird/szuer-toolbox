@@ -49,7 +49,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-04T08:54:23.318Z（构建号 35） */
+/* 构建信息：2026-10-04T09:21:23.184Z（构建号 36） */
 
 "use strict";
 (() => {
@@ -2222,6 +2222,20 @@ ${options.desc ?? ""}
   // src/common/custom/courses.ts
   var CUSTOM_COURSES_KEY = "custom:courses";
   var LEGACY_SITE_CUSTOM_KEY = "bkxk:customCourses";
+  var CUSTOM_COLORS = [
+    "#e8f2fd",
+    "#fdf0e8",
+    "#e8fdf0",
+    "#f2e8fd",
+    "#fdfde8",
+    "#fde8f0"
+  ];
+  function colorAt(index) {
+    const n = CUSTOM_COLORS.length;
+    const i = Number.isFinite(index) ? Math.floor(index) : 0;
+    const picked = CUSTOM_COLORS[(i % n + n) % n];
+    return picked === void 0 ? "#e8f2fd" : picked;
+  }
   function asRecord(v) {
     if (v === null || typeof v !== "object" || Array.isArray(v)) return null;
     return v;
@@ -2260,6 +2274,41 @@ ${options.desc ?? ""}
   }
   function enabledCourses(courses) {
     return courses.filter((c) => c.enabled);
+  }
+  function makeCourseId(now, rand) {
+    const ms = Number.isFinite(now) ? Math.floor(now) : 0;
+    const r = Number.isFinite(rand) ? Math.floor(Math.abs(rand) * 1e3) % 1e3 : 0;
+    return `c${String(ms)}-${String(r).padStart(3, "0")}`;
+  }
+  function appendCourse(courses, draft, id) {
+    const created = {
+      id,
+      name: draft.name.trim(),
+      teacher: draft.teacher.trim(),
+      place: draft.place.trim(),
+      color: colorAt(courses.length),
+      enabled: true
+    };
+    return [...courses, created];
+  }
+  function updateCourse(courses, id, patch) {
+    return courses.map(
+      (c) => c.id === id ? {
+        ...c,
+        name: patch.name.trim(),
+        teacher: patch.teacher.trim(),
+        place: patch.place.trim()
+      } : c
+    );
+  }
+  function removeCourse(courses, id) {
+    return courses.filter((c) => c.id !== id);
+  }
+  function setCourseEnabled(courses, id, enabled) {
+    return courses.map((c) => c.id === id ? { ...c, enabled } : c);
+  }
+  function writeCustomCourses(courses) {
+    write(CUSTOM_COURSES_KEY, courses);
   }
 
   // src/sites/bkxk/legacy.ts
@@ -2577,6 +2626,18 @@ ${options.desc ?? ""}
     const body = seg.weekFrom === seg.weekTo ? `${seg.weekFrom}周` : `${seg.weekFrom}-${seg.weekTo}周`;
     return seg.parity === null ? body : `${body}(${seg.parity})`;
   }
+  function sectionText(seg) {
+    return seg.sectionFrom === seg.sectionTo ? `${seg.sectionFrom}节` : `${seg.sectionFrom}-${seg.sectionTo}节`;
+  }
+  function segToPlaceText(seg) {
+    const parts = [weekText(seg)];
+    const dayText = seg.day === null ? "" : CN_WEEKDAY[seg.day] ?? "";
+    if (dayText !== "") parts.push(dayText);
+    parts.push(sectionText(seg));
+    const place = seg.place.trim();
+    if (place !== "") parts.push(place);
+    return parts.join(" ");
+  }
   function maxBitmapLength(bitmaps) {
     let n = 0;
     for (const b of bitmaps) if (b.length > n) n = b.length;
@@ -2588,7 +2649,22 @@ ${options.desc ?? ""}
     return courses.map((c) => ({ ...c, segs: parsePlace(c.place) }));
   }
   function readEnabledCustomCourses() {
+    if (!isEnabled(SITE_ID, TOGGLE.CUSTOM_COURSES)) return [];
     return withSegments(enabledCourses(readCustomCourses()));
+  }
+  function countSelfConflicts(courses) {
+    const live = enabledCourses(courses);
+    let n = 0;
+    for (let i = 0; i < live.length; i += 1) {
+      const a = live[i];
+      if (a === void 0) continue;
+      for (let j = i + 1; j < live.length; j += 1) {
+        const b = live[j];
+        if (b === void 0) continue;
+        if (placesConflict(a.place, b.place)) n += 1;
+      }
+    }
+    return n;
   }
 
   // src/sites/bkxk/hijack.ts
@@ -3784,8 +3860,9 @@ ${options.desc ?? ""}
     for (const node of olds) node.remove();
     return olds.length;
   }
-  function render(table, writing) {
-    writing.busy = true;
+  var writing = { busy: false };
+  function render(table, gate) {
+    gate.busy = true;
     try {
       clearInjected(table);
       const cards = readExistingCards(readRawCards(table));
@@ -3800,26 +3877,28 @@ ${options.desc ?? ""}
       log12.info(`课表注入自定义课程段 ${String(count)} 个（已选课程 ${String(cards.length)} 门）`);
       return count;
     } finally {
-      writing.busy = false;
+      gate.busy = false;
     }
   }
-  function scan2(writing) {
+  function scan2(gate) {
     const table = findTable();
-    if (table === null) return;
+    if (table === null) return 0;
     if (!isEnabled(SITE_ID, TOGGLE.TIMETABLE_SELF_DRAW)) {
       const n = clearInjected(table);
       if (n > 0) log12.info(`自绘课表开关已关闭：移除 ${String(n)} 个注入节点`);
-      return;
+      return 0;
     }
     injectStyle2();
-    render(table, writing);
+    return render(table, gate);
+  }
+  function refreshTimetable() {
+    return scan2(writing);
   }
   function startTimetableInjection() {
     if (!location.pathname.includes(TT_PAGE_MARK)) {
       log12.debug(`当前不是课表页（${location.pathname}），跳过自绘课表`);
       return () => void 0;
     }
-    const writing = { busy: false };
     let observer = null;
     let timer2 = null;
     let retry = null;
@@ -3869,6 +3948,691 @@ ${options.desc ?? ""}
     };
   }
 
+  // src/sites/bkxk/custom-form.ts
+  var DRAFT_LIMITS = {
+    WEEK_MIN: 1,
+    WEEK_MAX: 52,
+    SECTION_MIN: 1,
+    SECTION_MAX: 20,
+    /** 最多几段：只是想拦住误触「再加一段」，正常课程 1~3 段 */
+    MAX_SEGMENTS: 8
+  };
+  var DEFAULT_SEGMENT = {
+    weekFrom: "1",
+    weekTo: "18",
+    parity: "",
+    day: "1",
+    sectionFrom: "1",
+    sectionTo: "2",
+    place: ""
+  };
+  function emptySegment() {
+    return { ...DEFAULT_SEGMENT };
+  }
+  function intOf(text) {
+    const s = text.trim();
+    if (!/^-?\d+$/.test(s)) return null;
+    const n = Number(s);
+    return Number.isSafeInteger(n) ? n : null;
+  }
+  function draftFromSegment(seg) {
+    return {
+      weekFrom: String(seg.weekFrom),
+      weekTo: String(seg.weekTo),
+      parity: seg.parity === null ? "" : seg.parity,
+      day: seg.day === null ? "" : String(seg.day),
+      sectionFrom: String(seg.sectionFrom),
+      sectionTo: String(seg.sectionTo),
+      place: seg.place
+    };
+  }
+  function draftsFromText(text) {
+    return parsePlace(text).map((seg) => draftFromSegment(seg));
+  }
+  function validateSegment(d) {
+    const { WEEK_MIN, WEEK_MAX, SECTION_MIN, SECTION_MAX } = DRAFT_LIMITS;
+    const wf = intOf(d.weekFrom);
+    const wt = intOf(d.weekTo);
+    if (wf === null || wt === null || wf < WEEK_MIN || wt > WEEK_MAX || wf > WEEK_MAX || wt < WEEK_MIN) {
+      return `周次要填 ${String(WEEK_MIN)}-${String(WEEK_MAX)} 之间的整数`;
+    }
+    if (wf > wt) return "周次起止颠倒：起始周不能大于结束周";
+    const sf = intOf(d.sectionFrom);
+    const st = intOf(d.sectionTo);
+    if (sf === null || st === null || sf < SECTION_MIN || st > SECTION_MAX || sf > SECTION_MAX || st < SECTION_MIN) {
+      return `节次要填 ${String(SECTION_MIN)}-${String(SECTION_MAX)} 之间的整数`;
+    }
+    if (sf > st) return "节次起止颠倒：起始节不能大于结束节";
+    if (intOf(d.day) === null || (intOf(d.day) ?? 0) < 1 || (intOf(d.day) ?? 0) > 7) {
+      return "请选择星期几";
+    }
+    if (d.place.trim() === "") return "请填地点（例如 致理楼L1-707）";
+    return null;
+  }
+  function validateDraft(name, segs) {
+    if (name.trim() === "") return "请填课程名";
+    if (segs.length === 0) return "至少填一段上课时间";
+    if (segs.length > DRAFT_LIMITS.MAX_SEGMENTS) {
+      return `最多 ${String(DRAFT_LIMITS.MAX_SEGMENTS)} 段`;
+    }
+    for (let i = 0; i < segs.length; i += 1) {
+      const seg = segs[i];
+      if (seg === void 0) continue;
+      const err = validateSegment(seg);
+      if (err !== null) {
+        const nth = segs.length > 1 ? `第 ${String(i + 1)} 段：` : "";
+        return nth + err;
+      }
+    }
+    return null;
+  }
+  function segmentFromDraft(d) {
+    if (validateSegment(d) !== null) return null;
+    const wf = intOf(d.weekFrom);
+    const wt = intOf(d.weekTo);
+    const sf = intOf(d.sectionFrom);
+    const st = intOf(d.sectionTo);
+    const day = intOf(d.day);
+    if (wf === null || wt === null || sf === null || st === null || day === null) return null;
+    const parity = d.parity === "" ? null : d.parity;
+    const place = d.place.trim();
+    return {
+      weekFrom: wf,
+      weekTo: wt,
+      parity,
+      day,
+      sectionFrom: sf,
+      sectionTo: st,
+      place,
+      // 与手写文本走同一条生成路径，`raw` 就是生成出来的那一串
+      raw: segToPlaceText({
+        weekFrom: wf,
+        weekTo: wt,
+        parity,
+        day,
+        sectionFrom: sf,
+        sectionTo: st,
+        place
+      })
+    };
+  }
+  function placeFromDraft(segs) {
+    const parsed = [];
+    for (const d of segs) {
+      const seg = segmentFromDraft(d);
+      if (seg === null) return null;
+      parsed.push(seg);
+    }
+    return parsed.map((s) => s.raw).join(",");
+  }
+
+  // src/sites/bkxk/tabs/custom-style.ts
+  var CUSTOM_TAB_CSS = `
+.sztb-bkxk-seg {
+  border: 1px solid var(--sztb-border);
+  border-radius: 6px;
+  padding: 6px 8px 8px;
+  margin-bottom: 6px;
+}
+
+.sztb-bkxk-seghead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+  font-size: 12px;
+  color: var(--sztb-text-dim);
+}
+
+.sztb-bkxk-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 5px 8px;
+  align-items: center;
+}
+
+.sztb-bkxk-grid > .sztb-bkxk-key {
+  font-size: 12px;
+  color: var(--sztb-text-dim);
+  white-space: nowrap;
+}
+
+.sztb-bkxk-line {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+/* 数字框很窄，得压掉公共 .sztb-input 的 width:100%（两个类名提高特异性） */
+.sztb-input.sztb-bkxk-num {
+  width: 48px;
+  text-align: center;
+}
+
+.sztb-select.sztb-bkxk-parity {
+  width: auto;
+}
+
+.sztb-bkxk-amp {
+  font-size: 12px;
+  color: var(--sztb-text-dim);
+}
+
+.sztb-bkxk-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+}
+
+.sztb-bkxk-item:hover {
+  background: var(--sztb-bg-alt);
+}
+
+.sztb-bkxk-color {
+  flex: 0 0 auto;
+  width: 4px;
+  height: 30px;
+  border-radius: 2px;
+  border: 1px solid var(--sztb-border);
+}
+
+.sztb-bkxk-itemmain {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.sztb-bkxk-name {
+  display: block;
+  font-size: 13px;
+}
+
+.sztb-bkxk-meta {
+  display: block;
+  margin-top: 1px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--sztb-text-dim);
+  word-break: break-word;
+}
+
+.sztb-bkxk-item[data-off="true"] .sztb-bkxk-name {
+  color: var(--sztb-text-dim);
+  text-decoration: line-through;
+}
+
+.sztb-bkxk-ops {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 4px;
+}
+
+/* 公共样式里勾选框只被 .sztb-row input[type=checkbox] 管，这里的行不是 .sztb-row */
+.sztb-bkxk-item input[type="checkbox"] {
+  flex: 0 0 auto;
+  margin: 0;
+  width: 15px;
+  height: 15px;
+  accent-color: var(--sztb-accent);
+  cursor: pointer;
+}
+
+/* 「自定义课程之间有几处冲突」的警示条：红色左边线 */
+.sztb-bkxk-warn {
+  border-left-color: var(--sztb-danger);
+  color: var(--sztb-danger);
+}
+
+.sztb-bkxk-bad {
+  color: var(--sztb-danger);
+}
+`;
+
+  // src/sites/bkxk/tabs/custom.ts
+  var log13 = scoped("bkxk/custom-tab");
+  var BKXK_CUSTOM_TAB_ID = "bkxk:custom";
+  var PARITY_OPTIONS = [
+    ["", "每周"],
+    ["单", "单周"],
+    ["双", "双周"]
+  ];
+  var BKXK_CUSTOM_TAB = {
+    id: BKXK_CUSTOM_TAB_ID,
+    title: "自定义",
+    order: 150,
+    css: CUSTOM_TAB_CSS,
+    mount(root, ctx) {
+      mountCustomTab(root, ctx);
+    }
+  };
+  function mountCustomTab(root, ctx) {
+    let courses = readCustomCourses();
+    let editingId = null;
+    let segs = [emptySegment()];
+    const offNote = el("div", {
+      class: "sztb-note",
+      text: "「自定义课程」已在【设置】里关闭：这些课不会参与列表页的冲突追加，也不会注入课表。要使用请到【设置】页打开它，再切回本页。"
+    });
+    offNote.hidden = true;
+    const body = el("div");
+    const formTitle = el("div", { class: "sztb-group-title", text: "添加自定义课程" });
+    const nameInput = el("input", {
+      class: "sztb-input",
+      attrs: { type: "text", placeholder: "例：线性代数（重修）", maxlength: 40 }
+    });
+    const teacherInput = el("input", {
+      class: "sztb-input",
+      attrs: { type: "text", placeholder: "可空，例：张三", maxlength: 30 }
+    });
+    const segBox = el("div");
+    const addSegBtn = el("button", {
+      class: "sztb-btn",
+      attrs: { type: "button" },
+      text: "再加一段"
+    });
+    const submitBtn = el("button", {
+      class: "sztb-btn",
+      attrs: { type: "button", "data-variant": "primary" },
+      text: "添加"
+    });
+    const cancelBtn = el("button", {
+      class: "sztb-btn",
+      attrs: { type: "button" },
+      text: "取消编辑"
+    });
+    cancelBtn.hidden = true;
+    const hint = el("div", { class: "sztb-field-hint" });
+    hint.hidden = true;
+    const warnBox = el("div", { class: "sztb-note sztb-bkxk-warn" });
+    warnBox.hidden = true;
+    const listTitle = el("div", { class: "sztb-group-title", text: "已添加" });
+    const listBox = el("div");
+    const clearBtn = el("button", {
+      class: "sztb-btn",
+      attrs: { type: "button", "data-variant": "danger" },
+      text: "清空全部"
+    });
+    const formToolbar = el("div", { class: "sztb-toolbar" }, addSegBtn, submitBtn, cancelBtn);
+    const listToolbar = el("div", { class: "sztb-toolbar" }, clearBtn);
+    const segField = el("div", { class: "sztb-field" });
+    segField.appendChild(el("label", { class: "sztb-field-label", text: "上课时间" }));
+    segField.appendChild(segBox);
+    const noteTop = el("div", {
+      class: "sztb-note",
+      text: "课程名与地点必填，教师可空。时间用下面的下拉与数字框填 —— 不用也不能手写时间文本（写错了自己也不知道）。这里加的课会参与 ① 列表页的冲突提示 ② 课表页的自绘卡片。"
+    });
+    body.appendChild(noteTop);
+    body.appendChild(formTitle);
+    body.appendChild(field("课程名", nameInput));
+    body.appendChild(field("教师", teacherInput));
+    body.appendChild(segField);
+    body.appendChild(formToolbar);
+    body.appendChild(hint);
+    body.appendChild(warnBox);
+    body.appendChild(listTitle);
+    body.appendChild(listBox);
+    body.appendChild(listToolbar);
+    root.appendChild(offNote);
+    root.appendChild(body);
+    function applyGate() {
+      const on = isEnabled(SITE_ID, TOGGLE.CUSTOM_COURSES);
+      offNote.hidden = on;
+      body.hidden = !on;
+      return on;
+    }
+    function guard() {
+      if (applyGate()) return true;
+      ctx.host.toast("「自定义课程」已在【设置】里关闭", "warn");
+      return false;
+    }
+    function field(label, control) {
+      const box = el("div", { class: "sztb-field" });
+      box.appendChild(el("label", { class: "sztb-field-label", text: label }));
+      box.appendChild(control);
+      return box;
+    }
+    function showHint(text) {
+      hint.textContent = text;
+      hint.hidden = false;
+    }
+    function hideHint() {
+      hint.textContent = "";
+      hint.hidden = true;
+    }
+    function patchSeg(index, patch) {
+      const cur = segs[index];
+      if (cur === void 0) return;
+      segs[index] = { ...cur, ...patch };
+    }
+    function numInput(value, onChange) {
+      const input = el("input", {
+        class: "sztb-input sztb-bkxk-num",
+        attrs: { type: "text", inputmode: "numeric", maxlength: 2 }
+      });
+      input.value = value;
+      input.addEventListener("input", () => {
+        onChange(input.value);
+      });
+      return input;
+    }
+    function optionEl(value, label) {
+      const opt = el("option", { text: label });
+      opt.value = value;
+      return opt;
+    }
+    function paritySelect(value, onChange) {
+      const sel = el("select", { class: "sztb-select sztb-bkxk-parity" });
+      for (const [v, label] of PARITY_OPTIONS) sel.appendChild(optionEl(v, label));
+      sel.value = value;
+      sel.addEventListener("change", () => {
+        onChange(sel.value);
+      });
+      return sel;
+    }
+    function daySelect(value, onChange) {
+      const sel = el("select", { class: "sztb-select sztb-bkxk-parity" });
+      sel.appendChild(optionEl("", "—"));
+      for (let d = 1; d <= 7; d += 1) sel.appendChild(optionEl(String(d), CN_WEEKDAY[d] ?? ""));
+      sel.value = value;
+      sel.addEventListener("change", () => {
+        onChange(sel.value);
+      });
+      return sel;
+    }
+    function placeInput(value, onChange) {
+      const input = el("input", {
+        class: "sztb-input",
+        attrs: { type: "text", placeholder: "例：致理楼L1-707", maxlength: 60 }
+      });
+      input.value = value;
+      input.addEventListener("input", () => {
+        onChange(input.value);
+      });
+      return input;
+    }
+    function line(...nodes) {
+      const box = el("div", { class: "sztb-bkxk-line" });
+      for (const n of nodes) box.appendChild(typeof n === "string" ? el("span", { class: "sztb-bkxk-amp", text: n }) : n);
+      return box;
+    }
+    function gridRow(key, control) {
+      return [el("span", { class: "sztb-bkxk-key", text: key }), control];
+    }
+    function buildSegRow(index, draft) {
+      const block = el("div", { class: "sztb-bkxk-seg" });
+      const head = el("div", { class: "sztb-bkxk-seghead" });
+      head.appendChild(el("span", { text: `第 ${String(index + 1)} 段` }));
+      if (segs.length > 1) {
+        const del = el("button", {
+          class: "sztb-btn",
+          attrs: { type: "button" },
+          text: "删除这段"
+        });
+        del.addEventListener("click", () => {
+          segs.splice(index, 1);
+          renderSegs();
+        });
+        head.appendChild(del);
+      }
+      block.appendChild(head);
+      const grid = el("div", { class: "sztb-bkxk-grid" });
+      for (const node of gridRow(
+        "周次",
+        line(
+          numInput(draft.weekFrom, (v) => {
+            patchSeg(index, { weekFrom: v });
+          }),
+          "到",
+          numInput(draft.weekTo, (v) => {
+            patchSeg(index, { weekTo: v });
+          }),
+          paritySelect(draft.parity, (v) => {
+            patchSeg(index, { parity: v });
+          })
+        )
+      )) {
+        grid.appendChild(node);
+      }
+      for (const node of gridRow(
+        "星期",
+        line(
+          daySelect(draft.day, (v) => {
+            patchSeg(index, { day: v });
+          })
+        )
+      )) {
+        grid.appendChild(node);
+      }
+      for (const node of gridRow(
+        "节次",
+        line(
+          numInput(draft.sectionFrom, (v) => {
+            patchSeg(index, { sectionFrom: v });
+          }),
+          "到",
+          numInput(draft.sectionTo, (v) => {
+            patchSeg(index, { sectionTo: v });
+          }),
+          "节"
+        )
+      )) {
+        grid.appendChild(node);
+      }
+      for (const node of gridRow(
+        "地点",
+        line(
+          placeInput(draft.place, (v) => {
+            patchSeg(index, { place: v });
+          })
+        )
+      )) {
+        grid.appendChild(node);
+      }
+      block.appendChild(grid);
+      return block;
+    }
+    function renderSegs() {
+      segBox.textContent = "";
+      for (let i = 0; i < segs.length; i += 1) {
+        const d = segs[i];
+        if (d === void 0) continue;
+        segBox.appendChild(buildSegRow(i, d));
+      }
+    }
+    function resetForm() {
+      editingId = null;
+      nameInput.value = "";
+      teacherInput.value = "";
+      segs = [emptySegment()];
+      renderSegs();
+      hideHint();
+      formTitle.textContent = "添加自定义课程";
+      submitBtn.textContent = "添加";
+      cancelBtn.hidden = true;
+    }
+    function submit() {
+      if (!guard()) return;
+      const name = nameInput.value.trim();
+      const err = validateDraft(name, segs);
+      if (err !== null) {
+        showHint(err);
+        ctx.host.toast(err, "warn");
+        return;
+      }
+      const place = placeFromDraft(segs);
+      if (place === null) {
+        const msg = "时间填得不完整，请检查周次 / 节次 / 星期 / 地点";
+        showHint(msg);
+        ctx.host.toast(msg, "warn");
+        return;
+      }
+      const parsed = parsePlace(place);
+      if (parsed.length !== segs.length) {
+        log13.warn(
+          `生成的时间文本与解析结果对不上：${place}（解析出 ${String(parsed.length)} 段，表单有 ${String(segs.length)} 段）`
+        );
+        const msg = "时间文本生成异常，已取消本次提交（请把这条日志报给开发者）";
+        showHint(msg);
+        ctx.host.toast(msg, "error");
+        return;
+      }
+      const draft = { name, teacher: teacherInput.value.trim(), place };
+      const editing = editingId;
+      const next = editing === null ? appendCourse(courses, draft, makeCourseId(Date.now(), Math.random())) : updateCourse(courses, editing, draft);
+      mutate(next);
+      resetForm();
+      log13.info(`${editing === null ? "添加" : "修改"}自定义课程「${name}」（${place}）`);
+      ctx.host.toast(editing === null ? "已添加" : "已保存修改", "success");
+    }
+    function beginEdit(course) {
+      if (!guard()) return;
+      const drafts = draftsFromText(course.place);
+      editingId = course.id;
+      nameInput.value = course.name;
+      teacherInput.value = course.teacher;
+      if (drafts.length === 0) {
+        segs = [emptySegment()];
+        const msg = "这门课原本的时间文本解析不出，已按默认值回填，请重新填写";
+        showHint(msg);
+        ctx.host.toast(msg, "warn");
+        log13.warn(`自定义课程「${course.name}」的 place 解析不出：${course.place}`);
+      } else {
+        segs = drafts.map((d) => ({ ...d }));
+        hideHint();
+      }
+      renderSegs();
+      formTitle.textContent = `修改：${course.name}`;
+      submitBtn.textContent = "保存修改";
+      cancelBtn.hidden = false;
+      root.scrollTop = 0;
+    }
+    function buildItem(course) {
+      const item = el("div", { class: "sztb-bkxk-item", data: course.enabled ? {} : { off: "true" } });
+      const color = el("span", { class: "sztb-bkxk-color" });
+      color.style.background = course.color;
+      item.appendChild(color);
+      const toggle = el("input", { attrs: { type: "checkbox", title: "参与冲突计算与课表注入" } });
+      toggle.checked = course.enabled;
+      toggle.addEventListener("change", () => {
+        if (!guard()) {
+          toggle.checked = course.enabled;
+          return;
+        }
+        mutate(setCourseEnabled(courses, course.id, toggle.checked));
+        log13.info(`${toggle.checked ? "启用" : "停用"}自定义课程「${course.name}」`);
+      });
+      item.appendChild(toggle);
+      const main2 = el("div", { class: "sztb-bkxk-itemmain" });
+      main2.appendChild(el("span", { class: "sztb-bkxk-name", text: course.name }));
+      main2.appendChild(
+        el("span", {
+          class: "sztb-bkxk-meta",
+          text: course.teacher === "" ? course.place : `${course.teacher} ｜ ${course.place}`
+        })
+      );
+      const parsedCount = parsePlace(course.place).length;
+      main2.appendChild(
+        el("span", {
+          class: parsedCount === 0 ? "sztb-bkxk-meta sztb-bkxk-bad" : "sztb-bkxk-meta",
+          text: parsedCount === 0 ? "时间未解析：这门课不会参与冲突计算，也不会注入课表（建议【修改】重填）" : `解析出 ${String(parsedCount)} 段`
+        })
+      );
+      item.appendChild(main2);
+      const ops = el("div", { class: "sztb-bkxk-ops" });
+      const editBtn = el("button", { class: "sztb-btn", attrs: { type: "button" }, text: "修改" });
+      editBtn.addEventListener("click", () => {
+        beginEdit(course);
+      });
+      const delBtn = el("button", {
+        class: "sztb-btn",
+        attrs: { type: "button", "data-variant": "danger" },
+        text: "删除"
+      });
+      delBtn.addEventListener("click", () => {
+        if (!guard()) return;
+        const wasEditing = editingId === course.id;
+        mutate(removeCourse(courses, course.id));
+        if (wasEditing) resetForm();
+        log13.info(`删除自定义课程「${course.name}」`);
+        ctx.host.toast("已删除", "success");
+      });
+      ops.appendChild(editBtn);
+      ops.appendChild(delBtn);
+      item.appendChild(ops);
+      return item;
+    }
+    function renderList() {
+      listBox.textContent = "";
+      listTitle.textContent = `已添加（${String(courses.length)} 门）`;
+      if (courses.length === 0) {
+        listBox.appendChild(
+          el("div", { class: "sztb-empty", text: "还没有自定义课程。上面填一门，点【添加】。" })
+        );
+        listToolbar.hidden = true;
+        return;
+      }
+      listToolbar.hidden = false;
+      for (const c of courses) listBox.appendChild(buildItem(c));
+    }
+    function renderConflicts() {
+      const n = countSelfConflicts(courses);
+      if (n <= 0) {
+        warnBox.hidden = true;
+        warnBox.textContent = "";
+        return;
+      }
+      warnBox.hidden = false;
+      warnBox.textContent = `自定义课程之间有 ${String(n)} 处时间冲突（不影响使用，只是提醒）`;
+    }
+    function mutate(next) {
+      courses = next;
+      writeCustomCourses(next);
+      renderList();
+      renderConflicts();
+      const injected = refreshTimetable();
+      if (injected > 0) log13.info(`课表已重画，注入 ${String(injected)} 个节次`);
+    }
+    addSegBtn.addEventListener("click", () => {
+      if (!guard()) return;
+      if (segs.length >= DRAFT_LIMITS.MAX_SEGMENTS) {
+        const msg = `最多 ${String(DRAFT_LIMITS.MAX_SEGMENTS)} 段`;
+        showHint(msg);
+        ctx.host.toast(msg, "warn");
+        return;
+      }
+      segs.push(emptySegment());
+      renderSegs();
+    });
+    submitBtn.addEventListener("click", () => {
+      submit();
+    });
+    cancelBtn.addEventListener("click", () => {
+      resetForm();
+    });
+    clearBtn.addEventListener("click", () => {
+      if (!guard()) return;
+      const n = courses.length;
+      void ctx.host.confirm({
+        title: "清空自定义课程",
+        body: `确定要删除全部 ${String(n)} 门自定义课程吗？删除后无法恢复。`,
+        danger: true,
+        confirmText: "全部删除"
+      }).then((ok) => {
+        if (!ok) return;
+        mutate([]);
+        resetForm();
+        log13.info(`清空自定义课程：删除 ${String(n)} 门`);
+        ctx.host.toast("已清空", "success");
+      });
+    });
+    renderSegs();
+    renderList();
+    renderConflicts();
+    applyGate();
+  }
+
   // src/sites/bkxk/tabs/settings.ts
   var BKXK_SETTINGS_TAB_ID = settingsTabId("bkxk");
   var BKXK_SETTINGS_TAB = {
@@ -3887,7 +4651,7 @@ ${options.desc ?? ""}
   };
 
   // src/sites/bkxk/index.ts
-  var log13 = scoped("site/bkxk");
+  var log14 = scoped("site/bkxk");
   var HOSTS2 = ["bkxk.szu.edu.cn"];
   var PAGES2 = ["*default/grablessons.do*", "*default/curriculum.do*"];
   var bkxkAdapter = {
@@ -3896,9 +4660,10 @@ ${options.desc ?? ""}
     hosts: HOSTS2,
     pages: PAGES2,
     // 标签页分批补齐（用户拍板的五个：任务 / 监控 / 自定义 / 设置 / 日志）：
-    //   本批只有【设置】—— 用户反馈「本科选课的设置都放在单独标签页更好」，
-    //   其余三个（任务 / 监控 / 自定义）在批 4 接入，【日志】是公共标签页、不用站点注册。
-    tabs: [BKXK_SETTINGS_TAB],
+    //   本批有【自定义】(order 150) 与【设置】(200) —— 自定义课程本来是批 4 的活儿，
+    //   用户拍板提前到本轮，理由是批 3 的 hijack / timetable 没有数据就没法验收。
+    //   剩下两个（任务 / 监控）在批 4 接入，【日志】是公共标签页、不用站点注册。
+    tabs: [BKXK_CUSTOM_TAB, BKXK_SETTINGS_TAB],
     toggles: BKXK_TOGGLES,
     /**
      * 启动期：只做「读 storage / 写 storage」与「装响应接管」，不碰 DOM。
@@ -3914,13 +4679,13 @@ ${options.desc ?? ""}
       registerBkxkSettings();
       const carried = runCustomCarry();
       if (lines.length > 0) {
-        log13.info(`已从旧版迁移 ${lines.length} 条内容，详情见日志页`);
+        log14.info(`已从旧版迁移 ${lines.length} 条内容，详情见日志页`);
       }
       if (carried.length > 0) {
-        log13.info(`自定义课程已搬到通用键（${carried.length} 条说明见日志页）`);
+        log14.info(`自定义课程已搬到通用键（${carried.length} 条说明见日志页）`);
       }
       if (lines.length === 0 && carried.length === 0) {
-        log13.debug(`无旧数据需要迁移（earlyInit @ ${ctx.url.pathname}）`);
+        log14.debug(`无旧数据需要迁移（earlyInit @ ${ctx.url.pathname}）`);
       }
     },
     /** 挂载期：DOM 已就绪，可以安全地把配置推给运行时并报登录态。 */
@@ -3928,11 +4693,11 @@ ${options.desc ?? ""}
       applyBkxkSettings();
       const session = readSession();
       if (!session.loggedIn) {
-        log13.warn("未读到有效登录态：学号或 token 缺失，功能接口会失败。请先在站内完成登录。");
+        log14.warn("未读到有效登录态：学号或 token 缺失，功能接口会失败。请先在站内完成登录。");
       } else {
-        log13.info(`站点已就绪：${sessionSummary(session)}`);
+        log14.info(`站点已就绪：${sessionSummary(session)}`);
       }
-      log13.info(`功能页=${String(ctx.isFeaturePage)}（设置标签页已就绪，其余标签页在批 4 接入）`);
+      log14.info(`功能页=${String(ctx.isFeaturePage)}（自定义 / 设置两个站点标签页已就绪，任务与监控在批 4 接入）`);
       startListInjection(ctx.panel);
       startTimetableInjection();
     }
@@ -3951,10 +4716,10 @@ ${options.desc ?? ""}
   }
 
   // src/main.ts
-  var log14 = scoped("main");
+  var log15 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-04T08:54:23.318Z" : null;
-  var BUILD_NO = true ? 35 : null;
+  var BUILD_TIME = true ? "2026-10-04T09:21:23.184Z" : null;
+  var BUILD_NO = true ? 36 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();
@@ -3994,7 +4759,7 @@ ${options.desc ?? ""}
       version: VERSION
     }));
     booted = { panel, adapterId: res.adapter?.id ?? null };
-    log14.info(
+    log15.info(
       `深大人工具箱 ${VERSION_LABEL} 已装载（host=${url.hostname}，分派=${res.reason}，站点=${res.adapter?.id ?? "无"}，功能页=${res.autoExpand ? "是" : "否"}）`
     );
     res.adapter?.init?.({
@@ -4014,10 +4779,10 @@ ${options.desc ?? ""}
         return;
       }
       if (!res.inject) {
-        log14.debug(`站内跳转后不再属于支持范围，保持现有悬浮窗`);
+        log15.debug(`站内跳转后不再属于支持范围，保持现有悬浮窗`);
         return;
       }
-      log14.info(`站内跳转导致重新分派：${bootedFor} → ${location.href}`);
+      log15.info(`站内跳转导致重新分派：${bootedFor} → ${location.href}`);
       bootedFor = location.href;
       boot(url, res);
     };
@@ -4044,9 +4809,9 @@ ${options.desc ?? ""}
     if (res.adapter?.earlyInit !== void 0) {
       try {
         res.adapter.earlyInit({ adapter: res.adapter, url });
-        log14.debug(`已执行启动期钩子：${res.adapter.id}`);
+        log15.debug(`已执行启动期钩子：${res.adapter.id}`);
       } catch (err) {
-        log14.error(`启动期钩子执行失败：${res.adapter.id}`, err);
+        log15.error(`启动期钩子执行失败：${res.adapter.id}`, err);
       }
     }
     whenDomReady(() => {

@@ -250,6 +250,49 @@ export function weekText(seg: Pick<TimeSegment, 'weekFrom' | 'weekTo' | 'parity'
   return seg.parity === null ? body : `${body}(${seg.parity})`;
 }
 
+/** 节次的短文本，例如 `3-4节` / `9节`。 */
+export function sectionText(seg: Pick<TimeSegment, 'sectionFrom' | 'sectionTo'>): string {
+  return seg.sectionFrom === seg.sectionTo
+    ? `${seg.sectionFrom}节`
+    : `${seg.sectionFrom}-${seg.sectionTo}节`;
+}
+
+/** `segToPlaceText` 需要的最小字段集合（结构化表单里没有 `raw`）。 */
+export interface PlaceTextInput {
+  readonly weekFrom: number;
+  readonly weekTo: number;
+  readonly parity: Parity;
+  readonly day: number | null;
+  readonly sectionFrom: number;
+  readonly sectionTo: number;
+  readonly place: string;
+}
+
+/**
+ * 把一段教学时间**写回** `teachingPlace` 文本 —— `parseSegment` 的逆运算。
+ *
+ * 形态与站点一致：`5-18周 星期二 3-4节 致理楼L1-707`（星期与地点可缺省）。
+ * 本函数是「自定义课程结构化表单」的出口：界面不让人手写这个串，只由它生成
+ * （`docs/需求文档.md` Q-F 明写「不纯靠文本识别」）。
+ *
+ * ⚠️ 与 `parseSegment` 必须**互为逆运算**：`parseSegment(segToPlaceText(s))` 的
+ * 周次 / 单双周 / 星期 / 节次 / 地点五个字段必须与 `s` 完全相同（`raw` 除外）。
+ */
+export function segToPlaceText(seg: PlaceTextInput): string {
+  const parts: string[] = [weekText(seg)];
+  const dayText = seg.day === null ? '' : (CN_WEEKDAY[seg.day] ?? '');
+  if (dayText !== '') parts.push(dayText);
+  parts.push(sectionText(seg));
+  const place = seg.place.trim();
+  if (place !== '') parts.push(place);
+  return parts.join(' ');
+}
+
+/** 多段拼成整串 `teachingPlace`（`,` 分隔，与 `parsePlace` 的切分口径一致）。 */
+export function placeTextFor(segs: readonly PlaceTextInput[]): string {
+  return segs.map((s) => segToPlaceText(s)).join(',');
+}
+
 /** 位图 → 有课的周次数组（下标 0 视为第 1 周）。非 `'1'` 字符一律当 0。 */
 export function bitmapWeeks(bitmap: string): readonly number[] {
   const out: number[] = [];

@@ -16,7 +16,7 @@
  *   批 1（本批）请求层 + 设置 + 风险门禁 + 旧数据迁移
  *   批 2 courses / time
  *   批 3 list / hijack / timetable
- *   批 4 tasks / monitor + 5 个标签页并入公共悬浮窗
+ *   批 4 tasks / monitor + 剩下的标签页（自定义那一页已于本批提前做完）
  */
 
 import { scoped } from '../../common/core/log.ts';
@@ -27,6 +27,7 @@ import { runCustomCarry, runMigration } from './legacy.ts';
 import { installHijack } from './hijack.ts';
 import { startListInjection } from './list.ts';
 import { startTimetableInjection } from './timetable.ts';
+import { BKXK_CUSTOM_TAB } from './tabs/custom.ts';
 import { BKXK_SETTINGS_TAB } from './tabs/settings.ts';
 
 const log = scoped('site/bkxk');
@@ -52,9 +53,10 @@ export const bkxkAdapter: SiteAdapter = {
   hosts: HOSTS,
   pages: PAGES,
   // 标签页分批补齐（用户拍板的五个：任务 / 监控 / 自定义 / 设置 / 日志）：
-  //   本批只有【设置】—— 用户反馈「本科选课的设置都放在单独标签页更好」，
-  //   其余三个（任务 / 监控 / 自定义）在批 4 接入，【日志】是公共标签页、不用站点注册。
-  tabs: [BKXK_SETTINGS_TAB],
+  //   本批有【自定义】(order 150) 与【设置】(200) —— 自定义课程本来是批 4 的活儿，
+  //   用户拍板提前到本轮，理由是批 3 的 hijack / timetable 没有数据就没法验收。
+  //   剩下两个（任务 / 监控）在批 4 接入，【日志】是公共标签页、不用站点注册。
+  tabs: [BKXK_CUSTOM_TAB, BKXK_SETTINGS_TAB],
   toggles: BKXK_TOGGLES,
 
   /**
@@ -91,7 +93,7 @@ export const bkxkAdapter: SiteAdapter = {
     } else {
       log.info(`站点已就绪：${sessionSummary(session)}`);
     }
-    log.info(`功能页=${String(ctx.isFeaturePage)}（设置标签页已就绪，其余标签页在批 4 接入）`);
+    log.info(`功能页=${String(ctx.isFeaturePage)}（自定义 / 设置两个站点标签页已就绪，任务与监控在批 4 接入）`);
 
     // 选课页注入教学班ID 与抢课/监控按钮。模块自己判页面（课表页也有 .cv-row，
     // 不是我们该动的地方），所以这里不重复判断。
