@@ -49,7 +49,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-04T10:47:28.379Z（构建号 40） */
+/* 构建信息：2026-10-04T12:35:29.799Z（构建号 42） */
 
 "use strict";
 (() => {
@@ -1885,6 +1885,7 @@ ${options.desc ?? ""}
 
   // src/sites/bkxk/api.ts
   var log6 = scoped("bkxk/api");
+  var BASE_PATH = "/xsxkapp/sys/xsxkapp/";
   var EP = {
     // 只读：课程查询（按类别分派）
     PROGRAM_COURSE: "elective/programCourse.do",
@@ -1934,6 +1935,119 @@ ${options.desc ?? ""}
     // 未实测
     MOOC: EP.PUBLIC_COURSE
   };
+  var RESP_KIND = {
+    OK: "ok",
+    BUSINESS: "business",
+    UNAUTHENTICATED: "unauthenticated",
+    UNKNOWN: "unknown"
+  };
+  var RESP_CODE = {
+    SUCCESS: "1",
+    BUSINESS_ERROR: "2",
+    UNAUTHENTICATED: "302"
+  };
+  var AUTH_MSG = /登录|认证/;
+  function isAuthStatus(status) {
+    return status === 401 || status === 403;
+  }
+  function classify(input) {
+    const out = {
+      kind: RESP_KIND.UNKNOWN,
+      code: null,
+      msg: "",
+      data: null,
+      json: null
+    };
+    if (isAuthStatus(input.status)) {
+      return { ...out, kind: RESP_KIND.UNAUTHENTICATED, msg: `HTTP ${input.status}` };
+    }
+    let json = null;
+    try {
+      json = JSON.parse(input.text);
+    } catch {
+      return { ...out, kind: RESP_KIND.UNKNOWN, msg: "响应不是 JSON" };
+    }
+    if (json === null || typeof json !== "object" || Array.isArray(json)) {
+      return { ...out, kind: RESP_KIND.UNKNOWN, msg: "JSON 顶层不是对象" };
+    }
+    const obj = json;
+    const rawCode = obj["code"];
+    const code = rawCode === void 0 || rawCode === null ? null : String(rawCode);
+    const msg = obj["msg"] === void 0 || obj["msg"] === null ? "" : String(obj["msg"]);
+    let kind;
+    if (code === RESP_CODE.SUCCESS) kind = RESP_KIND.OK;
+    else if (code === RESP_CODE.BUSINESS_ERROR) kind = RESP_KIND.BUSINESS;
+    else if (code === RESP_CODE.UNAUTHENTICATED) kind = RESP_KIND.UNAUTHENTICATED;
+    else if (AUTH_MSG.test(msg)) kind = RESP_KIND.UNAUTHENTICATED;
+    else kind = RESP_KIND.UNKNOWN;
+    return { kind, code, msg, data: obj["data"] === void 0 ? null : obj["data"], json };
+  }
+  function endpointUrl(ep, origin) {
+    return `${origin}${BASE_PATH}${ep}`;
+  }
+  function appendTimestamp(url, nowMs) {
+    const ts = typeof nowMs === "number" ? nowMs : Date.now();
+    return `${url}${url.includes("?") ? "&" : "?"}timestamp=${ts}`;
+  }
+  function formBody(obj) {
+    const parts = [];
+    for (const [k, v] of Object.entries(obj)) {
+      parts.push(`${encodeURIComponent(k)}=${encodeURIComponent(v === void 0 || v === null ? "" : String(v))}`);
+    }
+    return parts.join("&");
+  }
+  function buildTeachingTimeBody(studentCode) {
+    return formBody({ studentCode });
+  }
+  function headers(token) {
+    return { token: String(token), "X-Requested-With": "XMLHttpRequest" };
+  }
+  function dumpUnknown(input) {
+    const text = input.text ?? "";
+    const block = `
+──────── [未识别返回] ────────
+action: ${input.action}
+url: ${input.url}
+body: ${input.body ?? ""}
+code: ${input.code ?? ""} | msg: ${input.msg}
+长度: ${text.length} 字符
+原文:
+${text}
+──────────────────────────────
+`;
+    log6.error(
+      `未识别返回（已全量落档） code=${input.code ?? ""}${input.msg !== "" ? ` msg=${input.msg}` : ""}`
+    );
+    console.log(`%c${block}`, "color:#c00");
+    return block;
+  }
+  async function bkxkSend(o) {
+    const token = o.token ?? "";
+    const extra = o.extraHeaders ?? {};
+    const requestHeaders = token !== "" ? { ...headers(token), ...extra } : { ...extra };
+    if (o.body !== void 0) requestHeaders["Content-Type"] = "application/x-www-form-urlencoded";
+    const url = o.timestamp === true ? appendTimestamp(o.url) : o.url;
+    log6.info(`[请求] ${o.action} ${o.url}`);
+    const raw = await request({
+      url,
+      method: o.method ?? "POST",
+      headers: requestHeaders,
+      ...o.body !== void 0 ? { data: o.body } : {},
+      ...o.priority !== void 0 ? { priority: o.priority } : {}
+    });
+    const cls = classify({ status: raw.status, text: raw.text });
+    if (cls.kind === RESP_KIND.UNKNOWN) {
+      dumpUnknown({
+        action: o.action,
+        url,
+        body: o.body ?? "",
+        text: raw.text,
+        code: cls.code,
+        msg: cls.msg
+      });
+    }
+    return { status: raw.status, text: raw.text, cls, raw };
+  }
 
   // src/sites/bkxk/settings.ts
   var log7 = scoped("bkxk/settings");
@@ -2667,6 +2781,19 @@ ${options.desc ?? ""}
     return n;
   }
 
+  // src/sites/bkxk/page-realm.ts
+  function pageRealm() {
+    if (typeof unsafeWindow !== "undefined") return unsafeWindow;
+    return globalThis;
+  }
+  function pageRecord() {
+    const realm = pageRealm();
+    if (realm === null || realm === void 0) return {};
+    const type = typeof realm;
+    if (type !== "object" && type !== "function") return {};
+    return realm;
+  }
+
   // src/sites/bkxk/hijack.ts
   var log10 = scoped("bkxk/hijack");
   var CUSTOM_ID_PREFIX = "szu-custom-";
@@ -2786,25 +2913,45 @@ ${options.desc ?? ""}
   function isRec(v) {
     return v !== null;
   }
-  function transformResponse(kind, text, items2) {
-    if (text === "" || items2.length === 0) return null;
+  var SKIP_TEXT = {
+    rewritten: "",
+    "empty-text": "响应正文是空的",
+    "no-courses": "当前没有启用中的自定义课程，没必要改",
+    "bad-json": "正文不是 JSON",
+    "not-object": "解析出来不是对象",
+    "bad-code": "响应 code 不是 1（站点这次没成功）",
+    "nothing-changed": "解析成功、但没有一处需要改（这门课不冲突 / 没有可注入的段）"
+  };
+  function explainTransform(kind, text, items2) {
+    if (text === "") return { reason: "empty-text", text: null, changed: 0 };
+    if (items2.length === 0) return { reason: "no-courses", text: null, changed: 0 };
     let json;
     try {
       json = JSON.parse(text);
     } catch {
-      return null;
+      return { reason: "bad-json", text: null, changed: 0 };
     }
     const root = asRecord3(json);
-    if (root === null) return null;
-    if (String(root["code"]) !== "1") return null;
+    if (root === null) return { reason: "not-object", text: null, changed: 0 };
+    if (String(root["code"]) !== "1") return { reason: "bad-code", text: null, changed: 0 };
     const res = kind === "timetable" ? augmentTimetable(root, items2) : augmentList(root, items2);
-    if (res.changed === 0) return null;
-    log10.info(`[接管] ${kind} 改写了 ${res.changed} 处`);
-    return JSON.stringify(res.json);
+    if (res.changed === 0) return { reason: "nothing-changed", text: null, changed: 0 };
+    return { reason: "rewritten", text: JSON.stringify(res.json), changed: res.changed };
   }
+  var rewroteTimetable = false;
   function transformCurrentResponse(kind, text) {
     if (!kindEnabled(kind)) return null;
-    return transformResponse(kind, text, readEnabledCustomCourses());
+    const items2 = readEnabledCustomCourses();
+    const outcome = explainTransform(kind, text, items2);
+    if (outcome.reason === "rewritten") {
+      log10.info(`[接管] ${kind} 改写了 ${String(outcome.changed)} 处`);
+      if (kind === "timetable") rewroteTimetable = true;
+      return outcome.text;
+    }
+    if (outcome.reason !== "no-courses" && outcome.reason !== "empty-text") {
+      log10.info(`[接管] ${kind} 响应没改：${SKIP_TEXT[outcome.reason]}`);
+    }
+    return null;
   }
   function rewriteXhr(xhr) {
     const kind = kindOf(typeof xhr.responseURL === "string" ? xhr.responseURL : null);
@@ -2842,9 +2989,9 @@ ${options.desc ?? ""}
     Wrapped.prototype = Orig.prototype;
     return Wrapped;
   }
-  function pageRealm() {
-    if (typeof unsafeWindow !== "undefined") return unsafeWindow;
-    return globalThis;
+  var installedAtMs = null;
+  function installedAt() {
+    return installedAtMs;
   }
   function installXhr(target = pageRealm()) {
     const t = target;
@@ -2886,7 +3033,12 @@ ${options.desc ?? ""}
   function installHijack(target = pageRealm()) {
     const xhr = installXhr(target);
     const fetch2 = installFetch(target);
-    if (xhr || fetch2) log10.info(`响应接管已安装（XHR=${String(xhr)} fetch=${String(fetch2)}）`);
+    if (xhr || fetch2) {
+      installedAtMs = typeof performance !== "undefined" ? performance.now() : 0;
+      log10.info(
+        `响应接管已安装（XHR=${String(xhr)} fetch=${String(fetch2)}，装上时刻 ${installedAtMs.toFixed(0)}ms）`
+      );
+    }
     return xhr || fetch2;
   }
 
@@ -3641,6 +3793,115 @@ ${options.desc ?? ""}
     };
   }
 
+  // src/sites/bkxk/timetable-late.ts
+  var log12 = scoped("bkxk/timetable-late");
+  function currentOrigin() {
+    return typeof location !== "undefined" ? location.origin : "";
+  }
+  function teachingTimeStarts(entries2) {
+    const out = [];
+    for (const e of entries2) {
+      if (!e.name.includes("teachingTime.do")) continue;
+      if (!Number.isFinite(e.startTime)) continue;
+      out.push(e.startTime);
+    }
+    out.sort((a, b) => a - b);
+    return out;
+  }
+  function readTeachingTimeStarts() {
+    const perf = pageRecord()["performance"];
+    if (perf === null || typeof perf !== "object") return [];
+    const get = perf["getEntriesByType"];
+    if (typeof get !== "function") return [];
+    try {
+      const list = get.call(perf, "resource");
+      if (!Array.isArray(list)) return [];
+      const entries2 = [];
+      for (const raw of list) {
+        if (raw === null || typeof raw !== "object") continue;
+        const rec = raw;
+        const name = rec["name"];
+        const startTime = rec["startTime"];
+        if (typeof name !== "string" || typeof startTime !== "number") continue;
+        entries2.push({ name, startTime });
+      }
+      return teachingTimeStarts(entries2);
+    } catch {
+      return [];
+    }
+  }
+  function judgeLate(installedAtMs2, starts) {
+    let first;
+    for (const t of starts) {
+      if (!Number.isFinite(t) || t < 0) continue;
+      if (first === void 0 || t < first) first = t;
+    }
+    if (first === void 0) {
+      return { late: false, requestAtMs: null, gapMs: null, text: "查不到 teachingTime.do 的资源计时（缓存或已被清理），无法判断谁快谁慢" };
+    }
+    const gap = installedAtMs2 - first;
+    if (gap > 0) {
+      return {
+        late: true,
+        requestAtMs: first,
+        gapMs: gap,
+        text: `站点在 ${first.toFixed(0)}ms 就请求了 teachingTime.do，我们到 ${installedAtMs2.toFixed(0)}ms 才装上接管 ⇒ 晚了 ${gap.toFixed(0)}ms（那一发是原生 XHR，我们改不到）`
+      };
+    }
+    return {
+      late: false,
+      requestAtMs: first,
+      gapMs: gap,
+      text: `站点 ${first.toFixed(0)}ms 请求 teachingTime.do，我们 ${installedAtMs2.toFixed(0)}ms 已装上接管 ⇒ 赶上了（若仍没生效，病因不是速度）`
+    };
+  }
+  function fail(reason) {
+    return { ok: false, reason, added: 0, dataList: [] };
+  }
+  async function fetchMergedTimetable(p) {
+    if (p.items.length === 0) return fail("没有启用中的自定义课程，不需要补偿");
+    if (p.studentCode === "") return fail("读不到学号（sessionStorage.studentInfo 形状变了？）");
+    const origin = p.origin ?? currentOrigin();
+    if (origin === "") return fail("拿不到站点 origin（不在页面上？）");
+    const send = p.send ?? bkxkSend;
+    const url = appendTimestamp(endpointUrl(EP.TEACHING_TIME, origin));
+    let res;
+    try {
+      res = await send({
+        url,
+        action: "课表（晚到补偿）",
+        method: "POST",
+        body: buildTeachingTimeBody(p.studentCode),
+        token: p.token,
+        // 站点自己的 URL 上带 `?timestamp=`，漏了会被判重放（见旧仓库实测）
+        timestamp: true
+      });
+    } catch (err) {
+      log12.warn("晚到补偿请求抛错", err);
+      return fail("请求抛错（详见【日志】页上一行）");
+    }
+    if (res.status !== 200) return fail(`站点返回 HTTP ${String(res.status)}`);
+    let root;
+    try {
+      root = JSON.parse(res.text);
+    } catch {
+      return fail("响应不是 JSON");
+    }
+    if (root === null || typeof root !== "object" || Array.isArray(root)) return fail("响应不是对象");
+    const obj = root;
+    const code = obj["code"];
+    if (String(code) !== "1") {
+      return fail(String(code) === "302" ? "站点判未登录（code=302）—— 去重新登录再试" : `站点返回 code=${String(code)}`);
+    }
+    if (!Array.isArray(obj["dataList"])) return fail("响应里没有 dataList 数组");
+    const { json, changed } = augmentTimetable(obj, p.items);
+    if (changed === 0) return fail("一段都合并不进去（自定义课程都在关着，或都解析不出星期几）");
+    const merged = json["dataList"];
+    if (!Array.isArray(merged)) return fail("合并后拿不到 dataList");
+    log12.info(`晚到补偿：自己取了一次 teachingTime.do，合并进 ${String(changed)} 段（共 ${String(merged.length)} 行）`);
+    return { ok: true, reason: "", added: changed, dataList: merged };
+  }
+
   // src/sites/bkxk/timetable-style.ts
   var TT_STYLE_ID = "sztb-bkxk-tt-style";
   var TT_CSS = `
@@ -3769,8 +4030,10 @@ ${options.desc ?? ""}
   }
   function planInjection(courses, cards, geo = { slotH: DEFAULT_SLOT_H, top0: DEFAULT_TOP0 }) {
     const out = [];
+    const rendered = renderedCourseNames(cards);
     for (const course of courses) {
       if (!course.enabled) continue;
+      if (rendered.has(course.name.trim())) continue;
       const conflict = conflictsWithCards(course.place, cards);
       course.segs.forEach((seg, segIndex) => {
         if (seg.day === null) return;
@@ -3790,13 +4053,26 @@ ${options.desc ?? ""}
   function needsRescan(injected, enabledCourses2) {
     return enabledCourses2 > 0 && injected === 0;
   }
+  function renderedCourseNames(cards) {
+    const out = /* @__PURE__ */ new Set();
+    for (const card of cards) {
+      const name = card.courseName.trim();
+      if (name !== "") out.add(name);
+    }
+    return out;
+  }
+  function shouldOwnRender(input) {
+    return input.hijackOn && input.selfDrawOff && !input.alreadyTried && input.enabledCourses > 0 && input.missingCourses > 0 && input.siteCards > 0;
+  }
 
   // src/sites/bkxk/timetable.ts
-  var log12 = scoped("site/bkxk/timetable");
+  var log13 = scoped("site/bkxk/timetable");
   var TT_PAGE_MARK = "curriculum.do";
   var MAX_TRIES = 20;
   var RETRY_MS = 500;
   var RESCAN_DELAY_MS2 = 300;
+  var SITE_RENDERER_MODULE = "CVMyCourseTable";
+  var ownRender = { tried: false };
   function findTable(doc = document) {
     return doc.getElementById(SITE_TABLE_ID) ?? doc.querySelector(SITE_TABLE_SELECTOR);
   }
@@ -3855,7 +4131,7 @@ ${options.desc ?? ""}
     const heads = columnHeads(table);
     const index = findDayColumnIndex(heads, plan.seg.day);
     if (index < 0) {
-      log12.debug(`第 ${String(plan.seg.day)} 天没有对应列，跳过（列头=${heads.join(",")}）`);
+      log13.debug(`第 ${String(plan.seg.day)} 天没有对应列，跳过（列头=${heads.join(",")}）`);
       return false;
     }
     const cols = table.querySelectorAll(SITE_DAY_COLUMN_SELECTOR);
@@ -3898,18 +4174,109 @@ ${options.desc ?? ""}
       for (const plan of plans) {
         if (injectPlan(table, plan)) count += 1;
       }
-      log12.info(`课表注入自定义课程段 ${String(count)} 个（已选课程 ${String(cards.length)} 门）`);
+      log13.info(`课表注入自定义课程段 ${String(count)} 个（已选课程 ${String(cards.length)} 门）`);
       return count;
     } finally {
       gate.busy = false;
     }
   }
+  function readSysParam() {
+    const ss = pageSessionStorage();
+    if (ss === null) return {};
+    try {
+      const raw = ss.getItem("sysParam");
+      if (raw === null || raw === "") return {};
+      const json = JSON.parse(raw);
+      if (json === null || typeof json !== "object" || Array.isArray(json)) return {};
+      return json;
+    } catch {
+      return {};
+    }
+  }
+  function callSiteRenderer(table, rows) {
+    const realm = pageRecord();
+    const jq = realm["jQuery"];
+    if (typeof jq !== "function") return false;
+    const mod = realm[SITE_RENDERER_MODULE];
+    if (mod === null || typeof mod !== "object") return false;
+    const init = mod["init"];
+    if (typeof init !== "function") return false;
+    const sys = readSysParam();
+    const sectionList = {
+      morringSectionList: sys["morningSectionList"],
+      afternoonSectionList: sys["afternoonSectionList"],
+      nightSectionList: sys["nightSectionList"]
+    };
+    if (sectionList.morringSectionList === void 0 && sectionList.afternoonSectionList === void 0 && sectionList.nightSectionList === void 0) {
+      log13.warn("晚到补偿：读不到 sessionStorage.sysParam 的节次表，跳过（继续用自绘兜底）");
+      return false;
+    }
+    try {
+      const $ = jq;
+      init.call(mod, $(table), {
+        sectionList,
+        teachingTime: rows
+      });
+      return true;
+    } catch (err) {
+      log13.warn("晚到补偿：站点渲染器抛错", err);
+      return false;
+    }
+  }
+  async function ownRenderAsync(table, courses) {
+    const session = readSession();
+    const res = await fetchMergedTimetable({
+      items: courses,
+      studentCode: session.studentCode,
+      token: session.token
+    });
+    if (!res.ok) {
+      log13.warn(`晚到补偿失败：${res.reason}（继续用自绘兜底）`);
+      return;
+    }
+    const now = findTable() ?? table;
+    if (!callSiteRenderer(now, res.dataList)) {
+      log13.warn("晚到补偿：站点渲染器用不了（jQuery / CVMyCourseTable 找不到）—— 继续用自绘兜底");
+      return;
+    }
+    log13.info(`晚到补偿完成：请站点渲染器重画了整张课表，其中含我们的 ${String(res.added)} 段`);
+  }
+  function tryOwnRender(table) {
+    const courses = readEnabledCustomCourses();
+    const enabled = courses.filter((c) => c.enabled);
+    const rendered = renderedCourseNames(readExistingCards(readRawCards(table)));
+    const missing = enabled.filter((c) => !rendered.has(c.name.trim())).length;
+    const ok = shouldOwnRender({
+      hijackOn: kindEnabled("timetable"),
+      selfDrawOff: !isEnabled(SITE_ID, TOGGLE.TIMETABLE_SELF_DRAW),
+      alreadyTried: ownRender.tried,
+      enabledCourses: enabled.length,
+      missingCourses: missing,
+      siteCards: readExistingCards(readRawCards(table)).length
+    });
+    if (!ok) return false;
+    ownRender.tried = true;
+    log13.info(
+      `站点已经画完课表，但里面一门自定义课程都没有（${String(missing)} 门缺）⇒ 自己补一次 teachingTime.do，交给站点渲染器重画`
+    );
+    void ownRenderAsync(table, courses);
+    return true;
+  }
+  function logTiming() {
+    const at = installedAt();
+    if (at === null) {
+      log13.info("响应接管没装上（环境里没有 XHR 也没有 fetch）⇒ 本站的响应改不到");
+      return;
+    }
+    log13.info(judgeLate(at, readTeachingTimeStarts()).text);
+  }
   function scan2(gate) {
     const table = findTable();
     if (table === null) return 0;
+    if (tryOwnRender(table)) return 0;
     if (!isEnabled(SITE_ID, TOGGLE.TIMETABLE_SELF_DRAW)) {
       const n = clearInjected(table);
-      if (n > 0) log12.info(`自绘课表开关已关闭：移除 ${String(n)} 个注入节点`);
+      if (n > 0) log13.info(`自绘课表开关已关闭：移除 ${String(n)} 个注入节点`);
       return 0;
     }
     injectStyle2();
@@ -3920,9 +4287,10 @@ ${options.desc ?? ""}
   }
   function startTimetableInjection() {
     if (!location.pathname.includes(TT_PAGE_MARK)) {
-      log12.debug(`当前不是课表页（${location.pathname}），跳过自绘课表`);
+      log13.debug(`当前不是课表页（${location.pathname}），跳过自绘课表`);
       return () => void 0;
     }
+    logTiming();
     let observer = null;
     let timer2 = null;
     let retry = null;
@@ -3949,7 +4317,7 @@ ${options.desc ?? ""}
         if (tries < MAX_TRIES) {
           retry = window.setTimeout(attempt, RETRY_MS);
         } else {
-          log12.warn(`未找到课表容器 #${SITE_TABLE_ID}，放弃注入（站点的课表可能还没出数据）`);
+          log13.warn(`未找到课表容器 #${SITE_TABLE_ID}，放弃注入（站点的课表可能还没出数据）`);
         }
         return;
       }
@@ -3957,7 +4325,7 @@ ${options.desc ?? ""}
       observer = new MutationObserver(schedule2);
       observer.observe(table, { childList: true, subtree: true });
       const courses = readEnabledCustomCourses();
-      log12.info(`自绘课表已就绪：自定义课程 ${String(courses.length)} 门（单节 ${String(measure(table))}px）`);
+      log13.info(`自绘课表已就绪：自定义课程 ${String(courses.length)} 门（单节 ${String(measure(table))}px）`);
     };
     whenDomReady(attempt);
     return () => {
@@ -4218,7 +4586,7 @@ ${options.desc ?? ""}
 `;
 
   // src/sites/bkxk/tabs/custom.ts
-  var log13 = scoped("bkxk/custom-tab");
+  var log14 = scoped("bkxk/custom-tab");
   var BKXK_CUSTOM_TAB_ID = "bkxk:custom";
   var PARITY_OPTIONS = [
     ["", "每周"],
@@ -4500,7 +4868,7 @@ ${options.desc ?? ""}
       }
       const parsed = parsePlace(place);
       if (parsed.length !== segs.length) {
-        log13.warn(
+        log14.warn(
           `生成的时间文本与解析结果对不上：${place}（解析出 ${String(parsed.length)} 段，表单有 ${String(segs.length)} 段）`
         );
         const msg = "时间文本生成异常，已取消本次提交（请把这条日志报给开发者）";
@@ -4513,7 +4881,7 @@ ${options.desc ?? ""}
       const next = editing === null ? appendCourse(courses, draft, makeCourseId(Date.now(), Math.random())) : updateCourse(courses, editing, draft);
       mutate(next);
       resetForm();
-      log13.info(`${editing === null ? "添加" : "修改"}自定义课程「${name}」（${place}）`);
+      log14.info(`${editing === null ? "添加" : "修改"}自定义课程「${name}」（${place}）`);
       ctx.host.toast(editing === null ? "已添加" : "已保存修改", "success");
     }
     function beginEdit(course) {
@@ -4527,7 +4895,7 @@ ${options.desc ?? ""}
         const msg = "这门课原本的时间文本解析不出，已按默认值回填，请重新填写";
         showHint(msg);
         ctx.host.toast(msg, "warn");
-        log13.warn(`自定义课程「${course.name}」的 place 解析不出：${course.place}`);
+        log14.warn(`自定义课程「${course.name}」的 place 解析不出：${course.place}`);
       } else {
         segs = drafts.map((d) => ({ ...d }));
         hideHint();
@@ -4551,7 +4919,7 @@ ${options.desc ?? ""}
           return;
         }
         mutate(setCourseEnabled(courses, course.id, toggle.checked));
-        log13.info(`${toggle.checked ? "启用" : "停用"}自定义课程「${course.name}」`);
+        log14.info(`${toggle.checked ? "启用" : "停用"}自定义课程「${course.name}」`);
       });
       item.appendChild(toggle);
       const main2 = el("div", { class: "sztb-bkxk-itemmain" });
@@ -4585,7 +4953,7 @@ ${options.desc ?? ""}
         const wasEditing = editingId === course.id;
         mutate(removeCourse(courses, course.id));
         if (wasEditing) resetForm();
-        log13.info(`删除自定义课程「${course.name}」`);
+        log14.info(`删除自定义课程「${course.name}」`);
         ctx.host.toast("已删除", "success");
       });
       ops.appendChild(editBtn);
@@ -4622,7 +4990,7 @@ ${options.desc ?? ""}
       renderList();
       renderConflicts();
       const injected = refreshTimetable();
-      if (injected > 0) log13.info(`课表已重画，注入 ${String(injected)} 个节次`);
+      if (injected > 0) log14.info(`课表已重画，注入 ${String(injected)} 个节次`);
     }
     addSegBtn.addEventListener("click", () => {
       if (!guard()) return;
@@ -4654,7 +5022,7 @@ ${options.desc ?? ""}
         if (!ok) return;
         mutate([]);
         resetForm();
-        log13.info(`清空自定义课程：删除 ${String(n)} 门`);
+        log14.info(`清空自定义课程：删除 ${String(n)} 门`);
         ctx.host.toast("已清空", "success");
       });
     });
@@ -4682,7 +5050,7 @@ ${options.desc ?? ""}
   };
 
   // src/sites/bkxk/index.ts
-  var log14 = scoped("site/bkxk");
+  var log15 = scoped("site/bkxk");
   var HOSTS2 = ["bkxk.szu.edu.cn"];
   var PAGES2 = ["*default/grablessons.do*", "*default/curriculum.do*"];
   var bkxkAdapter = {
@@ -4710,13 +5078,13 @@ ${options.desc ?? ""}
       registerBkxkSettings();
       const carried = runCustomCarry();
       if (lines.length > 0) {
-        log14.info(`已从旧版迁移 ${lines.length} 条内容，详情见日志页`);
+        log15.info(`已从旧版迁移 ${lines.length} 条内容，详情见日志页`);
       }
       if (carried.length > 0) {
-        log14.info(`自定义课程已搬到通用键（${carried.length} 条说明见日志页）`);
+        log15.info(`自定义课程已搬到通用键（${carried.length} 条说明见日志页）`);
       }
       if (lines.length === 0 && carried.length === 0) {
-        log14.debug(`无旧数据需要迁移（earlyInit @ ${ctx.url.pathname}）`);
+        log15.debug(`无旧数据需要迁移（earlyInit @ ${ctx.url.pathname}）`);
       }
     },
     /** 挂载期：DOM 已就绪，可以安全地把配置推给运行时并报登录态。 */
@@ -4724,11 +5092,11 @@ ${options.desc ?? ""}
       applyBkxkSettings();
       const session = readSession();
       if (!session.loggedIn) {
-        log14.warn("未读到有效登录态：学号或 token 缺失，功能接口会失败。请先在站内完成登录。");
+        log15.warn("未读到有效登录态：学号或 token 缺失，功能接口会失败。请先在站内完成登录。");
       } else {
-        log14.info(`站点已就绪：${sessionSummary(session)}`);
+        log15.info(`站点已就绪：${sessionSummary(session)}`);
       }
-      log14.info(`功能页=${String(ctx.isFeaturePage)}（自定义 / 设置两个站点标签页已就绪，任务与监控在批 4 接入）`);
+      log15.info(`功能页=${String(ctx.isFeaturePage)}（自定义 / 设置两个站点标签页已就绪，任务与监控在批 4 接入）`);
       startListInjection(ctx.panel);
       startTimetableInjection();
     }
@@ -4747,10 +5115,10 @@ ${options.desc ?? ""}
   }
 
   // src/main.ts
-  var log15 = scoped("main");
+  var log16 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-04T10:47:28.379Z" : null;
-  var BUILD_NO = true ? 40 : null;
+  var BUILD_TIME = true ? "2026-10-04T12:35:29.799Z" : null;
+  var BUILD_NO = true ? 42 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();
@@ -4790,7 +5158,7 @@ ${options.desc ?? ""}
       version: VERSION
     }));
     booted = { panel, adapterId: res.adapter?.id ?? null };
-    log15.info(
+    log16.info(
       `深大人工具箱 ${VERSION_LABEL} 已装载（host=${url.hostname}，分派=${res.reason}，站点=${res.adapter?.id ?? "无"}，功能页=${res.autoExpand ? "是" : "否"}）`
     );
     res.adapter?.init?.({
@@ -4810,10 +5178,10 @@ ${options.desc ?? ""}
         return;
       }
       if (!res.inject) {
-        log15.debug(`站内跳转后不再属于支持范围，保持现有悬浮窗`);
+        log16.debug(`站内跳转后不再属于支持范围，保持现有悬浮窗`);
         return;
       }
-      log15.info(`站内跳转导致重新分派：${bootedFor} → ${location.href}`);
+      log16.info(`站内跳转导致重新分派：${bootedFor} → ${location.href}`);
       bootedFor = location.href;
       boot(url, res);
     };
@@ -4840,9 +5208,9 @@ ${options.desc ?? ""}
     if (res.adapter?.earlyInit !== void 0) {
       try {
         res.adapter.earlyInit({ adapter: res.adapter, url });
-        log15.debug(`已执行启动期钩子：${res.adapter.id}`);
+        log16.debug(`已执行启动期钩子：${res.adapter.id}`);
       } catch (err) {
-        log15.error(`启动期钩子执行失败：${res.adapter.id}`, err);
+        log16.error(`启动期钩子执行失败：${res.adapter.id}`, err);
       }
     }
     whenDomReady(() => {

@@ -30,6 +30,7 @@ import './suites/bkxk-courses.test.ts';
 import './suites/custom-courses.test.ts';
 import './suites/bkxk-hijack.test.ts';
 import './suites/bkxk-timetable.test.ts';
+import './suites/bkxk-timetable-late.test.ts';
 import './suites/bkxk-custom.test.ts';
 import './suites/bkxk-custom-form.test.ts';
 

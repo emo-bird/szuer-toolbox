@@ -15,8 +15,13 @@
 import { scoped } from '../../common/core/log.ts';
 import { isEnabled } from '../../common/core/settings.ts';
 import { el, whenDomReady } from '../../common/utils/dom.ts';
+import { pageSessionStorage } from '../../common/utils/page.ts';
 import { readEnabledCustomCourses } from './custom.ts';
+import { installedAt, kindEnabled } from './hijack.ts';
+import { pageRecord } from './page-realm.ts';
+import { readSession } from './session.ts';
 import { SITE_ID, TOGGLE } from './settings.ts';
+import { fetchMergedTimetable, judgeLate, readTeachingTimeStarts } from './timetable-late.ts';
 import { TT_CSS, TT_STYLE_ID } from './timetable-style.ts';
 import {
   DEFAULT_SLOT_H,
@@ -46,7 +51,9 @@ import {
   pickSlotH,
   planInjection,
   readExistingCards,
+  renderedCourseNames,
   segLabel,
+  shouldOwnRender,
 } from './timetable-model.ts';
 import type { InjectionPlan, RawCard } from './timetable-model.ts';
 import type { BkxkCustomCourse } from './custom.ts';
@@ -61,6 +68,18 @@ const MAX_TRIES = 20;
 const RETRY_MS = 500;
 /** 站点重绘的去抖（旧仓库 300ms） */
 const RESCAN_DELAY_MS = 300;
+
+/**
+ * 站点自己那个课表渲染器挂在哪。
+ *
+ * 实测来源：HAR 里那份 `curriculum.min.js`（6635 字符）—— 站点取完
+ * `teachingTime.do` 后调的正是 `CVMyCourseTable.init($("#myCourseTable"), {sectionList, teachingTime})`。
+ * 晚到补偿复用它，才能画出与站点**一模一样的**课表（含左侧节次栏与课程块样式）。
+ */
+const SITE_RENDERER_MODULE = 'CVMyCourseTable';
+
+/** 晚到补偿只做一次（本次页面加载内） */
+const ownRender = { tried: false };
 
 // ------------------------------------------------------------ 找容器 / 量尺寸
 
@@ -215,6 +234,132 @@ export function render(table: HTMLElement, gate: { busy: boolean }): number {
   }
 }
 
+// ------------------------------------------------- 晚到补偿（自己取一次，交给站点画）
+
+/** 读页面 `sessionStorage.sysParam`（站点渲染器要的 `sectionList` 从这里来） */
+function readSysParam(): Record<string, unknown> {
+  const ss = pageSessionStorage();
+  if (ss === null) return {};
+  try {
+    const raw = ss.getItem('sysParam');
+    if (raw === null || raw === '') return {};
+    const json: unknown = JSON.parse(raw);
+    if (json === null || typeof json !== 'object' || Array.isArray(json)) return {};
+    return json as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * 调站点自己的渲染器重画整张课表（行里已经含我们合并进去的自定义课程）。
+ *
+ * 三个前提缺一不可：页面世界的 `jQuery`（渲染器要一个 jQuery 对象，**不是 DOM 元素**：
+ * 它内部会 `.html()` / `.outerHeight()` / `.attr()`）、`CVMyCourseTable.init`、
+ * 以及 `sessionStorage.sysParam` 里的三段节次表。缺任何一个就返回 false，由自绘兜底。
+ */
+export function callSiteRenderer(table: HTMLElement, rows: readonly unknown[]): boolean {
+  const realm = pageRecord();
+  const jq = realm['jQuery'];
+  if (typeof jq !== 'function') return false;
+
+  const mod = realm[SITE_RENDERER_MODULE];
+  if (mod === null || typeof mod !== 'object') return false;
+  const init = (mod as Record<string, unknown>)['init'];
+  if (typeof init !== 'function') return false;
+
+  const sys = readSysParam();
+  // ⚠️ 站点自己把 `morningSectionList` 拼成了 `morringSectionList`（实测原文如此），
+  // 必须跟着拼错，否则左侧节次栏是空的。三个都没有就说明 sysParam 形状变了，别硬来。
+  const sectionList = {
+    morringSectionList: sys['morningSectionList'],
+    afternoonSectionList: sys['afternoonSectionList'],
+    nightSectionList: sys['nightSectionList'],
+  };
+  if (
+    sectionList.morringSectionList === undefined &&
+    sectionList.afternoonSectionList === undefined &&
+    sectionList.nightSectionList === undefined
+  ) {
+    log.warn('晚到补偿：读不到 sessionStorage.sysParam 的节次表，跳过（继续用自绘兜底）');
+    return false;
+  }
+
+  try {
+    // 传元素即可（jQuery 两种都吃）；用我们手上这个节点，省得它再查一次 DOM
+    const $ = jq as (target: unknown) => unknown;
+    (init as (this: unknown, el: unknown, data: unknown) => void).call(mod, $(table), {
+      sectionList,
+      teachingTime: rows,
+    });
+    return true;
+  } catch (err) {
+    log.warn('晚到补偿：站点渲染器抛错', err);
+    return false;
+  }
+}
+
+/** 自己取一次课表、合并自定义课程、交给站点渲染器画（异步，失败只记日志） */
+async function ownRenderAsync(table: HTMLElement, courses: readonly BkxkCustomCourse[]): Promise<void> {
+  const session = readSession();
+  const res = await fetchMergedTimetable({
+    items: courses,
+    studentCode: session.studentCode,
+    token: session.token,
+  });
+  if (!res.ok) {
+    log.warn(`晚到补偿失败：${res.reason}（继续用自绘兜底）`);
+    return;
+  }
+  // 请求期间站点可能已经把表重画过一遍（容器换了），重新找一次
+  const now = findTable() ?? table;
+  if (!callSiteRenderer(now, res.dataList)) {
+    log.warn('晚到补偿：站点渲染器用不了（jQuery / CVMyCourseTable 找不到）—— 继续用自绘兜底');
+    return;
+  }
+  log.info(`晚到补偿完成：请站点渲染器重画了整张课表，其中含我们的 ${String(res.added)} 段`);
+}
+
+/**
+ * 判断这一轮要不要走晚到补偿；要就发起来（异步）并返回 true。
+ *
+ * `timing-late.ts` 的 `judgeLate` 只把「谁快谁慢」写进日志，**不参与这个判断** ——
+ * 判断只看页面事实：我们手上还有课，而站点画完的表里一门都没有。
+ */
+function tryOwnRender(table: HTMLElement): boolean {
+  const courses = readEnabledCustomCourses();
+  const enabled = courses.filter((c) => c.enabled);
+  const rendered = renderedCourseNames(readExistingCards(readRawCards(table)));
+  const missing = enabled.filter((c) => !rendered.has(c.name.trim())).length;
+
+  const ok = shouldOwnRender({
+    hijackOn: kindEnabled('timetable'),
+    selfDrawOff: !isEnabled(SITE_ID, TOGGLE.TIMETABLE_SELF_DRAW),
+    alreadyTried: ownRender.tried,
+    enabledCourses: enabled.length,
+    missingCourses: missing,
+    siteCards: readExistingCards(readRawCards(table)).length,
+  });
+  if (!ok) return false;
+
+  ownRender.tried = true;
+  log.info(
+    `站点已经画完课表，但里面一门自定义课程都没有（${String(missing)} 门缺）⇒ 自己补一次 teachingTime.do，交给站点渲染器重画`,
+  );
+  void ownRenderAsync(table, courses);
+  return true;
+}
+
+/** 把「谁快谁慢」写进日志（每次到课表页写一次；补偿触发时它就是证据） */
+function logTiming(): void {
+  const at = installedAt();
+  if (at === null) {
+    log.info('响应接管没装上（环境里没有 XHR 也没有 fetch）⇒ 本站的响应改不到');
+    return;
+  }
+  log.info(judgeLate(at, readTeachingTimeStarts()).text);
+}
+
 /**
  * 扫一遍并按需重画；返回注入的节次数。
  *
@@ -223,6 +368,8 @@ export function render(table: HTMLElement, gate: { busy: boolean }): number {
 function scan(gate: { busy: boolean }): number {
   const table = findTable();
   if (table === null) return 0;
+  // ⚠️ 晚到补偿必须排在自绘开关判断**之前**：用户要的正是「关掉自绘也让站点自己画」。
+  if (tryOwnRender(table)) return 0;
   if (!isEnabled(SITE_ID, TOGGLE.TIMETABLE_SELF_DRAW)) {
     const n = clearInjected(table);
     if (n > 0) log.info(`自绘课表开关已关闭：移除 ${String(n)} 个注入节点`);
@@ -256,6 +403,9 @@ export function startTimetableInjection(): () => void {
     log.debug(`当前不是课表页（${location.pathname}），跳过自绘课表`);
     return () => undefined;
   }
+
+  // 「谁快谁慢」先记一笔：站点那条 teachingTime.do 要是比我们装接管还早，日志里就能看出来
+  logTiming();
 
   let observer: MutationObserver | null = null;
   let timer: number | null = null;

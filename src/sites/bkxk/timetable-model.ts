@@ -227,8 +227,12 @@ export function planInjection(
   geo: { readonly slotH: number; readonly top0: number } = { slotH: DEFAULT_SLOT_H, top0: DEFAULT_TOP0 },
 ): readonly InjectionPlan[] {
   const out: InjectionPlan[] = [];
+  // 站点自己已经画过这门课就不再自绘（v0.28 去重）：晚到补偿会让站点的渲染器
+  // 拿着合并后的 dataList 重画一遍，那一份里已经有我们的课 —— 再自绘就是两张卡片。
+  const rendered = renderedCourseNames(cards);
   for (const course of courses) {
     if (!course.enabled) continue;
+    if (rendered.has(course.name.trim())) continue;
     const conflict = conflictsWithCards(course.place, cards);
     course.segs.forEach((seg, segIndex) => {
       if (seg.day === null) return;
@@ -261,4 +265,59 @@ export function planInjection(
  */
 export function needsRescan(injected: number, enabledCourses: number): boolean {
   return enabledCourses > 0 && injected === 0;
+}
+
+/**
+ * 表上已经出现的课名（去掉前后空白、丢掉空名）。
+ *
+ * 用于「这门课是不是已经画过了」的去重 —— 自绘与站点渲染器画出来的卡片课名是同一个
+ * （都来自同一条自定义课程记录），所以拿名字当键够了。
+ */
+export function renderedCourseNames(cards: readonly ExistingCard[]): ReadonlySet<string> {
+  const out = new Set<string>();
+  for (const card of cards) {
+    const name = card.courseName.trim();
+    if (name !== '') out.add(name);
+  }
+  return out;
+}
+
+/** 「让站点自己画一次」的判据输入（全部来自页面事实，不看时钟） */
+export interface OwnRenderInput {
+  /** 🟠 响应接管开关开着 —— 否则我们根本不该碰站点的课表 */
+  readonly hijackOn: boolean;
+  /**
+   * 🟢 自绘课表**关着**。
+   *
+   * 这是用户要这个功能的原始场景：「关闭课表自绘不应该有网页自己的绘制逻辑来绘制
+   * 自定义课程吗」。自绘开着时我们本来就会立刻把课画上去，不缺这一条路 ——
+   * 若那时也补一次，等于每次刷新都白跑一个请求 + 白重画一遍整张表。
+   */
+  readonly selfDrawOff: boolean;
+  /** 本次页面加载还没试过（只补一次，绝不循环） */
+  readonly alreadyTried: boolean;
+  /** 还有启用中的自定义课程 */
+  readonly enabledCourses: number;
+  /** 站点画出来的卡片里，**一门**我们的课都没有（有就说明已经画上了，不用补） */
+  readonly missingCourses: number;
+  /** 站点确实画过表；连表都没有时该走自绘兜底，没什么可补的 */
+  readonly siteCards: number;
+}
+
+/**
+ * 要不要「自己取一次课表、交给站点渲染器画」。
+ *
+ * 判据全部是**页面上的既成事实**（不是猜时钟）：我们手上还有课，而站点已经画完的
+ * 表里一门都没有 ⇒ 我们没赶上站点那条 `teachingTime.do`（`timing-late` 那边的
+ * `judgeLate` 只负责把「谁快谁慢」写进日志，不参与决策）。
+ */
+export function shouldOwnRender(input: OwnRenderInput): boolean {
+  return (
+    input.hijackOn &&
+    input.selfDrawOff &&
+    !input.alreadyTried &&
+    input.enabledCourses > 0 &&
+    input.missingCourses > 0 &&
+    input.siteCards > 0
+  );
 }

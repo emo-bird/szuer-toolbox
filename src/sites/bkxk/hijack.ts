@@ -34,6 +34,7 @@ import {
 import type { TimeSegment } from './time.ts';
 import { readEnabledCustomCourses } from './custom.ts';
 import type { BkxkCustomCourse } from './custom.ts';
+import { pageRealm } from './page-realm.ts';
 
 const log = scoped('bkxk/hijack');
 
@@ -215,8 +216,68 @@ function isRec(v: Rec | null): v is Rec {
 }
 
 /**
- * 改写一段响应正文。返回 `null` = **不要改变原响应**（不解析 / 不是我们的响应 /
- * `code !== '1'` / 一处都没改）。
+ * 一段响应为什么没被改写（**诊断用**，v0.28 新增）。
+ *
+ * `rewritten` = 真的改了；其余都是早退路径。逐条记下来的原因：
+ * 出了问题（「开关开了但什么都没发生」）时，日志里能直接看出卡在哪一步，
+ * 而不是只能猜「是不是响应根本没经过我们」。
+ */
+export type SkipReason =
+  | 'rewritten'
+  | 'empty-text'
+  | 'no-courses'
+  | 'bad-json'
+  | 'not-object'
+  | 'bad-code'
+  | 'nothing-changed';
+
+/** 人能读的早退原因（进日志） */
+export const SKIP_TEXT: Record<SkipReason, string> = {
+  rewritten: '',
+  'empty-text': '响应正文是空的',
+  'no-courses': '当前没有启用中的自定义课程，没必要改',
+  'bad-json': '正文不是 JSON',
+  'not-object': '解析出来不是对象',
+  'bad-code': '响应 code 不是 1（站点这次没成功）',
+  'nothing-changed': '解析成功、但没有一处需要改（这门课不冲突 / 没有可注入的段）',
+};
+
+export interface TransformOutcome {
+  readonly reason: SkipReason;
+  /** `reason === 'rewritten'` 时是新正文，否则为 null */
+  readonly text: string | null;
+  readonly changed: number;
+}
+
+/**
+ * 改写一段响应正文，并把**为什么**一并返回。
+ *
+ * 判据与旧版 `transformResponse` 完全一致（返回 `null` = **不要改变原响应**）：
+ * 空正文 / 没有自定义课程 / 不是 JSON / 不是对象 / `code !== '1'` / 一处都没改。
+ */
+export function explainTransform(
+  kind: HijackKind,
+  text: string,
+  items: readonly BkxkCustomCourse[],
+): TransformOutcome {
+  if (text === '') return { reason: 'empty-text', text: null, changed: 0 };
+  if (items.length === 0) return { reason: 'no-courses', text: null, changed: 0 };
+  let json: unknown;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    return { reason: 'bad-json', text: null, changed: 0 };
+  }
+  const root = asRecord(json);
+  if (root === null) return { reason: 'not-object', text: null, changed: 0 };
+  if (String(root['code']) !== '1') return { reason: 'bad-code', text: null, changed: 0 };
+  const res = kind === 'timetable' ? augmentTimetable(root, items) : augmentList(root, items);
+  if (res.changed === 0) return { reason: 'nothing-changed', text: null, changed: 0 };
+  return { reason: 'rewritten', text: JSON.stringify(res.json), changed: res.changed };
+}
+
+/**
+ * 改写一段响应正文。返回 `null` = **不要改变原响应**。
  *
  * 没有自定义课程时直接返回 `null`：此时接管没有任何意义，早退也省一次 JSON 解析。
  */
@@ -225,26 +286,45 @@ export function transformResponse(
   text: string,
   items: readonly BkxkCustomCourse[],
 ): string | null {
-  if (text === '' || items.length === 0) return null;
-  let json: unknown;
-  try {
-    json = JSON.parse(text);
-  } catch {
-    return null;
-  }
-  const root = asRecord(json);
-  if (root === null) return null;
-  if (String(root['code']) !== '1') return null;
-  const res = kind === 'timetable' ? augmentTimetable(root, items) : augmentList(root, items);
-  if (res.changed === 0) return null;
-  log.info(`[接管] ${kind} 改写了 ${res.changed} 处`);
-  return JSON.stringify(res.json);
+  const outcome = explainTransform(kind, text, items);
+  if (outcome.reason === 'rewritten') log.info(`[接管] ${kind} 改写了 ${String(outcome.changed)} 处`);
+  return outcome.text;
 }
 
-/** 运行期入口：读开关 + 读自定义课程，再改写 */
+/** 改写过课表响应没有（晚到补偿用：只有「真改到了」才算接住） */
+let rewroteTimetable = false;
+
+/** 我们是不是真的把自定义课程写进过站点课表响应 */
+export function didRewriteTimetable(): boolean {
+  return rewroteTimetable;
+}
+
+/** 复位（档 1 测试用） */
+export function resetRewriteFlags(): void {
+  rewroteTimetable = false;
+}
+
+/**
+ * 运行期入口：读开关 + 读自定义课程，再改写。
+ *
+ * ⚠️ 这里会为**每一条**响应留一行诊断（v0.28 起）：接管「开关打开了但什么都没发生」
+ * 这类问题，光看成功日志是看不出来的 —— 必须知道它是没经过我们、还是经过了但早退了。
+ * 刻意**不给两种情况记日志**：开关关着（那是用户的选择）、以及没有自定义课程
+ * （那是常态，否则列表页每次请求都要刷一行）。
+ */
 export function transformCurrentResponse(kind: HijackKind, text: string): string | null {
   if (!kindEnabled(kind)) return null;
-  return transformResponse(kind, text, readEnabledCustomCourses());
+  const items = readEnabledCustomCourses();
+  const outcome = explainTransform(kind, text, items);
+  if (outcome.reason === 'rewritten') {
+    log.info(`[接管] ${kind} 改写了 ${String(outcome.changed)} 处`);
+    if (kind === 'timetable') rewroteTimetable = true;
+    return outcome.text;
+  }
+  if (outcome.reason !== 'no-courses' && outcome.reason !== 'empty-text') {
+    log.info(`[接管] ${kind} 响应没改：${SKIP_TEXT[outcome.reason]}`);
+  }
+  return null;
 }
 
 // ------------------------------------------------------------ 安装层（IO）
@@ -313,20 +393,16 @@ export function makeXhrCtor(Orig: XhrCtor): XhrCtor {
 /**
  * 该往哪个全局对象上装接管 —— **必须是页面 realm，不是沙箱 realm**。
  *
- * ⚠️ 这是 v0.24 修掉的真 bug：本脚本的 header 声明了 `@grant`（GM_setValue 等），
- * Tampermonkey 因此把脚本放进**沙箱**执行，沙箱里的 `globalThis` 不是页面的 `window`。
- * 把包装后的 `XMLHttpRequest` 写在沙箱上，页面自己的那份**一个字节都没动** ⇒
- * 站点发请求用的还是原生 XHR ⇒ 响应永远不会被改写，用户在界面上看到的只是「开关打开了
- * 但什么也没发生」，而且没有任何报错。
- *
- * 旧仓库（`C:\Project\szu_bkxk`）是 `@grant none`，直接跑在页面 realm，
- * 所以它当年这样写是有效的 —— 迁移时漏掉了「本项目的运行环境已经变了」这一层。
+ * v0.24 修掉的真 bug 的说明挪到了 `page-realm.ts`（那两个函数现在被本文件与
+ * 晚到补偿共用）。这里只留一句：`installXhr()` 默认目标是 `pageRealm()`。
  */
-function pageRealm(): unknown {
-  // @types/tampermonkey 声明了 unsafeWindow；Node（档 1 测试）与 @grant none 下它是 undefined，
-  // 用 typeof 判断不会抛 ReferenceError。
-  if (typeof unsafeWindow !== 'undefined') return unsafeWindow;
-  return globalThis;
+
+/** 我们是在页面加载后的第几毫秒装上接管的（`performance.now()` 同一时钟） */
+let installedAtMs: number | null = null;
+
+/** 装上接管的时刻（毫秒）；没装过为 null。晚到补偿用它和站点请求时刻比大小 */
+export function installedAt(): number | null {
+  return installedAtMs;
 }
 
 /** 装 XHR 接管；已装或环境里没有 XHR 返回 `false` */
@@ -393,6 +469,11 @@ export function installFetch(target: unknown = pageRealm()): boolean {
 export function installHijack(target: unknown = pageRealm()): boolean {
   const xhr = installXhr(target);
   const fetch = installFetch(target);
-  if (xhr || fetch) log.info(`响应接管已安装（XHR=${String(xhr)} fetch=${String(fetch)}）`);
+  if (xhr || fetch) {
+    installedAtMs = typeof performance !== 'undefined' ? performance.now() : 0;
+    log.info(
+      `响应接管已安装（XHR=${String(xhr)} fetch=${String(fetch)}，装上时刻 ${installedAtMs.toFixed(0)}ms）`,
+    );
+  }
   return xhr || fetch;
 }

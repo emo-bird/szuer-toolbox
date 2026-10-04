@@ -31,7 +31,9 @@ import {
   pickSlotH,
   planInjection,
   readExistingCards,
+  renderedCourseNames,
   segLabel,
+  shouldOwnRender,
   slotHeight,
   slotTop,
 } from '../../src/sites/bkxk/timetable-model.ts';
@@ -333,5 +335,76 @@ describe('bkxk/timetable —— 站点重绘后要不要重画（v0.26）', () =
   it('课名字层类名带了项目前缀（只作用于我们自己的节点）', () => {
     assert(TT_LINES_CLASS.startsWith('sztb-bkxk-'), '我们的类名带前缀');
     assert(!hasClassToken(SITE_CARD_CLASS, TT_LINES_CLASS), '与站点类名不撞');
+  });
+});
+
+// ------------------------------------------------------------ 晚到补偿与去重（v0.28）
+
+describe('bkxk/timetable —— 站点画过就不自绘（v0.28 去重）', () => {
+  it('renderedCourseNames：去前后空白、丢掉空名', () => {
+    const names = renderedCourseNames([card(' 线性代数 ', '5-18周 星期二 9-10节'), card('', '1-8周 星期一 1-2节')]);
+    assertEqual(names.size, 1, '空名不算一门课');
+    assert(names.has('线性代数'), '空白被去掉');
+  });
+
+  it('站点已经画过这门课 → 不再自绘（否则同门课两张卡片）', () => {
+    const one = custom('c1', '我的课', '5-18周星期一3-5节 A');
+    const cards = [card('我的课', '5-18周 星期一 3-5节 A')];
+    assertDeepEqual(planInjection([one], cards), [], '站点那份里已经有它了');
+  });
+
+  it('站点没画过 → 照常自绘', () => {
+    const one = custom('c1', '我的课', '5-18周星期一3-5节 A');
+    const cards = [card('高等数学', '5-18周 星期一 3-5节 A')];
+    assertEqual(planInjection([one], cards).length, 1, '站点画的不是我们的课');
+  });
+
+  it('只跳过站点画过的那一门，其余照画', () => {
+    const a = custom('c1', '甲课', '1-8周星期一1-2节 A');
+    const b = custom('c2', '乙课', '1-8周星期二3-4节 B');
+    const cards = [card('甲课', '1-8周 星期一 1-2节 A')];
+    const plans = planInjection([a, b], cards);
+    assertEqual(plans.length, 1, '只留一门');
+    assertEqual(plans[0]?.courseId, 'c2', '留下的必须是站点没画过的那门');
+  });
+});
+
+describe('bkxk/timetable —— 要不要「让站点自己画一次」（v0.28）', () => {
+  /** 全部满足的基线：接管开着、自绘关着、没试过、有课、站点画完但一门我们的都没有 */
+  function ready(over: Partial<Parameters<typeof shouldOwnRender>[0]> = {}): Parameters<typeof shouldOwnRender>[0] {
+    return {
+      hijackOn: true,
+      selfDrawOff: true,
+      alreadyTried: false,
+      enabledCourses: 1,
+      missingCourses: 1,
+      siteCards: 14,
+      ...over,
+    };
+  }
+
+  it('基线：条件全满足 → 该补', () => {
+    assertEqual(shouldOwnRender(ready()), true, '这就是用户报的那个场景');
+  });
+
+  it('六个条件各缺一条都不补', () => {
+    for (const over of [
+      { hijackOn: false },
+      { selfDrawOff: false },
+      { alreadyTried: true },
+      { enabledCourses: 0 },
+      { missingCourses: 0 },
+      { siteCards: 0 },
+    ]) {
+      assertEqual(shouldOwnRender(ready(over)), false, `缺了 ${JSON.stringify(over)} 就不该补`);
+    }
+  });
+
+  it('自绘开着时永不补：那条路本来就会立刻把课画上去，补一次等于每次刷新白跑一个请求', () => {
+    assertEqual(shouldOwnRender(ready({ selfDrawOff: false, missingCourses: 3 })), false, '自绘负责人');
+  });
+
+  it('缺少的课多于 0 才算「一门都没画上」的前置', () => {
+    assertEqual(shouldOwnRender(ready({ missingCourses: 0 })), false, '站点的表里已经有我们的课');
   });
 });
