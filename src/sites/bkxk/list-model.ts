@@ -266,7 +266,7 @@ export function addTask(store: TaskStore, input: TaskAddInput): { store: TaskSto
     courseName: cleanText(input.courseName),
     teacherName: cleanText(input.teacherName),
     category: input.category,
-    // 一律从 0 开始：抢课顺序由【任务】页的上移 / 下移改（见 tasks-model.ts 的 moveTask）
+    // 一律从 0 开始：抢课顺序看的是 priority（小的先抢），要插队到【任务】页点【−】
     priority: 0,
     enabled: true,
     status: TASK_STATUS_PENDING,

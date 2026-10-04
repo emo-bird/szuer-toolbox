@@ -49,7 +49,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-04T18:37:49.134Z（构建号 46） */
+/* 构建信息：2026-10-04T18:53:45.661Z（构建号 46） */
 
 "use strict";
 (() => {
@@ -3644,7 +3644,7 @@ ${text}
       courseName: cleanText(input.courseName),
       teacherName: cleanText(input.teacherName),
       category: input.category,
-      // 一律从 0 开始：抢课顺序由【任务】页的上移 / 下移改（见 tasks-model.ts 的 moveTask）
+      // 一律从 0 开始：抢课顺序看的是 priority（小的先抢），要插队到【任务】页点【−】
       priority: 0,
       enabled: true,
       status: TASK_STATUS_PENDING,
@@ -4362,36 +4362,28 @@ ${text}
     if (disabled > 0) parts.push(`未勾选 ${String(disabled)}`);
     return `${String(items2.length)} 条（${parts.join(" · ")}）`;
   }
+  var PRIORITY_MIN = -9;
+  var PRIORITY_MAX = 9;
+  function clampPriority(p) {
+    const n = typeof p === "number" ? p : Number(p);
+    if (!Number.isFinite(n)) return 0;
+    const i = Math.trunc(n);
+    if (i < PRIORITY_MIN) return PRIORITY_MIN;
+    if (i > PRIORITY_MAX) return PRIORITY_MAX;
+    return i;
+  }
+  function setPriority(store, id, p) {
+    return patchTask(store, id, { priority: clampPriority(p) });
+  }
   function priorityHint(p) {
     if (p < 0) return `优先级 ${String(p)}（比默认更先抢）`;
     if (p > 0) return `优先级 ${String(p)}（比默认更后抢）`;
     return "优先级 0（默认）";
   }
-  function moveTask(store, id, dir) {
-    const ordered = [...activeTasks(store.items)];
-    const idx = ordered.findIndex((t) => t.id === id);
-    if (idx < 0) return { store, moved: false };
-    const target = dir === "up" ? idx - 1 : idx + 1;
-    if (target < 0 || target >= ordered.length) return { store, moved: false };
-    const seq3 = ordered.map((t) => t.id);
-    const tmp = seq3[idx];
-    const other = seq3[target];
-    if (tmp === void 0 || other === void 0) return { store, moved: false };
-    seq3[idx] = other;
-    seq3[target] = tmp;
-    const rankOf = new Map(seq3.map((tid, i) => [tid, i]));
-    const items2 = store.items.map((t) => {
-      const rank = rankOf.get(t.id);
-      return rank === void 0 ? t : { ...t, priority: rank };
-    });
-    return { store: { ...store, items: items2 }, moved: true };
-  }
-  function canMoveTask(store, id, dir) {
-    const ordered = activeTasks(store.items);
-    const idx = ordered.findIndex((t) => t.id === id);
-    if (idx < 0) return false;
-    const target = dir === "up" ? idx - 1 : idx + 1;
-    return target >= 0 && target < ordered.length;
+  function priorityLabel(p) {
+    if (p < 0) return "更先抢";
+    if (p > 0) return "更后抢";
+    return "默认";
   }
 
   // src/sites/bkxk/tasks.ts
@@ -5175,14 +5167,22 @@ ${text}
   justify-content: flex-end;
 }
 
-/* 很小的按钮：上移 / 下移、删除。两个类名压住公共 .sztb-btn 的内边距 */
+/* 很小的按钮：优先级加减、删除。两个类名压住公共 .sztb-btn 的内边距 */
 .sztb-btn.sztb-bkxk-tk-tiny {
   padding: 1px 7px;
   font-size: 11.5px;
 }
 
-.sztb-bkxk-tk-prio {
+/* 步进器左边那个短标签：告诉人这一串是干什么的 */
+.sztb-bkxk-tk-prio-label {
   font-size: 11.5px;
+  color: var(--sztb-text-dim);
+}
+
+.sztb-bkxk-tk-prio {
+  min-width: 20px;
+  text-align: center;
+  font-size: 12px;
   color: var(--sztb-text-dim);
 }
 
@@ -5342,7 +5342,7 @@ ${text}
       main2.appendChild(el("span", { class: "sztb-bkxk-tk-meta", text: metaText(task) }));
       const msg = el("span", { class: "sztb-bkxk-tk-meta" });
       if (task.lastMsg === "") {
-        msg.textContent = "还没试过";
+        msg.textContent = priorityHint(task.priority);
       } else {
         msg.textContent = `${kindLabel(task.lastKind)}：${task.lastMsg}`;
         if (task.lastKind !== "ok" && task.lastKind !== "retryable") {
@@ -5360,43 +5360,39 @@ ${text}
       );
       item.appendChild(top);
       const ops = el("div", { class: "sztb-bkxk-tk-ops" });
-      const canUp = canMoveTask(loadTaskStore(), task.id, "up");
-      const canDown = canMoveTask(loadTaskStore(), task.id, "down");
-      const up = el("button", {
-        class: "sztb-btn sztb-bkxk-tk-tiny",
-        text: "上移",
-        attrs: {
-          type: "button",
-          title: canUp ? "在抢课顺序里往前挪一位" : "已经在最前面了",
-          ...canUp ? {} : { disabled: "true" }
-        }
-      });
-      up.addEventListener("click", () => {
-        updateTasks((s) => moveTask(s, task.id, "up").store);
-        render();
-      });
-      const down = el("button", {
-        class: "sztb-btn sztb-bkxk-tk-tiny",
-        text: "下移",
-        attrs: {
-          type: "button",
-          title: canDown ? "在抢课顺序里往后挪一位" : "已经在最后面了",
-          ...canDown ? {} : { disabled: "true" }
-        }
-      });
-      down.addEventListener("click", () => {
-        updateTasks((s) => moveTask(s, task.id, "down").store);
-        render();
-      });
-      ops.appendChild(up);
-      ops.appendChild(down);
       ops.appendChild(
         el("span", {
-          class: "sztb-bkxk-tk-prio",
-          text: priorityHint(task.priority),
-          attrs: { title: "抢课顺序按它排：数字越小越先抢" }
+          class: "sztb-bkxk-tk-prio-label",
+          text: priorityLabel(task.priority),
+          attrs: { title: priorityHint(task.priority) }
         })
       );
+      const down = el("button", {
+        class: "sztb-btn sztb-bkxk-tk-tiny",
+        text: "−",
+        attrs: { type: "button", title: "优先级 -1（更先抢）" }
+      });
+      down.addEventListener("click", () => {
+        updateTasks((s) => setPriority(s, task.id, clampPriority(task.priority - 1)));
+        render();
+      });
+      const prio = el("span", {
+        class: "sztb-bkxk-tk-prio",
+        text: String(task.priority),
+        attrs: { title: priorityHint(task.priority) }
+      });
+      const up = el("button", {
+        class: "sztb-btn sztb-bkxk-tk-tiny",
+        text: "＋",
+        attrs: { type: "button", title: "优先级 +1（更后抢）" }
+      });
+      up.addEventListener("click", () => {
+        updateTasks((s) => setPriority(s, task.id, clampPriority(task.priority + 1)));
+        render();
+      });
+      ops.appendChild(down);
+      ops.appendChild(prio);
+      ops.appendChild(up);
       const mode = el("select", { class: "sztb-select sztb-bkxk-tk-mode", attrs: { title: "失败后怎么处理" } });
       for (const value of MODE_ORDER) {
         const opt = el("option", { text: RETRY_MODE_NAME[value] ?? value });
@@ -6639,7 +6635,7 @@ ${text}
   // src/main.ts
   var log20 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-04T18:37:49.134Z" : null;
+  var BUILD_TIME = true ? "2026-10-04T18:53:45.661Z" : null;
   var BUILD_NO = true ? 46 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {

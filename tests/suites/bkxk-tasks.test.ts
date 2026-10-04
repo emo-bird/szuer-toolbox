@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 纯函数冒烟（档1）：抢课任务队列的判定规则与执行引擎的门禁。
  *
  * 为什么不测 `tasks.ts` 的抢课流程本身：它会真发请求（`bkxkSend`），
@@ -27,10 +27,11 @@ import {
   RETRY_MODE,
   RETRY_MODE_NAME,
   TASK_KIND,
+  PRIORITY_MAX,
+  PRIORITY_MIN,
   TASK_STATUS,
   activeTasks,
   byId,
-  canMoveTask,
   clampPriority,
   classifyMsg,
   clearStaleTasks,
@@ -38,12 +39,12 @@ import {
   isActiveTask,
   isRetryMode,
   kindLabel,
-  moveTask,
   normalizeRetryMode,
   normalizeStatus,
   normalizeStore,
   patchTask,
   priorityHint,
+  priorityLabel,
   removeTask,
   resetTasks,
   setPriority,
@@ -283,12 +284,12 @@ describe('bkxk 抢课 —— 该轮询谁、按什么顺序', () => {
 // ------------------------------------------------------------- 变更
 
 describe('bkxk 抢课 —— 变更规则', () => {
-  it('优先级钳位到 [-1, 1]，非法值回 0', () => {
-    assertEqual(clampPriority(-5), -1);
-    assertEqual(clampPriority(5), 1);
+  it('优先级钳位到 [-9, 9]，非法值回 0（下界从旧仓库的 0 放宽，见 clampPriority 注释）', () => {
+    assertEqual(clampPriority(-99), -9);
+    assertEqual(clampPriority(99), 9);
     assertEqual(clampPriority(1.9), 1);
     assertEqual(clampPriority(-1.9), -1);
-    assertEqual(clampPriority('2'), 1);
+    assertEqual(clampPriority('2'), 2);
     assertEqual(clampPriority(Number.NaN), 0);
     assertEqual(clampPriority('abc'), 0);
     assertEqual(clampPriority(undefined), 0);
@@ -402,90 +403,78 @@ describe('bkxk 抢课 —— 展示文案', () => {
   });
 });
 
-// ------------------------------------------------------------- 上移 / 下移
+// ---------------------------------------------------------------- 优先级
 
-describe('bkxk 抢课 —— 上移 / 下移（抢课顺序）', () => {
-  /** 按 activeTasks 的顺序取 id，便于断言「界面上看到的顺序」 */
-  function order(store: TaskStore): string[] {
-    return activeTasks(store.items).map((t) => t.id);
-  }
-
-  it('默认三条（priority 全是 0）时，上移真的能换位', () => {
-    // 这正是旧仓库 moveTask 的静默 no-op 场景：只比 priority，同号就不动
-    const s1 = store(task({ id: 'a' }), task({ id: 'b' }), task({ id: 'c' }));
-    const r1 = moveTask(s1, 'b', 'up');
-    assertEqual(r1.moved, true);
-    assertDeepEqual(order(r1.store), ['b', 'a', 'c']);
+describe('bkxk 抢课 —— 优先级步进器（-9 ~ 9）', () => {
+  it('默认是 0，加号减号各走一步', () => {
+    const s1 = store(task({ id: 'a' }));
+    assertEqual(byId(s1, 'a')?.priority, 0);
+    const up = setPriority(s1, 'a', clampPriority(0 + 1));
+    assertEqual(byId(up, 'a')?.priority, 1);
+    const down = setPriority(s1, 'a', clampPriority(0 - 1));
+    assertEqual(byId(down, 'a')?.priority, -1);
   });
 
-  it('下移同理，且交换的是 priority 而不是数组顺序', () => {
-    const s1 = store(task({ id: 'a' }), task({ id: 'b' }), task({ id: 'c' }));
-    const r1 = moveTask(s1, 'a', 'down');
-    assertEqual(r1.moved, true);
-    assertDeepEqual(order(r1.store), ['b', 'a', 'c']);
-    // seq 是「加入队列的先后」，不该被排序操作改动
+  it('可以一路减到 -9，比默认更先抢 —— 这正是旧仓库按不动的那一步', () => {
+    // 旧仓库 NS.util.clamp(p, -1, 1, 0) 的下界是 0，默认队列全 0 ⇒ 【−】永远 no-op。
+    // 放宽到 -9 之后，「插到默认那批前面」才有手段。
+    const s1 = store(task({ id: 'a' }), task({ id: 'b' }));
+    const s2 = setPriority(s1, 'b', clampPriority(-9));
+    assertEqual(byId(s2, 'b')?.priority, -9);
+    // 排序口径：priority 小的在前 ⇒ b 真的排到了 a 前面
     assertDeepEqual(
-      r1.store.items.map((t) => t.seq),
-      [1, 1, 1],
+      activeTasks(s2.items).map((t) => t.id),
+      ['b', 'a'],
     );
   });
 
-  it('已有一条在 -1（钳位边界）时上移仍然有效，且不会两条都撞到 -1 卡死', () => {
-    const s1 = store(task({ id: 'a', priority: -1 }), task({ id: 'b', priority: 0 }));
-    const r1 = moveTask(s1, 'b', 'up');
-    assertEqual(r1.moved, true);
-    assertDeepEqual(order(r1.store), ['b', 'a']);
-    // 重排把顺序原样写回 0,1,…，所以 b 现在是最前面、值就是 0
-    assertEqual(byId(r1.store, 'b')?.priority, 0);
-    assertEqual(byId(r1.store, 'a')?.priority, 1);
-    // 再点一次 a 的上移，应当还能换回来（说明没有卡死）
-    assertDeepEqual(order(moveTask(r1.store, 'a', 'up').store), ['a', 'b']);
+  it('两端都钳住，越界输入不会产生 -10 / 10', () => {
+    const s1 = store(task({ id: 'a' }));
+    assertEqual(byId(setPriority(s1, 'a', -99), 'a')?.priority, PRIORITY_MIN);
+    assertEqual(byId(setPriority(s1, 'a', 99), 'a')?.priority, PRIORITY_MAX);
+    assertEqual(byId(setPriority(s1, 'a', 1.7), 'a')?.priority, 1);
+    assertEqual(byId(setPriority(s1, 'a', Number.NaN), 'a')?.priority, 0);
+    assertEqual(byId(setPriority(s1, 'a', 'abc'), 'a')?.priority, 0);
   });
 
-  it('已在首位上移 / 已在末位下移 → 同一个 store 引用，moved=false', () => {
-    const s1 = store(task({ id: 'a' }), task({ id: 'b' }));
-    const up = moveTask(s1, 'a', 'up');
-    assertEqual(up.moved, false);
-    assertEqual(up.store, s1);
-    const down = moveTask(s1, 'b', 'down');
-    assertEqual(down.moved, false);
-    assertEqual(down.store, s1);
+  it('钳位常量本身自洽（最小值真的比默认更先抢）', () => {
+    assertEqual(PRIORITY_MIN < 0, true);
+    assertEqual(PRIORITY_MAX > 0, true);
+    assertEqual(clampPriority(PRIORITY_MIN - 1), PRIORITY_MIN);
+    assertEqual(clampPriority(PRIORITY_MAX + 1), PRIORITY_MAX);
+  });
+
+  it('短标签把数字翻译成人话，别把方向说反', () => {
+    assertEqual(priorityLabel(-9), '更先抢');
+    assertEqual(priorityLabel(-1), '更先抢');
+    assertEqual(priorityLabel(0), '默认');
+    assertEqual(priorityLabel(1), '更后抢');
+    assertEqual(priorityLabel(9), '更后抢');
+  });
+
+  it('短标签与长提示的方向一致（同一件事的两种说法）', () => {
+    for (const p of [PRIORITY_MIN, -1, 0, 1, PRIORITY_MAX]) {
+      const long = priorityHint(p);
+      const short = priorityLabel(p);
+      if (p < 0) {
+        assertEqual(long.includes('更先抢'), true);
+        assertEqual(short, '更先抢');
+      } else if (p > 0) {
+        assertEqual(long.includes('更后抢'), true);
+        assertEqual(short, '更后抢');
+      } else {
+        assertEqual(long.includes('默认'), true);
+        assertEqual(short, '默认');
+      }
+    }
   });
 
   it('id 不存在 → 同一个 store 引用（既有约定的延续）', () => {
     const s1 = store(task({ id: 'a' }));
-    const r1 = moveTask(s1, 'zzz', 'up');
-    assertEqual(r1.moved, false);
-    assertEqual(r1.store, s1);
-  });
-
-  it('不勾选的任务不参与排序移动', () => {
-    const s1 = store(task({ id: 'a' }), task({ id: 'b', enabled: false }), task({ id: 'c' }));
-    // b 未勾选 ⇒ activeTasks 里根本没有它 ⇒ 不能动
-    assertEqual(canMoveTask(s1, 'b', 'up'), false);
-    assertEqual(moveTask(s1, 'b', 'up').moved, false);
-    // a 的下一条是 c（跳过 b），下移后 a 应当排到 c 后面
-    assertDeepEqual(order(moveTask(s1, 'a', 'down').store), ['c', 'a']);
-  });
-
-  it('canMoveTask 与 moveTask 的判据一致（按钮不会亮着却点了没反应）', () => {
-    const s1 = store(task({ id: 'a' }), task({ id: 'b' }), task({ id: 'c' }));
-    for (const id of ['a', 'b', 'c']) {
-      for (const dir of ['up', 'down'] as const) {
-        assertEqual(canMoveTask(s1, id, dir), moveTask(s1, id, dir).moved, `${id} ${dir} 判据不一致`);
-      }
-    }
-    assertEqual(canMoveTask(s1, 'zzz', 'up'), false);
-  });
-
-  it('反复上移能把末位一路挪到首位，且顺序始终不重复', () => {
-    const s1 = store(task({ id: 'a' }), task({ id: 'b' }), task({ id: 'c' }), task({ id: 'd' }));
-    let cur = s1;
-    for (let i = 0; i < 3; i += 1) cur = moveTask(cur, 'd', 'up').store;
-    assertDeepEqual(order(cur), ['d', 'a', 'b', 'c']);
-    assertEqual(canMoveTask(cur, 'd', 'up'), false);
+    assertEqual(setPriority(s1, 'zzz', 3), s1);
   });
 });
+
 
 // ------------------------------------------------------------- 引擎门禁
 
