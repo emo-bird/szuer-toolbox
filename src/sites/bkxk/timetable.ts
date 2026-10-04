@@ -37,10 +37,12 @@ import {
   TT_DONE_ATTR,
   TT_HOLDER_CLASS,
   TT_LESSON_CLASS,
+  TT_LINES_CLASS,
   TT_TAG_CLASS,
   TT_TAG_TEXT,
   TT_TIP_CLASS,
   findDayColumnIndex,
+  needsRescan,
   pickSlotH,
   planInjection,
   readExistingCards,
@@ -121,13 +123,17 @@ function buildCard(seg: TimeSegment, course: BkxkCustomCourse, conflict: boolean
   if (course.teacher !== '') lines.push(el('div', { text: course.teacher }));
   if (conflict) lines.push(el('div', { class: TT_TIP_CLASS, text: TT_CONFLICT_TIP }));
 
+  // ⚠️ 这几行必须包在中间那层 div 里（站点同构：`.cv-course-card-single > div > div`）——
+  // 站点给卡片本身的 CSS 会把**直接子元素**排成一行，漏了这层就变成「左中右」。
+  const box = el('div', { class: TT_LINES_CLASS }, ...lines);
+
   const card = el(
     'div',
     {
       class: `${SITE_CARD_CLASS} ${TT_CARD_CLASS}${conflict ? ` ${TT_CONFLICT_CLASS}` : ''}`,
       attrs: { [TT_DONE_ATTR]: '1' },
     },
-    ...lines,
+    box,
   );
   // 自定义课程的颜色由用户选（`CUSTOM_COLORS` / `colorAt`），站点自己的卡片不吃这个字段
   if (course.color !== '') card.style.background = course.color;
@@ -169,6 +175,12 @@ export function clearInjected(table: HTMLElement | null): number {
   const olds = scope.querySelectorAll<HTMLElement>(`.${TT_LESSON_CLASS}`);
   for (const node of olds) node.remove();
   return olds.length;
+}
+
+/** 当前页面上还留着几个我们注入的「一节课」（判断站点有没有把我们抹掉） */
+export function countInjected(table: HTMLElement | null): number {
+  const scope: ParentNode = table ?? document;
+  return scope.querySelectorAll(`.${TT_LESSON_CLASS}`).length;
 }
 
 // ------------------------------------------------------------ 渲染与扫描
@@ -254,13 +266,19 @@ export function startTimetableInjection(): () => void {
     if (timer !== null) return;
     timer = window.setTimeout(() => {
       timer = null;
-      // 站点重绘会连带把我们注入的块一起抹掉，这时才需要重画；
-      // 我们自己的写入（writing.busy）直接忽略。
+      // 我们自己的写入期间不重画（同任务内的自触发）。
       if (writing.busy) return;
+      const table = findTable();
+      if (table === null) return;
       if (!isEnabled(SITE_ID, TOGGLE.TIMETABLE_SELF_DRAW)) {
         scan(writing);
         return;
       }
+      // ⚠️ 关键判据：**只有我们注入的节点被抹掉了才重画**（站点翻页 / 切学期会整段重绘）。
+      // 若节点还在，说明这次 DOM 变动就是我们自己上一次注入造成的 —— 而 MutationObserver
+      // 的回调是**异步**投递的，`writing` 闸门那时早已复位，拦不住它 ⇒ 会变成
+      // 「清掉 → 重注入 → 又触发 → 每 300ms 一次」的死循环（v0.26 修的真 bug）。
+      if (!needsRescan(countInjected(table), readEnabledCustomCourses().length)) return;
       scan(writing);
     }, RESCAN_DELAY_MS);
   };

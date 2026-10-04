@@ -49,7 +49,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-04T10:15:44.329Z（构建号 39） */
+/* 构建信息：2026-10-04T10:47:28.379Z（构建号 40） */
 
 "use strict";
 (() => {
@@ -3650,6 +3650,17 @@ ${options.desc ?? ""}
   opacity: .92;
 }
 
+/* 卡片里「装三行文字」的那层（站点同构：卡片 > div > div）。
+   站点给卡片本身（.cv-course-card-single）的 CSS 会把**直接子元素**排成一行，
+   所以课名 / 时间 / 地点 / 教师必须待在这层里，并且显式声明为纵向堆叠。 */
+.sztb-bkxk-tt-lines {
+  display: block;
+}
+
+.sztb-bkxk-tt-lines > div {
+  display: block;
+}
+
 .sztb-bkxk-tt-card .sztb-bkxk-tt-tag {
   display: inline-block;
   font-size: 11px;
@@ -3681,6 +3692,7 @@ ${options.desc ?? ""}
   var TT_TIP_CLASS = "sztb-bkxk-tt-conflict-tip";
   var TT_HOLDER_CLASS = "sztb-bkxk-tt-holder";
   var TT_DONE_ATTR = "data-sztb-tt";
+  var TT_LINES_CLASS = "sztb-bkxk-tt-lines";
   var SITE_TABLE_ID = "myCourseTable";
   var SITE_TABLE_SELECTOR = ".cv-my-course";
   var SITE_LEFT_SELECTOR = ".cv-left";
@@ -3775,6 +3787,9 @@ ${options.desc ?? ""}
     }
     return out;
   }
+  function needsRescan(injected, enabledCourses2) {
+    return enabledCourses2 > 0 && injected === 0;
+  }
 
   // src/sites/bkxk/timetable.ts
   var log12 = scoped("site/bkxk/timetable");
@@ -3824,13 +3839,14 @@ ${options.desc ?? ""}
     if (seg.place !== "") lines.push(el("div", { text: seg.place }));
     if (course.teacher !== "") lines.push(el("div", { text: course.teacher }));
     if (conflict) lines.push(el("div", { class: TT_TIP_CLASS, text: TT_CONFLICT_TIP }));
+    const box = el("div", { class: TT_LINES_CLASS }, ...lines);
     const card = el(
       "div",
       {
         class: `${SITE_CARD_CLASS} ${TT_CARD_CLASS}${conflict ? ` ${TT_CONFLICT_CLASS}` : ""}`,
         attrs: { [TT_DONE_ATTR]: "1" }
       },
-      ...lines
+      box
     );
     if (course.color !== "") card.style.background = course.color;
     return card;
@@ -3863,6 +3879,10 @@ ${options.desc ?? ""}
     const olds = scope.querySelectorAll(`.${TT_LESSON_CLASS}`);
     for (const node of olds) node.remove();
     return olds.length;
+  }
+  function countInjected(table) {
+    const scope = table ?? document;
+    return scope.querySelectorAll(`.${TT_LESSON_CLASS}`).length;
   }
   var writing = { busy: false };
   function render(table, gate) {
@@ -3912,10 +3932,13 @@ ${options.desc ?? ""}
       timer2 = window.setTimeout(() => {
         timer2 = null;
         if (writing.busy) return;
+        const table = findTable();
+        if (table === null) return;
         if (!isEnabled(SITE_ID, TOGGLE.TIMETABLE_SELF_DRAW)) {
           scan2(writing);
           return;
         }
+        if (!needsRescan(countInjected(table), readEnabledCustomCourses().length)) return;
         scan2(writing);
       }, RESCAN_DELAY_MS2);
     };
@@ -4726,8 +4749,8 @@ ${options.desc ?? ""}
   // src/main.ts
   var log15 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-04T10:15:44.329Z" : null;
-  var BUILD_NO = true ? 39 : null;
+  var BUILD_TIME = true ? "2026-10-04T10:47:28.379Z" : null;
+  var BUILD_NO = true ? 40 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();

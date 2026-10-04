@@ -20,12 +20,14 @@ import {
   SITE_LESSON_SELECTOR,
   TT_CARD_CLASS,
   TT_CONFLICT_TIP,
+  TT_LINES_CLASS,
   TT_TAG_TEXT,
   classTokens,
   conflictsWithCards,
   dayColumnName,
   findDayColumnIndex,
   hasClassToken,
+  needsRescan,
   pickSlotH,
   planInjection,
   readExistingCards,
@@ -309,5 +311,27 @@ describe('bkxk/timetable · 派单表', () => {
   it('注入文案常量与卡片结构对齐', () => {
     assertEqual(TT_TAG_TEXT, '自定义', '标签文案');
     assertEqual(TT_CONFLICT_TIP, '与已选课程冲突', '冲突提示文案');
+  });
+});
+
+// ------------------------------------------------------------ 重绘判据（v0.26）
+
+describe('bkxk/timetable —— 站点重绘后要不要重画（v0.26）', () => {
+  it('我们的节点还在 → 不重画（否则就是自触发死循环）', () => {
+    assertEqual(needsRescan(6, 1), false, '节点还在说明那次变动是我们自己造成的');
+  });
+
+  it('节点被站点抹掉了、且还有启用的自定义课程 → 重画', () => {
+    assertEqual(needsRescan(0, 1), true, '站点重绘后要补回来');
+  });
+
+  it('没有启用的自定义课程 → 永不重画（开了开关也不会自己动）', () => {
+    assertEqual(needsRescan(0, 0), false, '无课程时不必清也不必画');
+    assertEqual(needsRescan(6, 0), false, '课程被全部停用/删除后，交给 refreshTimetable 清理');
+  });
+
+  it('课名字层类名带了项目前缀（只作用于我们自己的节点）', () => {
+    assert(TT_LINES_CLASS.startsWith('sztb-bkxk-'), '我们的类名带前缀');
+    assert(!hasClassToken(SITE_CARD_CLASS, TT_LINES_CLASS), '与站点类名不撞');
   });
 });

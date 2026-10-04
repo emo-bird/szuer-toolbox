@@ -18,6 +18,17 @@ export const TT_CSS = `
   opacity: .92;
 }
 
+/* 卡片里「装三行文字」的那层（站点同构：卡片 > div > div）。
+   站点给卡片本身（.cv-course-card-single）的 CSS 会把**直接子元素**排成一行，
+   所以课名 / 时间 / 地点 / 教师必须待在这层里，并且显式声明为纵向堆叠。 */
+.sztb-bkxk-tt-lines {
+  display: block;
+}
+
+.sztb-bkxk-tt-lines > div {
+  display: block;
+}
+
 .sztb-bkxk-tt-card .sztb-bkxk-tt-tag {
   display: inline-block;
   font-size: 11px;

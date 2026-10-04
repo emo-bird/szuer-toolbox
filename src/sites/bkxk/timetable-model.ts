@@ -41,6 +41,15 @@ export const TT_TIP_CLASS = 'sztb-bkxk-tt-conflict-tip';
 export const TT_HOLDER_CLASS = 'sztb-bkxk-tt-holder';
 /** 标记属性：注入过的节点都带，方便自检与清理（值是 `'1'`） */
 export const TT_DONE_ATTR = 'data-sztb-tt';
+/**
+ * 卡片内那层「装三行文字」的 div。
+ *
+ * ⚠️ 站点结构是 `.cv-course-card-single > div > div{课程名,时间,地点,教师}` ——
+ * **中间那层 div 不是装饰**：站点给卡片本身（`.cv-course-card-single`）的 CSS
+ * 会把它的**直接子元素**排成一行。v0.26 前我们漏了这层，于是课名/时间/地点
+ * 被排成了「左中右」，用户手测原话：「预期应该是上中下的排列」。
+ */
+export const TT_LINES_CLASS = 'sztb-bkxk-tt-lines';
 
 /** 站点选择器（单一来源，改结构只改这里） */
 export const SITE_TABLE_ID = 'myCourseTable';
@@ -235,4 +244,21 @@ export function planInjection(
     });
   }
   return out;
+}
+
+/**
+ * 站点重绘后**要不要重画**我们注入的那些块。
+ *
+ * 语义是「我们的节点被抹掉了才重画」：站点翻页 / 切学期会整段重绘课表，
+ * 连带把我们注入的节点一起删掉 —— 这时才需要补。若我们的节点还在，说明
+ * 这次 DOM 变动**就是我们自己上一次注入造成的**，再扫一次就等于自杀式循环。
+ *
+ * ⚠️ 为什么不能只靠 `writing` 闸门（v0.26 修的 bug）：闸门是**同步**置位/复位的，
+ * 而 MutationObserver 的回调是**异步**投递的（当前任务结束后的微任务里才跑），
+ * 回调执行时闸门早就复位了 ⇒ 拦不住自触发。旧仓库 `timetable.js` 用的正是
+ * 「我们的节点还在吗」这条判据（`if (!document.querySelector('.szu-tt-lesson') ...) render()`）。
+ * 现象是日志每 300ms 刷一条「课表注入…」，同时白白清掉再重建一遍 DOM。
+ */
+export function needsRescan(injected: number, enabledCourses: number): boolean {
+  return enabledCourses > 0 && injected === 0;
 }
