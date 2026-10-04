@@ -24,6 +24,7 @@ import type { SiteAdapter } from '../types.ts';
 import { BKXK_TOGGLES, applyBkxkSettings, registerBkxkSettings, SITE_ID } from './settings.ts';
 import { readSession, sessionSummary } from './session.ts';
 import { runMigration } from './legacy.ts';
+import { startListInjection } from './list.ts';
 import { BKXK_SETTINGS_TAB } from './tabs/settings.ts';
 
 const log = scoped('site/bkxk');
@@ -79,5 +80,10 @@ export const bkxkAdapter: SiteAdapter = {
       log.info(`站点已就绪：${sessionSummary(session)}`);
     }
     log.info(`功能页=${String(ctx.isFeaturePage)}（设置标签页已就绪，其余标签页在批 4 接入）`);
+
+    // 选课页注入教学班ID 与抢课/监控按钮。模块自己判页面（课表页也有 .cv-row，
+    // 不是我们该动的地方），所以这里不重复判断。
+    // 本轮点击**只入队**，不发请求 —— 执行引擎在批 4。
+    startListInjection(ctx.panel);
   },
 };

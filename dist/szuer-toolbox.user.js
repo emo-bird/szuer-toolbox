@@ -49,7 +49,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-03T17:28:29.123Z（构建号 22） */
+/* 构建信息：2026-10-03T19:56:02.619Z（构建号 31） */
 
 "use strict";
 (() => {
@@ -1156,19 +1156,87 @@ ${options.desc ?? ""}
     }
   };
 
+  // src/common/utils/clipboard.ts
+  var ORDER = ["gm", "exec", "modern"];
+  function has(env, method) {
+    if (method === "gm") return env.hasGm;
+    if (method === "exec") return env.hasExec;
+    if (method === "modern") return env.hasClipboard;
+    return false;
+  }
+  function copyMethodOrder(env) {
+    return ORDER.filter((m) => has(env, m));
+  }
+  function detectCopyEnv() {
+    const g = globalThis;
+    return {
+      hasGm: typeof g["GM_setClipboard"] === "function",
+      // http 页面上这是 undefined；访问它本身也可能抛（极少），所以整段包起来
+      hasClipboard: typeof navigator !== "undefined" && navigator.clipboard !== void 0,
+      hasExec: typeof document !== "undefined" && typeof document.execCommand === "function"
+    };
+  }
+  function execCopy(text) {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.top = "-1000px";
+    ta.style.left = "-1000px";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    const sel = typeof document.getSelection === "function" ? document.getSelection() : null;
+    const saved = [];
+    if (sel !== null) {
+      for (let i = 0; i < sel.rangeCount; i++) saved.push(sel.getRangeAt(i).cloneRange());
+    }
+    let ok = false;
+    try {
+      ta.select();
+      ok = document.execCommand("copy");
+    } catch {
+      ok = false;
+    }
+    ta.remove();
+    if (sel !== null) {
+      sel.removeAllRanges();
+      for (const r of saved) sel.addRange(r);
+    }
+    return ok;
+  }
+  async function copyText(text) {
+    const methods = copyMethodOrder(detectCopyEnv());
+    if (methods.length === 0) {
+      return { ok: false, method: "none", detail: "当前环境没有任何可用的剪贴板写入方式" };
+    }
+    let last = "none";
+    let detail = "";
+    for (const method of methods) {
+      last = method;
+      try {
+        if (method === "gm") {
+          globalThis.GM_setClipboard(text);
+          return { ok: true, method, detail: "" };
+        }
+        if (method === "exec") {
+          if (execCopy(text)) return { ok: true, method, detail: "" };
+          detail = "document.execCommand(copy) 返回 false";
+          continue;
+        }
+        await navigator.clipboard.writeText(text);
+        return { ok: true, method, detail: "" };
+      } catch (err) {
+        detail = `${method} 失败：${String(err)}`;
+      }
+    }
+    return { ok: false, method: last, detail };
+  }
+
   // src/common/ui/tabs/log.ts
   var LEVELS = ["debug", "info", "warn", "error"];
   async function copyAll() {
     const text = entries().map(formatEntry).join("\n");
-    const gm = globalThis["GM_setClipboard"];
-    if (typeof gm === "function") {
-      gm(text);
-      return;
-    }
-    try {
-      await navigator.clipboard.writeText(text);
-    } catch {
-    }
+    await copyText(text);
   }
   var tabCss = `
 .sztb-log-wrap { display: flex; flex-direction: column; gap: 8px; height: 100%; min-height: 0; }
@@ -1881,6 +1949,8 @@ ${options.desc ?? ""}
     TIMETABLE_SELF_DRAW: "timetable-self-draw",
     /** 🟢 列表加列 */
     LIST_EXTRA_COLUMNS: "list-extra-columns",
+    /** 🟢 列表注入（教学班ID / 抢课按钮） */
+    LIST_INJECT: "list-inject",
     /** 🟢 自定义课程 */
     CUSTOM_COURSES: "custom-courses"
   };
@@ -1930,6 +2000,14 @@ ${options.desc ?? ""}
       id: TOGGLE.LIST_EXTRA_COLUMNS,
       label: "列表加列（冲突 / 余量）",
       desc: "在选课列表里补上冲突提示与实时余量。用 flex 布局，不写死列宽。",
+      risk: "safe",
+      default: true,
+      group: "选课列表"
+    },
+    {
+      id: TOGGLE.LIST_INJECT,
+      label: "列表注入（教学班ID / 抢课按钮）",
+      desc: "在选课列表的每个教学班旁补上教学班ID 与「添加抢课 / 添加监控」两个按钮。点击只写本地队列，不发送任何请求。关掉后已注入的块会立即移除。",
       risk: "safe",
       default: true,
       group: "选课列表"
@@ -2322,6 +2400,757 @@ ${options.desc ?? ""}
     return lines;
   }
 
+  // src/sites/bkxk/list-style.ts
+  var LIST_STYLE_ID = "sztb-bkxk-list-style";
+  var LIST_CSS = `
+/* ---- 我们自己的注入块（列表行与卡片共用，v0.17 起整体压缩高度） ---- */
+
+.sztb-bkxk-block {
+  display: block;
+  margin: 0 0 1px;
+  padding: 1px 5px;
+  border-left: 2px solid #2a6df4;
+  border-radius: 3px;
+  background: rgba(42, 109, 244, 0.06);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.sztb-bkxk-id {
+  display: block;
+  font-family: ui-monospace, Consolas, "Courier New", monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #1b4fd8;
+  white-space: nowrap;
+  cursor: pointer;
+  /* 一整块可选中：复制失败时用户可以手动拖选，不用一个字符一个字符点 */
+  user-select: all;
+}
+
+.sztb-bkxk-id:hover {
+  text-decoration: underline;
+}
+
+/* 两个按钮**必须在同一行**：列表页这一列只有 150px 上下，
+   一旦允许换行就折成两行、把整行行高顶上去（v0.17 手测 #52 的反馈） */
+.sztb-bkxk-ops {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 4px;
+  margin-top: 1px;
+  white-space: nowrap;
+}
+
+.sztb-bkxk-btn {
+  flex: 0 0 auto;
+  padding: 0 6px;
+  border: 1px solid #c9d4e6;
+  border-radius: 3px;
+  background: #fff;
+  color: #333;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.sztb-bkxk-btn:hover {
+  border-color: #2a6df4;
+  color: #2a6df4;
+}
+
+/* 已入队 / 已监控 */
+.sztb-bkxk-btn-on {
+  border-color: #2a6df4;
+  background: #2a6df4;
+  color: #fff;
+}
+
+.sztb-bkxk-btn-on:hover {
+  color: #fff;
+}
+
+/* 新加的那一列：占满剩余宽度，最小宽度兜住「ID 一行 + 两个按钮一行」 */
+.sztb-bkxk-col {
+  flex: 1 1 auto;
+  min-width: 150px;
+  box-sizing: border-box;
+}
+
+.sztb-bkxk-head {
+  font-weight: bold;
+  /* 站点给表头单元格挂的排序箭头（伪元素或背景图）会连我们这份一起命中 ——
+     我们的表头不是可排序列，v0.17 手测 #53 要求清掉（用户拍板保留「抢课模块」文字） */
+  background-image: none !important;
+  cursor: default;
+}
+
+.sztb-bkxk-head::before,
+.sztb-bkxk-head::after {
+  content: none !important;
+  display: none !important;
+}
+
+/* ---- 只在被我们加过列的容器上改布局 ---- */
+
+.cv-body:has(> .cv-row > .sztb-bkxk-col) > .cv-row {
+  display: flex;
+  align-items: center;
+}
+
+.cv-body:has(> .cv-row > .sztb-bkxk-col) > .cv-row > div {
+  float: none;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.cv-head:has(> .sztb-bkxk-col) {
+  display: flex;
+  align-items: center;
+}
+
+.cv-head:has(> .sztb-bkxk-col) > * {
+  float: none;
+  flex: 0 1 auto;
+}
+
+.cv-head:has(> .sztb-bkxk-col) > .sztb-bkxk-col {
+  flex: 1 1 auto;
+}
+
+/* ---- 卡片页：卡片高度改为「按内容自适应」+ 缩小卡片内外边距（v0.17 手测 #54/#55，
+        v0.18 按 v5 采样定稿）----
+
+   **为什么必须让高度自适应**：站点给 .cv-course-card 写死了 210px 高（v5 采样实测 13 张卡
+   的计算高度全是 210px，overflow 是 visible），而卡片里的 .cv-info 实际有 234–254px 高
+   —— 各卡内容本来就不一样（有的多一行 .cv-caption-text / .cv-caption-red）。
+   固定高度装不下，内容就从卡片下沿漏出去；也是因为这个写死的高度，我们压 h5 的行高
+   在屏幕上一屏卡片数量毫无变化（用户手测「行高没有减少」的真正原因）。
+   所以这里对含我们块的卡片改 height: auto（!important 压得住站点的行内 style），
+   min-height 保留站点原值，以免内容少的卡变得比站点风格还矮。
+
+   严格限制在「含我们注入块的那张卡」上：没有注入的卡片一律不动。
+   注入块是 .cv-info 的第一个子元素，所以锚点用 :has(> .cv-info > .sztb-bkxk-block)。 */
+
+.cv-course-card:has(> .cv-info > .sztb-bkxk-block) {
+  height: auto !important;
+  min-height: 210px;
+  /* 站点是 16px。v0.18 先压到 8px 10px，手测反馈「过于不美观」⇒ v0.19 恢复一点点到 12px 14px：
+     既比站点原样紧，又不至于内容贴边。想再松/再紧就改这一行。 */
+  padding: 12px 14px !important;
+  box-sizing: border-box;
+}
+
+.cv-info:has(> .sztb-bkxk-block) {
+  padding: 2px 0 !important;
+}
+
+/* 卡片内容区里的每一层：上下外边距一律清零（站点给这些 div 挂了 margin-top: 4px）。
+   这里用通配而不是逐个列举，是因为站点各卡的元素数量不同 ——
+   列举漏掉的那一层就是「部分卡片还是溢出」的原因（v5 采样里那三个 20/16/32px 的 div）。 */
+.cv-info:has(> .sztb-bkxk-block) > * {
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+}
+
+.cv-info:has(> .sztb-bkxk-block) > h5 {
+  line-height: 1.3 !important;
+}
+
+.cv-info:has(> .sztb-bkxk-block) > h5 > div,
+.cv-info:has(> .sztb-bkxk-block) > div.cv-caption-text,
+.cv-info:has(> .sztb-bkxk-block) > div.cv-caption-red {
+  line-height: 1.3 !important;
+}
+
+.cv-info:has(> .sztb-bkxk-block) > div.cv-operate {
+  margin-top: 2px !important;
+  margin-bottom: 2px !important;
+}
+
+/* 卡片里我们的块：ID 与按钮保持两行（卡片只有 ~212px 宽，硬挤一行会把 ID 截断），
+   但纵向间距再收一点。站点给 .cv-info 的子元素挂了 margin-top，这里要显式压掉。 */
+.cv-info > .sztb-bkxk-block {
+  margin-top: 0;
+  margin-bottom: 2px;
+}
+
+/* ---- 站点节点的重新摆位（v0.20）----
+
+   list.ts 会把站点自己的两个节点挪位置（见那边 relocateInUnit 的注释）：
+     · 退选按钮 button.cv-delete-volunteer → 挪进 h5、「已选」标签旁边
+     · 收藏星标 img.collection-img → 挪到课名（span.cv-info-title）前面
+   搬完剩下的宽度问题由这里的样式解决。 */
+
+/* h5 原来是「float:left 的课名 + inline-block 的标签」。
+   课名浮动后不占文档流宽度，剩下的空间不够再塞一个退选按钮（h5 宽 216px，
+   课名 136 + 已选 41 + 间隙 4 = 177，只剩 39px，而退选按钮要 41px）。
+   改成 flex 之后三个元素一起参与排布，课名按内容自适应宽度，标签靠右。 */
+.cv-info:has(> .sztb-bkxk-block) > h5 {
+  display: flex !important;
+  align-items: center;
+  gap: 4px;
+}
+
+/* 课名：取消浮动、按内容宽度占位（min-width: 0 允许它在极窄时收缩，不撑破卡片） */
+.cv-info:has(> .sztb-bkxk-block) > h5 > .cv-info-title {
+  float: none !important;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+/* h5 里的三个标签（星标 / 已选 / 退选）：不缩放、不换行，各自的 margin 由站点给 */
+.cv-info:has(> .sztb-bkxk-block) > h5 > .cv-one,
+.cv-info:has(> .sztb-bkxk-block) > h5 > .cv-delete-volunteer,
+.cv-info:has(> .sztb-bkxk-block) > h5 > .collection-img {
+  flex: 0 0 auto;
+}
+
+/* 星标搬进 h5 后，原本由它那层 div 提供的 20px 行高没了 —— 星标自己带
+   vertical-align: middle 是给行内流用的，flex 下不生效，靠 align-items: center 对齐。
+   站点给它的 inline style 里有 width/height: 20px，保留。 */
+.cv-info:has(> .sztb-bkxk-block) > h5 > .collection-img {
+  display: block;
+  cursor: pointer;
+}
+
+/* 退选按钮搬走以后，站点那个只装它一个的 div.cv-caption-text 会变成空 div。
+   站点在未选课时这个 div 本来就高 0，所以**不需要额外规则** —— 这里只兜一层保险：
+   万一站点给空 div 补了伪元素或背景，也不让它冒出行高。 */
+.cv-info:has(> .sztb-bkxk-block) > div.cv-caption-text:empty {
+  height: 0 !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+`;
+
+  // src/sites/bkxk/list-model.ts
+  var TC_ID_RE = /^\d{15,24}$/;
+  function isTcId(value) {
+    return typeof value === "string" && TC_ID_RE.test(value);
+  }
+  function cleanText(raw) {
+    if (raw === null || raw === void 0) return "";
+    return raw.replace(/\s+/g, " ").replace(/^[·\s]+/, "").trim();
+  }
+  function pickTcId(candidates) {
+    for (const c of candidates) {
+      if (isTcId(c)) return c;
+    }
+    return null;
+  }
+  var BODY_CATEGORY = {
+    programBody: "FANKC",
+    unProgramBody: "FAWKC",
+    recommendBody: "TJKC",
+    publicBody: "XGXK",
+    retakeBody: "CXKC",
+    sportBody: "TYKC",
+    minorBody: "FXKC",
+    moocBody: "MOOC",
+    // 全校课程没有独立类别码，旧仓库按校公选处理（旧仓库自己标了「未实测」）
+    schoolBody: "XGXK"
+  };
+  function categoryOfBodyId(id) {
+    if (id === null || id === void 0) return "";
+    const hit = BODY_CATEGORY[id];
+    return hit === void 0 ? "" : hit;
+  }
+  var TASK_STATUS_PENDING = "pending";
+  function asRecord2(v) {
+    if (v === null || typeof v !== "object" || Array.isArray(v)) return null;
+    return v;
+  }
+  function str(v) {
+    if (typeof v === "string") return v;
+    if (typeof v === "number" && Number.isFinite(v)) return String(v);
+    return "";
+  }
+  function num(v, fallback) {
+    return typeof v === "number" && Number.isFinite(v) ? v : fallback;
+  }
+  function bool(v, fallback) {
+    return typeof v === "boolean" ? v : fallback;
+  }
+  function readTaskStore(raw) {
+    const rec = asRecord2(raw);
+    const rawItems = rec === null ? null : rec["items"];
+    if (!Array.isArray(rawItems)) return { seq: 0, items: [] };
+    const items2 = [];
+    for (const it of rawItems) {
+      const o = asRecord2(it);
+      if (o === null) continue;
+      const teachingClassID = str(o["teachingClassID"]);
+      if (teachingClassID === "") continue;
+      items2.push({
+        id: str(o["id"]),
+        seq: num(o["seq"], 0),
+        teachingClassID,
+        courseName: str(o["courseName"]),
+        teacherName: str(o["teacherName"]),
+        category: str(o["category"]),
+        priority: num(o["priority"], 0),
+        enabled: bool(o["enabled"], true),
+        status: str(o["status"]) === "" ? TASK_STATUS_PENDING : str(o["status"]),
+        retryMode: str(o["retryMode"]),
+        attempts: num(o["attempts"], 0),
+        lastMsg: str(o["lastMsg"]),
+        lastKind: str(o["lastKind"]),
+        addedAt: num(o["addedAt"], 0)
+      });
+    }
+    return { seq: num(rec?.["seq"], items2.length), items: items2 };
+  }
+  function readMonitorStore(raw) {
+    const rec = asRecord2(raw);
+    const rawItems = rec === null ? null : rec["items"];
+    if (!Array.isArray(rawItems)) return { items: [], hitCount: 0 };
+    const items2 = [];
+    for (const it of rawItems) {
+      const o = asRecord2(it);
+      if (o === null) continue;
+      const teachingClassID = str(o["teachingClassID"]);
+      if (teachingClassID === "") continue;
+      items2.push({
+        teachingClassID,
+        courseName: str(o["courseName"]),
+        teacherName: str(o["teacherName"]),
+        teachingPlace: str(o["teachingPlace"]),
+        category: str(o["category"]),
+        remain: typeof o["remain"] === "number" && Number.isFinite(o["remain"]) ? o["remain"] : null,
+        checkedAt: typeof o["checkedAt"] === "number" && Number.isFinite(o["checkedAt"]) ? o["checkedAt"] : null,
+        hits: num(o["hits"], 0),
+        lastMsg: str(o["lastMsg"])
+      });
+    }
+    return { items: items2, hitCount: num(rec?.["hitCount"], 0) };
+  }
+  function hasTask(store, tcId) {
+    return store.items.some((t) => t.teachingClassID === tcId);
+  }
+  function hasMonitor(store, tcId) {
+    return store.items.some((m) => m.teachingClassID === tcId);
+  }
+  function addTask(store, input) {
+    if (hasTask(store, input.tcId)) return { store, added: false };
+    const seq3 = store.seq + 1;
+    const item = {
+      id: `t${seq3}`,
+      seq: seq3,
+      teachingClassID: input.tcId,
+      courseName: cleanText(input.courseName),
+      teacherName: cleanText(input.teacherName),
+      category: input.category,
+      priority: 0,
+      enabled: true,
+      status: TASK_STATUS_PENDING,
+      retryMode: input.retryMode,
+      attempts: 0,
+      lastMsg: "",
+      lastKind: "",
+      addedAt: input.now
+    };
+    return { store: { seq: seq3, items: [...store.items, item] }, added: true };
+  }
+  function addMonitor(store, input) {
+    if (hasMonitor(store, input.tcId)) return { store, added: false };
+    const item = {
+      teachingClassID: input.tcId,
+      courseName: cleanText(input.courseName),
+      teacherName: cleanText(input.teacherName),
+      teachingPlace: cleanText(input.teachingPlace),
+      category: input.category,
+      remain: null,
+      checkedAt: null,
+      hits: 0,
+      lastMsg: ""
+    };
+    return { store: { ...store, items: [...store.items, item] }, added: true };
+  }
+  function removeMonitor(store, tcId) {
+    const items2 = store.items.filter((m) => m.teachingClassID !== tcId);
+    if (items2.length === store.items.length) return { store, removed: false };
+    return { store: { ...store, items: items2 }, removed: true };
+  }
+  function grabButtonLabel(on) {
+    return on ? "已加抢课" : "添加抢课";
+  }
+  function monitorButtonLabel(on) {
+    return on ? "移除监控" : "添加监控";
+  }
+  function teacherFromTitle(raw) {
+    if (raw === null || raw === void 0) return "";
+    return cleanText(raw.replace(/^\s*\[\d+\]\s*/, ""));
+  }
+  function idLineText(tcId) {
+    return `教学班ID ${tcId}`;
+  }
+  function placeFromTimeText(raw) {
+    const first = cleanText(raw).split(",")[0] ?? "";
+    const tokens = first.split(" ").filter((t) => t !== "");
+    const last = tokens[tokens.length - 1];
+    if (last === void 0) return "";
+    if (last.endsWith("节") || last.endsWith("周")) return "";
+    return last;
+  }
+  var CLASS_DELETE_VOLUNTEER = "cv-delete-volunteer";
+  var CLASS_COLLECTION_IMG = "collection-img";
+  function planDeleteVolunteer(inH5) {
+    return inH5 ? "none" : "h5";
+  }
+  function planCollectionImg(beforeTitle) {
+    return beforeTitle ? "none" : "title-before";
+  }
+  var H5_ORDER = [
+    CLASS_COLLECTION_IMG,
+    "cv-info-title",
+    "cv-one",
+    CLASS_DELETE_VOLUNTEER
+  ];
+  function orderH5Children(keys) {
+    const rank = (key) => {
+      const i = H5_ORDER.indexOf(key);
+      return i === -1 ? H5_ORDER.length : i;
+    };
+    return [...keys].map((key, index) => ({ key, index })).sort((a, b) => rank(a.key) - rank(b.key) || a.index - b.index).map((item) => item.key);
+  }
+  function elementKey(classList) {
+    let best = "";
+    for (const c of classList) {
+      if (c.length > best.length) best = c;
+    }
+    return best;
+  }
+
+  // src/sites/bkxk/list.ts
+  var log10 = scoped("site/bkxk/list");
+  var LIST_PAGE_MARK = "grablessons.do";
+  var RESCAN_DELAY_MS = 120;
+  var MAX_BLOCKS_PER_SCAN = 400;
+  var HEAD_TEXT = "抢课模块";
+  var CARD_SELECTOR = ".cv-course-card";
+  var INFO_SELECTOR = ".cv-info";
+  var ROW_SELECTOR = ".cv-row";
+  var BODY_SELECTOR = ".cv-body";
+  var SETTING_COL_SELECTOR = ".cv-setting-col";
+  var TITLE_CELL_SELECTOR = ".cv-title-col, .cv-course";
+  function swallow(ev) {
+    ev.preventDefault();
+    ev.stopPropagation();
+  }
+  function textOf(node) {
+    return cleanText(node === null ? "" : node.textContent);
+  }
+  function ownDescendant(unit, selector) {
+    for (const node of unit.querySelectorAll(selector)) {
+      if (node.closest(INFO_SELECTOR) === unit) return node;
+    }
+    return null;
+  }
+  function ownsBlock(unit) {
+    return ownDescendant(unit, ".sztb-bkxk-block") !== null;
+  }
+  function attr(node, name) {
+    const v = node.getAttribute(name);
+    return v === null ? "" : v.trim();
+  }
+  function tcIdIn(unit) {
+    const candidates = [];
+    for (const node of unit.querySelectorAll("[tcid]")) {
+      if (node.closest(INFO_SELECTOR) !== unit) continue;
+      candidates.push(attr(node, "tcid"));
+    }
+    return pickTcId(candidates);
+  }
+  function tcIdsIn(node) {
+    const out = [];
+    for (const node2 of node.querySelectorAll("[tcid]")) {
+      const id = attr(node2, "tcid");
+      if (!isTcId(id)) continue;
+      if (!out.includes(id)) out.push(id);
+    }
+    return out;
+  }
+  function categoryFor(node) {
+    let cur = node;
+    for (let i = 0; i < 10 && cur !== null; i++) {
+      if (cur.classList.contains("cv-body")) return categoryOfBodyId(cur.id);
+      cur = cur.parentElement;
+    }
+    return "";
+  }
+  function courseNameOf(row3) {
+    if (row3 === null) return "";
+    return textOf(row3.querySelector(TITLE_CELL_SELECTOR));
+  }
+  function placeOfUnit(unit) {
+    const timeEl = ownDescendant(unit, "div[title]");
+    return placeFromTimeText(timeEl === null ? "" : timeEl.getAttribute("title"));
+  }
+  function infoForUnit(unit, tcId) {
+    const titleEl = ownDescendant(unit, ".cv-info-title");
+    const rawTitle = titleEl === null ? "" : titleEl.getAttribute("title") ?? titleEl.textContent;
+    const row3 = unit.closest(".cv-row");
+    return {
+      tcId,
+      courseName: courseNameOf(row3),
+      teacherName: teacherFromTitle(rawTitle),
+      category: categoryFor(unit),
+      teachingPlace: placeOfUnit(unit)
+    };
+  }
+  function infoForRow(row3, tcId) {
+    return {
+      tcId,
+      courseName: courseNameOf(row3),
+      teacherName: textOf(row3.querySelector(".cv-teacher-col")),
+      category: categoryFor(row3),
+      teachingPlace: textOf(row3.querySelector(".cv-time-col"))
+    };
+  }
+  function targetText(info) {
+    const parts = [info.courseName, info.teacherName].filter((s) => s !== "");
+    const label = parts.length === 0 ? info.tcId : parts.join(" / ");
+    return info.category === "" ? `${label}（类别未识别）` : label;
+  }
+  async function copyId(tcId, panel) {
+    const res = await copyText(tcId);
+    if (res.ok) {
+      log10.info(`已复制教学班ID ${tcId} 到剪贴板（方式：${res.method}）`);
+      panel.toast("已复制教学班ID", "success");
+      return;
+    }
+    log10.warn(`复制教学班ID 失败：${res.detail}（可手动选中那一行复制）`);
+    panel.toast("复制失败，请手动选中复制", "warn");
+  }
+  function onGrab(info, ctx, btn) {
+    if (hasTask(ctx.tasks, info.tcId)) {
+      ctx.panel.toast("这个教学班已经在抢课队列里了（不重复添加）", "info");
+      return;
+    }
+    const res = addTask(ctx.tasks, {
+      ...info,
+      now: Date.now(),
+      retryMode: getValue(SITE_ID, VALUE.RETRY_MODE)
+    });
+    if (!res.added) return;
+    ctx.tasks = res.store;
+    write(BKXK_STORE_KEY.TASKS, ctx.tasks);
+    btn.textContent = grabButtonLabel(true);
+    btn.classList.add("sztb-bkxk-btn-on");
+    log10.info(`已加入抢课队列：${targetText(info)}（本轮只入队，不会发送任何请求）`);
+    ctx.panel.toast(`已加入抢课队列：${info.courseName === "" ? info.tcId : info.courseName}`, "success");
+  }
+  function onMonitorToggle(info, ctx, btn) {
+    const wasOn = hasMonitor(ctx.monitor, info.tcId);
+    if (wasOn) {
+      ctx.monitor = removeMonitor(ctx.monitor, info.tcId).store;
+      log10.info(`已移出监控列表：${targetText(info)}`);
+      ctx.panel.toast("已移出监控", "info");
+    } else {
+      ctx.monitor = addMonitor(ctx.monitor, { ...info, now: Date.now() }).store;
+      log10.info(`已加入监控列表：${targetText(info)}（本轮只入队，不会轮询）`);
+      ctx.panel.toast("已加入监控", "success");
+    }
+    write(BKXK_STORE_KEY.MONITOR, ctx.monitor);
+    btn.textContent = monitorButtonLabel(!wasOn);
+    btn.classList.toggle("sztb-bkxk-btn-on", !wasOn);
+  }
+  function buildBlock(info, ctx) {
+    const idLine = el("div", {
+      class: "sztb-bkxk-id",
+      text: idLineText(info.tcId),
+      attrs: { title: `点击复制：${info.tcId}` },
+      on: {
+        click: (ev) => {
+          swallow(ev);
+          void copyId(info.tcId, ctx.panel);
+        }
+      }
+    });
+    const queued = hasTask(ctx.tasks, info.tcId);
+    const grab = el("button", {
+      class: `sztb-bkxk-btn${queued ? " sztb-bkxk-btn-on" : ""}`,
+      text: grabButtonLabel(queued),
+      attrs: { type: "button" },
+      on: {
+        click: (ev) => {
+          swallow(ev);
+          onGrab(info, ctx, grab);
+        }
+      }
+    });
+    const monitored = hasMonitor(ctx.monitor, info.tcId);
+    const mon = el("button", {
+      class: `sztb-bkxk-btn${monitored ? " sztb-bkxk-btn-on" : ""}`,
+      text: monitorButtonLabel(monitored),
+      attrs: { type: "button" },
+      on: {
+        click: (ev) => {
+          swallow(ev);
+          onMonitorToggle(info, ctx, mon);
+        }
+      }
+    });
+    const block = el("div", {
+      class: "sztb-bkxk-block",
+      attrs: { "data-sztb-tcid": info.tcId }
+    }, idLine, el("div", { class: "sztb-bkxk-ops" }, grab, mon));
+    block.addEventListener("click", swallow);
+    return block;
+  }
+  function injectStyle() {
+    if (document.getElementById(LIST_STYLE_ID) !== null) return;
+    const style = el("style", { attrs: { id: LIST_STYLE_ID } });
+    style.textContent = LIST_CSS;
+    (document.head ?? document.documentElement).appendChild(style);
+  }
+  function enhanceUnit(unit, ctx) {
+    if (ctx.budget >= MAX_BLOCKS_PER_SCAN) return;
+    if (ownsBlock(unit)) return;
+    const tcId = tcIdIn(unit);
+    if (tcId === null) {
+      log10.debug("卡片 .cv-info 未取到教学班 id，跳过（站点结构可能已变）");
+      return;
+    }
+    const info = infoForUnit(unit, tcId);
+    const block = buildBlock(info, ctx);
+    unit.insertBefore(block, unit.firstChild);
+    ctx.budget += 1;
+    relocateInUnit(unit);
+  }
+  function enhanceRow(row3, ctx) {
+    if (ctx.budget >= MAX_BLOCKS_PER_SCAN) return;
+    if (row3.querySelector(CARD_SELECTOR) !== null) return;
+    if (row3.querySelector(`:scope > .sztb-bkxk-col`) !== null) return;
+    const cell = row3.querySelector(SETTING_COL_SELECTOR);
+    if (cell === null) return;
+    const ids = tcIdsIn(cell);
+    if (ids.length === 0) {
+      log10.debug("列表行未取到教学班 id，跳过（站点结构可能已变）");
+      return;
+    }
+    const col = el("div", { class: "sztb-bkxk-col" });
+    for (const tcId of ids) {
+      col.appendChild(buildBlock(infoForRow(row3, tcId), ctx));
+      ctx.budget += 1;
+    }
+    row3.appendChild(col);
+  }
+  function syncHeads() {
+    for (const body of document.querySelectorAll(BODY_SELECTOR)) {
+      if (body.querySelector(`:scope > ${ROW_SELECTOR} > .sztb-bkxk-col`) === null) continue;
+      const head = body.parentElement?.querySelector(":scope > .cv-head") ?? null;
+      if (head === null) continue;
+      if (head.querySelector(":scope > .sztb-bkxk-col") !== null) continue;
+      head.appendChild(el("div", { class: "sztb-bkxk-col sztb-bkxk-head", text: HEAD_TEXT }));
+    }
+  }
+  function relocateInUnit(unit) {
+    const title = ownDescendant(unit, ".cv-info-title");
+    const star = ownDescendant(unit, `.${CLASS_COLLECTION_IMG}`);
+    if (star !== null && title !== null) {
+      const already = title.previousElementSibling === star;
+      if (planCollectionImg(already) === "title-before") {
+        title.parentElement?.insertBefore(star, title);
+      }
+    }
+    const del = ownDescendant(unit, `.${CLASS_DELETE_VOLUNTEER}`);
+    const h5 = ownDescendant(unit, "h5");
+    if (del !== null && h5 !== null) {
+      const already = del.parentElement === h5;
+      if (planDeleteVolunteer(already) === "h5") {
+        h5.appendChild(del);
+      }
+      reorderH5(h5);
+    }
+  }
+  function reorderH5(h5) {
+    const kids = Array.from(h5.children);
+    if (kids.length < 2) return;
+    const current = kids.map((node) => elementKey(Array.from(node.classList)));
+    const wanted = orderH5Children(current);
+    if (current.every((key, i) => key === wanted[i])) return;
+    const byKey = /* @__PURE__ */ new Map();
+    for (const node of kids) {
+      const key = elementKey(Array.from(node.classList));
+      const list = byKey.get(key);
+      if (list === void 0) byKey.set(key, [node]);
+      else list.push(node);
+    }
+    for (const key of wanted) {
+      const list = byKey.get(key);
+      const node = list?.shift();
+      if (node !== void 0) h5.appendChild(node);
+    }
+  }
+  function syncRelocation() {
+    for (const unit of document.querySelectorAll(`${CARD_SELECTOR} ${INFO_SELECTOR}`)) {
+      relocateInUnit(unit);
+    }
+  }
+  function removeInjected() {
+    const nodes = document.querySelectorAll(".sztb-bkxk-block, .sztb-bkxk-col, .sztb-bkxk-head");
+    if (nodes.length === 0) return;
+    for (const node of nodes) node.remove();
+    log10.info(`列表注入开关已关闭：移除 ${String(nodes.length)} 个注入节点`);
+  }
+  function scan(ctx) {
+    if (!isEnabled(SITE_ID, TOGGLE.LIST_INJECT)) {
+      removeInjected();
+      return;
+    }
+    ctx.budget = 0;
+    injectStyle();
+    for (const unit of document.querySelectorAll(`${CARD_SELECTOR} ${INFO_SELECTOR}`)) {
+      enhanceUnit(unit, ctx);
+    }
+    for (const row3 of document.querySelectorAll(`${BODY_SELECTOR} > ${ROW_SELECTOR}`)) {
+      enhanceRow(row3, ctx);
+    }
+    syncHeads();
+    syncRelocation();
+  }
+  function startListInjection(panel) {
+    if (!location.pathname.includes(LIST_PAGE_MARK)) {
+      log10.debug(`当前不是选课页（${location.pathname}），跳过列表注入`);
+      return () => void 0;
+    }
+    const ctx = {
+      panel,
+      tasks: readTaskStore(read(BKXK_STORE_KEY.TASKS, null)),
+      monitor: readMonitorStore(read(BKXK_STORE_KEY.MONITOR, null)),
+      budget: 0
+    };
+    let observer = null;
+    let timer2 = null;
+    const schedule2 = () => {
+      if (timer2 !== null) return;
+      timer2 = window.setTimeout(() => {
+        timer2 = null;
+        scan(ctx);
+      }, RESCAN_DELAY_MS);
+    };
+    whenDomReady(() => {
+      scan(ctx);
+      observer = new MutationObserver(schedule2);
+      observer.observe(document.body, { childList: true, subtree: true });
+      log10.info(
+        `选课列表注入已就绪：抢课队列 ${String(ctx.tasks.items.length)} 条 / 监控 ${String(ctx.monitor.items.length)} 条（本轮点击只入队，不发请求）`
+      );
+    });
+    return () => {
+      observer?.disconnect();
+      observer = null;
+      if (timer2 !== null) {
+        window.clearTimeout(timer2);
+        timer2 = null;
+      }
+    };
+  }
+
   // src/sites/bkxk/tabs/settings.ts
   var BKXK_SETTINGS_TAB_ID = settingsTabId("bkxk");
   var BKXK_SETTINGS_TAB = {
@@ -2340,7 +3169,7 @@ ${options.desc ?? ""}
   };
 
   // src/sites/bkxk/index.ts
-  var log10 = scoped("site/bkxk");
+  var log11 = scoped("site/bkxk");
   var HOSTS2 = ["bkxk.szu.edu.cn"];
   var PAGES2 = ["*default/grablessons.do*", "*default/curriculum.do*"];
   var bkxkAdapter = {
@@ -2361,9 +3190,9 @@ ${options.desc ?? ""}
       const lines = runMigration();
       registerBkxkSettings();
       if (lines.length > 0) {
-        log10.info(`已从旧版迁移 ${lines.length} 条内容，详情见日志页`);
+        log11.info(`已从旧版迁移 ${lines.length} 条内容，详情见日志页`);
       } else {
-        log10.debug(`无旧数据需要迁移（earlyInit @ ${ctx.url.pathname}）`);
+        log11.debug(`无旧数据需要迁移（earlyInit @ ${ctx.url.pathname}）`);
       }
     },
     /** 挂载期：DOM 已就绪，可以安全地把配置推给运行时并报登录态。 */
@@ -2371,11 +3200,12 @@ ${options.desc ?? ""}
       applyBkxkSettings();
       const session = readSession();
       if (!session.loggedIn) {
-        log10.warn("未读到有效登录态：学号或 token 缺失，功能接口会失败。请先在站内完成登录。");
+        log11.warn("未读到有效登录态：学号或 token 缺失，功能接口会失败。请先在站内完成登录。");
       } else {
-        log10.info(`站点已就绪：${sessionSummary(session)}`);
+        log11.info(`站点已就绪：${sessionSummary(session)}`);
       }
-      log10.info(`功能页=${String(ctx.isFeaturePage)}（设置标签页已就绪，其余标签页在批 4 接入）`);
+      log11.info(`功能页=${String(ctx.isFeaturePage)}（设置标签页已就绪，其余标签页在批 4 接入）`);
+      startListInjection(ctx.panel);
     }
   };
 
@@ -2392,10 +3222,10 @@ ${options.desc ?? ""}
   }
 
   // src/main.ts
-  var log11 = scoped("main");
+  var log12 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-03T17:28:29.123Z" : null;
-  var BUILD_NO = true ? 22 : null;
+  var BUILD_TIME = true ? "2026-10-03T19:56:02.619Z" : null;
+  var BUILD_NO = true ? 31 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();
@@ -2435,7 +3265,7 @@ ${options.desc ?? ""}
       version: VERSION
     }));
     booted = { panel, adapterId: res.adapter?.id ?? null };
-    log11.info(
+    log12.info(
       `深大人工具箱 ${VERSION_LABEL} 已装载（host=${url.hostname}，分派=${res.reason}，站点=${res.adapter?.id ?? "无"}，功能页=${res.autoExpand ? "是" : "否"}）`
     );
     res.adapter?.init?.({
@@ -2455,10 +3285,10 @@ ${options.desc ?? ""}
         return;
       }
       if (!res.inject) {
-        log11.debug(`站内跳转后不再属于支持范围，保持现有悬浮窗`);
+        log12.debug(`站内跳转后不再属于支持范围，保持现有悬浮窗`);
         return;
       }
-      log11.info(`站内跳转导致重新分派：${bootedFor} → ${location.href}`);
+      log12.info(`站内跳转导致重新分派：${bootedFor} → ${location.href}`);
       bootedFor = location.href;
       boot(url, res);
     };
@@ -2485,9 +3315,9 @@ ${options.desc ?? ""}
     if (res.adapter?.earlyInit !== void 0) {
       try {
         res.adapter.earlyInit({ adapter: res.adapter, url });
-        log11.debug(`已执行启动期钩子：${res.adapter.id}`);
+        log12.debug(`已执行启动期钩子：${res.adapter.id}`);
       } catch (err) {
-        log11.error(`启动期钩子执行失败：${res.adapter.id}`, err);
+        log12.error(`启动期钩子执行失败：${res.adapter.id}`, err);
       }
     }
     whenDomReady(() => {

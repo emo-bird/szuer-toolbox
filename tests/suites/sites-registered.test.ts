@@ -113,16 +113,20 @@ describe('sites 真实注册表 —— 与 userscript header 的 @match 对齐',
     assertEqual(r.autoExpand, false);
   });
 
-  it('bkxk 适配器声明了 6 个开关，且 🔴/🟠 不能被默认打开', () => {
+  it('bkxk 适配器声明了 7 个开关，且 🔴/🟠 不能被默认打开', () => {
     bootReal();
     const bkxk = allAdapters().find((a) => a.id === 'bkxk');
     assert(bkxk !== undefined, 'bkxk 适配器应已注册');
-    assertEqual(bkxk!.toggles?.length, 6, '批 1 应注册 6 个开关');
+    assertEqual(bkxk!.toggles?.length, 7, '批 1 的 6 个 + 批 3 的列表注入共 7 个开关');
     for (const t of bkxk!.toggles ?? []) {
       if (t.risk !== 'safe') {
         assert(!t.default, `危险开关 ${t.id}（${t.risk}）的 default 必须是 false`);
       }
     }
+    // 列表注入是 🟢 且默认开 —— 它与「列表加列」是两件事，所以单独一个开关
+    const inject = bkxk!.toggles?.find((t) => t.id === 'list-inject');
+    assert(inject !== undefined, '列表注入开关应当注册');
+    assertEqual(inject!.default, true, '列表注入默认开（🟢，点击不出网）');
     assertEqual(bkxk!.hosts.length, 1);
     assertEqual(bkxk!.hosts[0], 'bkxk.szu.edu.cn');
   });

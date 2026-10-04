@@ -35,6 +35,8 @@ export const TOGGLE = {
   TIMETABLE_SELF_DRAW: 'timetable-self-draw',
   /** 🟢 列表加列 */
   LIST_EXTRA_COLUMNS: 'list-extra-columns',
+  /** 🟢 列表注入（教学班ID / 抢课按钮） */
+  LIST_INJECT: 'list-inject',
   /** 🟢 自定义课程 */
   CUSTOM_COURSES: 'custom-courses',
 } as const;
@@ -100,6 +102,16 @@ export const BKXK_TOGGLES: readonly SiteToggleDef[] = [
     id: TOGGLE.LIST_EXTRA_COLUMNS,
     label: '列表加列（冲突 / 余量）',
     desc: '在选课列表里补上冲突提示与实时余量。用 flex 布局，不写死列宽。',
+    risk: 'safe',
+    default: true,
+    group: '选课列表',
+  },
+  {
+    id: TOGGLE.LIST_INJECT,
+    label: '列表注入（教学班ID / 抢课按钮）',
+    desc:
+      '在选课列表的每个教学班旁补上教学班ID 与「添加抢课 / 添加监控」两个按钮。' +
+      '点击只写本地队列，不发送任何请求。关掉后已注入的块会立即移除。',
     risk: 'safe',
     default: true,
     group: '选课列表',

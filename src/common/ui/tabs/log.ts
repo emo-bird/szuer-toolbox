@@ -6,6 +6,7 @@
  */
 
 import { el, clear } from '../../utils/dom.ts';
+import { copyText } from '../../utils/clipboard.ts';
 import {
   entries,
   formatEntry,
@@ -21,19 +22,10 @@ import type { TabRegistration } from '../../../sites/types.ts';
 
 const LEVELS: LogLevel[] = ['debug', 'info', 'warn', 'error'];
 
-/** 复制全文。GM 环境优先用 GM_setClipboard，否则退回剪贴板 API。 */
+/** 复制全文。共用 `copyText()`：GM_setClipboard → execCommand → 剪贴板 API 三条路依次退。 */
 async function copyAll(): Promise<void> {
   const text = entries().map(formatEntry).join('\n');
-  const gm = (globalThis as Record<string, unknown>)['GM_setClipboard'];
-  if (typeof gm === 'function') {
-    (gm as (t: string) => void)(text);
-    return;
-  }
-  try {
-    await navigator.clipboard.writeText(text);
-  } catch {
-    /* 用户拒绝授权或非安全上下文，静默失败 */
-  }
+  await copyText(text);
 }
 
 const tabCss = `

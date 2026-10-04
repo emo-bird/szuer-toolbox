@@ -15,6 +15,7 @@ import './suites/sites-registered.test.ts';
 import './suites/storage.test.ts';
 import './suites/settings.test.ts';
 import './suites/log.test.ts';
+import './suites/clipboard.test.ts';
 import './suites/http.test.ts';
 import './suites/limits.test.ts';
 import './suites/tab-order.test.ts';
@@ -23,5 +24,6 @@ import './suites/bkxk-api.test.ts';
 import './suites/bkxk-session.test.ts';
 import './suites/bkxk-migrate.test.ts';
 import './suites/bkxk-settings.test.ts';
+import './suites/bkxk-list.test.ts';
 
 await run();
