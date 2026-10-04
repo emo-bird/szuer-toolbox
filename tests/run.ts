@@ -32,5 +32,7 @@ import './suites/bkxk-hijack.test.ts';
 import './suites/bkxk-timetable.test.ts';
 import './suites/bkxk-custom.test.ts';
 import './suites/bkxk-custom-form.test.ts';
+import './suites/bkxk-tasks.test.ts';
+import './suites/bkxk-monitor.test.ts';
 
 await run();
