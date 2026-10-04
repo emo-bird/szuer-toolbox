@@ -14,12 +14,15 @@
  *      旧版曾开启的，只在报告里提一句（用户已拍板方案 A）。
  *   3. **不是照搬，是清洗**。只接受能识别的形状，其余丢弃并列进 skipped，
  *      避免把旧版的派生字段 / 脏数据带进新结构。
+ *   4. **自定义课程写通用键**（`custom:courses`）。批 1 曾写进站点键 `bkxk:customCourses`，
+ *      那是错误落点（自定义课程是跨站点数据）；已装过批 1 的机器由 `runCustomCarry()` 补搬。
  *
- * 本文件是纯函数集合，可在 Node 下直接测试；真正的 IO 在 `runMigration()`。
+ * 本文件是纯函数集合，可在 Node 下直接测试；真正的 IO 在 `runMigration()` / `runCustomCarry()`。
  */
 
 import { read, write } from '../../common/core/storage.ts';
 import { scoped } from '../../common/core/log.ts';
+import { CUSTOM_COURSES_KEY, LEGACY_SITE_CUSTOM_KEY, parseCustomCourses } from '../../common/custom/courses.ts';
 import { TOGGLE } from './settings.ts';
 
 const log = scoped('bkxk/legacy');
@@ -37,17 +40,29 @@ export const LEGACY_DATA_KEY = {
 } as const;
 
 /**
- * 新存储里对应的键。批 3 / 批 4 的自定义课程、监控、任务模块**都从这里 import**，
+ * 新存储里对应的键。批 3 / 批 4 的监控、任务模块**都从这里 import**，
  * 不要在别处另起炉灶 —— 否则迁移写进去的东西没人读得到。
+ *
+ * ⚠️ **自定义课程不在这里**：它是**跨站点通用**数据（办事大厅的「我的课程表」也要读），
+ * 键在 `common/custom/courses.ts` 的 `CUSTOM_COURSES_KEY`（`custom:courses`，
+ * 不带站点前缀）。批 1 曾把它写进站点命名空间，那是个错误落点，见下面的搬运逻辑。
  */
 export const BKXK_STORE_KEY = {
-  CUSTOM_COURSES: 'bkxk:customCourses',
   MONITOR: 'bkxk:monitor',
   TASKS: 'bkxk:tasks',
 } as const;
 
+/**
+ * 批 1 的错误落点（`bkxk:customCourses`）。
+ * 只给 `runCustomCarry()` 读，**任何模块都不许往这里写**。
+ */
+export const BKXK_SITE_CUSTOM_KEY = LEGACY_SITE_CUSTOM_KEY;
+
 /** 迁移完成标记 */
 export const MIGRATION_FLAG_KEY = 'migrate:bkxk:v2';
+
+/** 自定义课程搬运完成标记（与上面那个是两件事：迁移可能早就跑过了，搬运才需要补） */
+export const CARRY_FLAG_KEY = 'migrate:bkxk:custom-to-common';
 
 /**
  * 旧设置项 → 新配置项 id 的映射。
@@ -112,24 +127,6 @@ function asRecord(v: unknown): Record<string, unknown> | null {
   return v as Record<string, unknown>;
 }
 
-/** 旧自定义课程的「瘦身」形状，与 `custom.js:87-92` 写入的一致 */
-function slimCustomCourse(item: unknown): Record<string, unknown> | null {
-  const o = asRecord(item);
-  if (o === null) return null;
-  const name = typeof o['name'] === 'string' ? o['name'].trim() : '';
-  if (name === '') return null;
-  const id = typeof o['id'] === 'string' && o['id'] !== '' ? o['id'] : '';
-  if (id === '') return null;
-  return {
-    id,
-    name,
-    teacher: typeof o['teacher'] === 'string' ? o['teacher'] : '',
-    place: typeof o['place'] === 'string' ? o['place'] : '',
-    color: typeof o['color'] === 'string' ? o['color'] : '',
-    enabled: o['enabled'] !== false,
-  };
-}
-
 /**
  * 生成迁移计划（纯函数）。
  *
@@ -185,15 +182,11 @@ export function planMigration(snapshot: LegacySnapshot, alreadyMigrated: boolean
   const ccRaw = parseJson(snapshot.customCourses);
   if (ccRaw !== null) {
     if (Array.isArray(ccRaw)) {
-      const slim: Record<string, unknown>[] = [];
-      let dropped = 0;
-      for (const item of ccRaw) {
-        const rec = slimCustomCourse(item);
-        if (rec === null) dropped += 1;
-        else slim.push(rec);
-      }
-      entries.push({ key: BKXK_STORE_KEY.CUSTOM_COURSES, value: slim });
-      report.push(`自定义课程 ${slim.length} 门`);
+      const slim = parseCustomCourses(ccRaw);
+      const dropped = ccRaw.length - slim.length;
+      // 写**通用键**（不带站点前缀）：自定义课程是跨站点数据
+      entries.push({ key: CUSTOM_COURSES_KEY, value: slim });
+      report.push(`自定义课程 ${slim.length} 门 → ${CUSTOM_COURSES_KEY}`);
       if (dropped > 0) notices.push(`有 ${dropped} 条自定义课程缺少 name / id，已丢弃。`);
     } else {
       notices.push('旧自定义课程不是数组，已跳过。');
@@ -220,6 +213,84 @@ export function planMigration(snapshot: LegacySnapshot, alreadyMigrated: boolean
   }
 
   return { entries, report, notices, empty: entries.length === 0 };
+}
+
+// -------------------------------------------- 自定义课程：站点键 → 通用键搬运
+
+/**
+ * 「把批 1 误写进站点键的自定义课程搬到通用键」的计划（纯函数）。
+ *
+ * 【为什么需要它】`migrate:bkxk:v2` 是**一次性**标记。已经装过批 1 的机器上，
+ * 迁移早就跑完并把课程写进了 `bkxk:customCourses`；现在通用键 `custom:courses`
+ * 才是正式落点 ⇒ 不做搬运的话，那些用户的课程会静默消失。
+ *
+ * 【为什么不覆盖】通用键里已经有内容就**放弃搬运**（只出一条提醒）：
+ * 覆盖等于拿旧数据盖掉用户后来新建的课程，丢数据比重复更不可接受。
+ *
+ * 【旧键不删】与迁移同一原则：`bkxk:customCourses` 原样留着当退路。
+ */
+export interface CarryPlan {
+  readonly entries: PlannedEntry[];
+  readonly report: string[];
+  readonly notices: string[];
+  /** 没有东西可搬（含「通用键已有内容，刻意不搬」） */
+  readonly empty: boolean;
+}
+
+export function planCustomCarry(siteValue: unknown, commonValue: unknown): CarryPlan {
+  const rawCount = Array.isArray(siteValue) ? siteValue.length : 0;
+  const site = parseCustomCourses(siteValue);
+  if (site.length === 0) {
+    return { entries: [], report: [], notices: [], empty: true };
+  }
+
+  const notices: string[] = [];
+  if (rawCount > site.length) {
+    notices.push(`站点键里有 ${rawCount - site.length} 条自定义课程缺少 name / id，搬运时丢弃。`);
+  }
+
+  const common = parseCustomCourses(commonValue);
+  if (common.length > 0) {
+    notices.push(
+      `通用键 ${CUSTOM_COURSES_KEY} 里已有 ${common.length} 门自定义课程，` +
+        `站点键里的 ${site.length} 门**未搬运**（避免覆盖）。如需保留，请自行导出后合并。`,
+    );
+    return { entries: [], report: [], notices, empty: true };
+  }
+
+  return {
+    entries: [{ key: CUSTOM_COURSES_KEY, value: site }],
+    report: [`自定义课程 ${site.length} 门：${BKXK_SITE_CUSTOM_KEY} → ${CUSTOM_COURSES_KEY}`],
+    notices,
+    empty: false,
+  };
+}
+
+/**
+ * 执行搬运（IO 入口）。**只应在 bkxk 页面上调用**（键是本工具箱自己的，与 origin 无关，
+ * 但与其他早期初始化放在一起，读一次 storage 而已）。
+ *
+ * @returns 报告行数（0 表示无事可做）
+ */
+export function runCustomCarry(): string[] {
+  if (read<boolean>(CARRY_FLAG_KEY, false)) return [];
+
+  const site = read<unknown>(BKXK_SITE_CUSTOM_KEY, null);
+  const common = read<unknown>(CUSTOM_COURSES_KEY, []);
+  const plan = planCustomCarry(site, common);
+
+  write(CARRY_FLAG_KEY, true);
+
+  if (plan.empty) {
+    // 没有东西可搬（或刻意不搬）：也打标记，免得每次进页面都读一遍旧键
+    for (const line of plan.notices) log.warn(`搬运 · ${line}`);
+    return [];
+  }
+
+  for (const e of plan.entries) write(e.key, e.value);
+  log.info(`自定义课程搬运完成：${plan.report.join('；')}`);
+  for (const line of plan.notices) log.warn(`搬运 · ${line}`);
+  return [...plan.report, ...plan.notices];
 }
 
 /** 从页面 localStorage 读旧数据原文 */

@@ -9,12 +9,16 @@
 
 import { describe, it, assert, assertEqual, assertDeepEqual } from '../harness.ts';
 import {
+  BKXK_SITE_CUSTOM_KEY,
   BKXK_STORE_KEY,
+  CARRY_FLAG_KEY,
   LEGACY_SETTINGS_KEY,
   LEGACY_STORE_PREFIX,
+  planCustomCarry,
   planMigration,
 } from '../../src/sites/bkxk/legacy.ts';
 import type { LegacySnapshot } from '../../src/sites/bkxk/legacy.ts';
+import { CUSTOM_COURSES_KEY } from '../../src/common/custom/courses.ts';
 
 function snapshot(patch: Partial<LegacySnapshot> = {}): LegacySnapshot {
   return { settings: null, customCourses: null, monitor: null, tasks: null, ...patch };
@@ -34,10 +38,12 @@ describe('bkxk/legacy —— 旧键名常量', () => {
     assertEqual(LEGACY_STORE_PREFIX, 'szubkxk.v2.');
   });
 
-  it('新存储键集中在 BKXK_STORE_KEY 里，别处不许另起炉灶', () => {
-    assertEqual(BKXK_STORE_KEY.CUSTOM_COURSES, 'bkxk:customCourses');
+  it('监控 / 任务键集中在 BKXK_STORE_KEY 里，自定义课程改用跨站点通用键', () => {
     assertEqual(BKXK_STORE_KEY.MONITOR, 'bkxk:monitor');
     assertEqual(BKXK_STORE_KEY.TASKS, 'bkxk:tasks');
+    assertEqual(CUSTOM_COURSES_KEY, 'custom:courses');
+    assertEqual(BKXK_SITE_CUSTOM_KEY, 'bkxk:customCourses', '批 1 的误落点，只给搬运逻辑读');
+    assertEqual(CARRY_FLAG_KEY, 'migrate:bkxk:custom-to-common');
   });
 });
 
@@ -133,7 +139,7 @@ describe('bkxk/legacy —— 数据块清洗', () => {
   it('自定义课程只保留已知字段（丢掉派生数据 segs）', () => {
     const withSegs = { ...goodCourse, segs: [{ day: 1 }], 额外字段: 'x' };
     const plan = planMigration(snapshot({ customCourses: JSON.stringify([withSegs]) }), false);
-    const e = plan.entries.find((x) => x.key === BKXK_STORE_KEY.CUSTOM_COURSES);
+    const e = plan.entries.find((x) => x.key === CUSTOM_COURSES_KEY);
     assert(e !== undefined, '应写入自定义课程');
     assertDeepEqual(e!.value, [goodCourse]);
   });
@@ -145,7 +151,7 @@ describe('bkxk/legacy —— 数据块清洗', () => {
       }),
       false,
     );
-    const e = plan.entries.find((x) => x.key === BKXK_STORE_KEY.CUSTOM_COURSES);
+    const e = plan.entries.find((x) => x.key === CUSTOM_COURSES_KEY);
     assertEqual((e!.value as unknown[]).length, 1);
     assert(plan.notices.some((n) => n.includes('已丢弃')), JSON.stringify(plan.notices));
   });
@@ -155,19 +161,19 @@ describe('bkxk/legacy —— 数据块清洗', () => {
       snapshot({ customCourses: JSON.stringify([{ id: 'c1', name: 'A' }]) }),
       false,
     );
-    const e = plan.entries.find((x) => x.key === BKXK_STORE_KEY.CUSTOM_COURSES);
+    const e = plan.entries.find((x) => x.key === CUSTOM_COURSES_KEY);
     assertEqual((e!.value as Array<{ enabled: boolean }>)[0]?.enabled, true);
   });
 
   it('自定义课程不是数组时跳过并报告', () => {
     const plan = planMigration(snapshot({ customCourses: JSON.stringify({ a: 1 }) }), false);
-    assert(!entryKeys(plan).includes(BKXK_STORE_KEY.CUSTOM_COURSES), '非数组不该写入');
+    assert(!entryKeys(plan).includes(CUSTOM_COURSES_KEY), '非数组不该写入');
     assert(plan.notices.some((n) => n.includes('不是数组')), '应报告「不是数组」');
   });
 
   it('空数组仍会写入（表示「用户确实没有自定义课程」）', () => {
     const plan = planMigration(snapshot({ customCourses: '[]' }), false);
-    const e = plan.entries.find((x) => x.key === BKXK_STORE_KEY.CUSTOM_COURSES);
+    const e = plan.entries.find((x) => x.key === CUSTOM_COURSES_KEY);
     assert(e !== undefined, '空数组也应写入');
     assertDeepEqual(e!.value, []);
   });
@@ -188,6 +194,60 @@ describe('bkxk/legacy —— 数据块清洗', () => {
     const plan = planMigration(snapshot({ monitor: JSON.stringify([1, 2]) }), false);
     assert(!entryKeys(plan).includes(BKXK_STORE_KEY.MONITOR), '非对象不该写入');
     assert(plan.notices.some((n) => n.includes('不是对象')), '应报告「不是对象」');
+  });
+});
+
+describe('bkxk/legacy —— 自定义课程搬运（站点键 → 通用键）', () => {
+  const course = (id: string, name: string): Record<string, unknown> => ({
+    id,
+    name,
+    teacher: '张老师',
+    place: '1-16周 星期一 1-2节 致理楼L1-707',
+    color: '#fff',
+    enabled: true,
+  });
+
+  it('通用键为空时把站点键里的课程搬过去', () => {
+    const plan = planCustomCarry([course('c1', 'A'), course('c2', 'B')], []);
+    assertEqual(plan.empty, false);
+    assertEqual(plan.entries.length, 1);
+    assertEqual(plan.entries[0]?.key, CUSTOM_COURSES_KEY);
+    assertDeepEqual(plan.entries[0]?.value, [course('c1', 'A'), course('c2', 'B')]);
+    assert(plan.report.some((l) => l.includes('自定义课程 2 门')), JSON.stringify(plan.report));
+  });
+
+  it('站点键里没有东西时什么都不做（且没有 notice）', () => {
+    for (const v of [null, undefined, [], {}, 'x', 7]) {
+      const plan = planCustomCarry(v, []);
+      assertEqual(plan.empty, true, `siteValue=${String(v)}`);
+      assertEqual(plan.entries.length, 0, `siteValue=${String(v)}`);
+      assertEqual(plan.notices.length, 0, `siteValue=${String(v)}`);
+    }
+  });
+
+  it('通用键里已有课程时**不覆盖**，只出一条提醒', () => {
+    const plan = planCustomCarry([course('c1', '旧的')], [course('c9', '新的')]);
+    assertEqual(plan.empty, true);
+    assertEqual(plan.entries.length, 0);
+    assert(
+      plan.notices.some((n) => n.includes('未搬运')),
+      `应说明未搬运，实际：${JSON.stringify(plan.notices)}`,
+    );
+  });
+
+  it('缺 name / id 的条目丢弃并报告数量', () => {
+    const plan = planCustomCarry([course('c1', 'A'), { id: 'c2' }, { name: '无 id' }, null], []);
+    assertDeepEqual(plan.entries[0]?.value, [course('c1', 'A')]);
+    assert(
+      plan.notices.some((n) => n.includes('3 条')),
+      `应报告丢弃 3 条，实际：${JSON.stringify(plan.notices)}`,
+    );
+  });
+
+  it('搬运是清洗不是照抄：派生字段 segs 不落盘', () => {
+    const withSegs = { ...course('c1', 'A'), segs: [{ day: 1 }], 额外: 1 };
+    const plan = planCustomCarry([withSegs], []);
+    assertDeepEqual(plan.entries[0]?.value, [course('c1', 'A')]);
   });
 });
 
