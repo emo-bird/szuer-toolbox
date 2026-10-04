@@ -49,7 +49,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-04T18:02:32.036Z（构建号 45） */
+/* 构建信息：2026-10-04T18:37:49.134Z（构建号 46） */
 
 "use strict";
 (() => {
@@ -3644,6 +3644,7 @@ ${text}
       courseName: cleanText(input.courseName),
       teacherName: cleanText(input.teacherName),
       category: input.category,
+      // 一律从 0 开始：抢课顺序由【任务】页的上移 / 下移改（见 tasks-model.ts 的 moveTask）
       priority: 0,
       enabled: true,
       status: TASK_STATUS_PENDING,
@@ -4284,14 +4285,6 @@ ${text}
     });
     return hit ? { ...store, items: items2 } : store;
   }
-  function clampPriority(p) {
-    const n = typeof p === "number" ? p : Number(p);
-    if (!Number.isFinite(n)) return 0;
-    return Math.min(1, Math.max(-1, Math.trunc(n)));
-  }
-  function setPriority(store, id, p) {
-    return patchTask(store, id, { priority: clampPriority(p) });
-  }
   function setRetryMode(store, id, mode) {
     if (!isRetryMode(mode)) return store;
     return patchTask(store, id, { retryMode: mode });
@@ -4373,6 +4366,32 @@ ${text}
     if (p < 0) return `优先级 ${String(p)}（比默认更先抢）`;
     if (p > 0) return `优先级 ${String(p)}（比默认更后抢）`;
     return "优先级 0（默认）";
+  }
+  function moveTask(store, id, dir) {
+    const ordered = [...activeTasks(store.items)];
+    const idx = ordered.findIndex((t) => t.id === id);
+    if (idx < 0) return { store, moved: false };
+    const target = dir === "up" ? idx - 1 : idx + 1;
+    if (target < 0 || target >= ordered.length) return { store, moved: false };
+    const seq3 = ordered.map((t) => t.id);
+    const tmp = seq3[idx];
+    const other = seq3[target];
+    if (tmp === void 0 || other === void 0) return { store, moved: false };
+    seq3[idx] = other;
+    seq3[target] = tmp;
+    const rankOf = new Map(seq3.map((tid, i) => [tid, i]));
+    const items2 = store.items.map((t) => {
+      const rank = rankOf.get(t.id);
+      return rank === void 0 ? t : { ...t, priority: rank };
+    });
+    return { store: { ...store, items: items2 }, moved: true };
+  }
+  function canMoveTask(store, id, dir) {
+    const ordered = activeTasks(store.items);
+    const idx = ordered.findIndex((t) => t.id === id);
+    if (idx < 0) return false;
+    const target = dir === "up" ? idx - 1 : idx + 1;
+    return target >= 0 && target < ordered.length;
   }
 
   // src/sites/bkxk/tasks.ts
@@ -5156,16 +5175,14 @@ ${text}
   justify-content: flex-end;
 }
 
-/* 很小的按钮：优先级加减、删除。两个类名压住公共 .sztb-btn 的内边距 */
+/* 很小的按钮：上移 / 下移、删除。两个类名压住公共 .sztb-btn 的内边距 */
 .sztb-btn.sztb-bkxk-tk-tiny {
   padding: 1px 7px;
   font-size: 11.5px;
 }
 
 .sztb-bkxk-tk-prio {
-  min-width: 20px;
-  text-align: center;
-  font-size: 12px;
+  font-size: 11.5px;
   color: var(--sztb-text-dim);
 }
 
@@ -5325,7 +5342,7 @@ ${text}
       main2.appendChild(el("span", { class: "sztb-bkxk-tk-meta", text: metaText(task) }));
       const msg = el("span", { class: "sztb-bkxk-tk-meta" });
       if (task.lastMsg === "") {
-        msg.textContent = priorityHint(task.priority);
+        msg.textContent = "还没试过";
       } else {
         msg.textContent = `${kindLabel(task.lastKind)}：${task.lastMsg}`;
         if (task.lastKind !== "ok" && task.lastKind !== "retryable") {
@@ -5343,32 +5360,43 @@ ${text}
       );
       item.appendChild(top);
       const ops = el("div", { class: "sztb-bkxk-tk-ops" });
-      const down = el("button", {
-        class: "sztb-btn sztb-bkxk-tk-tiny",
-        text: "−",
-        attrs: { type: "button", title: "优先级 -1（更先抢）" }
-      });
-      down.addEventListener("click", () => {
-        updateTasks((s) => setPriority(s, task.id, clampPriority(task.priority - 1)));
-        render();
-      });
-      const prio = el("span", {
-        class: "sztb-bkxk-tk-prio",
-        text: String(task.priority),
-        attrs: { title: priorityHint(task.priority) }
-      });
+      const canUp = canMoveTask(loadTaskStore(), task.id, "up");
+      const canDown = canMoveTask(loadTaskStore(), task.id, "down");
       const up = el("button", {
         class: "sztb-btn sztb-bkxk-tk-tiny",
-        text: "＋",
-        attrs: { type: "button", title: "优先级 +1（更后抢）" }
+        text: "上移",
+        attrs: {
+          type: "button",
+          title: canUp ? "在抢课顺序里往前挪一位" : "已经在最前面了",
+          ...canUp ? {} : { disabled: "true" }
+        }
       });
       up.addEventListener("click", () => {
-        updateTasks((s) => setPriority(s, task.id, clampPriority(task.priority + 1)));
+        updateTasks((s) => moveTask(s, task.id, "up").store);
         render();
       });
-      ops.appendChild(down);
-      ops.appendChild(prio);
+      const down = el("button", {
+        class: "sztb-btn sztb-bkxk-tk-tiny",
+        text: "下移",
+        attrs: {
+          type: "button",
+          title: canDown ? "在抢课顺序里往后挪一位" : "已经在最后面了",
+          ...canDown ? {} : { disabled: "true" }
+        }
+      });
+      down.addEventListener("click", () => {
+        updateTasks((s) => moveTask(s, task.id, "down").store);
+        render();
+      });
       ops.appendChild(up);
+      ops.appendChild(down);
+      ops.appendChild(
+        el("span", {
+          class: "sztb-bkxk-tk-prio",
+          text: priorityHint(task.priority),
+          attrs: { title: "抢课顺序按它排：数字越小越先抢" }
+        })
+      );
       const mode = el("select", { class: "sztb-select sztb-bkxk-tk-mode", attrs: { title: "失败后怎么处理" } });
       for (const value of MODE_ORDER) {
         const opt = el("option", { text: RETRY_MODE_NAME[value] ?? value });
@@ -6611,8 +6639,8 @@ ${text}
   // src/main.ts
   var log20 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-04T18:02:32.036Z" : null;
-  var BUILD_NO = true ? 45 : null;
+  var BUILD_TIME = true ? "2026-10-04T18:37:49.134Z" : null;
+  var BUILD_NO = true ? 46 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();

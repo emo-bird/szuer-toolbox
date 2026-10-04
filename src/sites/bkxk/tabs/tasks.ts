@@ -28,13 +28,13 @@ import {
   RETRY_MODE,
   RETRY_MODE_NAME,
   TASK_STATUS,
-  clampPriority,
+  canMoveTask,
   clearTasks,
   kindLabel,
+  moveTask,
   priorityHint,
   removeTask,
   resetTasks,
-  setPriority,
   setRetryMode,
   statusKey,
   statusLabel,
@@ -202,7 +202,7 @@ function mountTasksTab(root: HTMLElement, ctx: TabContext): () => void {
 
     const msg = el('span', { class: 'sztb-bkxk-tk-meta' });
     if (task.lastMsg === '') {
-      msg.textContent = priorityHint(task.priority);
+      msg.textContent = '还没试过';
     } else {
       msg.textContent = `${kindLabel(task.lastKind)}：${task.lastMsg}`;
       if (task.lastKind !== 'ok' && task.lastKind !== 'retryable') {
@@ -221,38 +221,50 @@ function mountTasksTab(root: HTMLElement, ctx: TabContext): () => void {
     );
     item.appendChild(top);
 
-    // 第二行：优先级、重试策略、删除
+    // 第二行：抢课顺序（上移 / 下移）、重试策略、删除
     const ops = el('div', { class: 'sztb-bkxk-tk-ops' });
 
-    const down = el('button', {
-      class: 'sztb-btn sztb-bkxk-tk-tiny',
-      text: '−',
-      attrs: { type: 'button', title: '优先级 -1（更先抢）' },
-    });
-    down.addEventListener('click', () => {
-      updateTasks((s) => setPriority(s, task.id, clampPriority(task.priority - 1)));
-      render();
-    });
-
-    const prio = el('span', {
-      class: 'sztb-bkxk-tk-prio',
-      text: String(task.priority),
-      attrs: { title: priorityHint(task.priority) },
-    });
+    // 上移 / 下移。禁用判据与 moveTask 用的是同一个函数，避免「按钮亮着但点了没反应」
+    const canUp = canMoveTask(loadTaskStore(), task.id, 'up');
+    const canDown = canMoveTask(loadTaskStore(), task.id, 'down');
 
     const up = el('button', {
       class: 'sztb-btn sztb-bkxk-tk-tiny',
-      text: '＋',
-      attrs: { type: 'button', title: '优先级 +1（更后抢）' },
+      text: '上移',
+      attrs: {
+        type: 'button',
+        title: canUp ? '在抢课顺序里往前挪一位' : '已经在最前面了',
+        ...(canUp ? {} : { disabled: 'true' }),
+      },
     });
     up.addEventListener('click', () => {
-      updateTasks((s) => setPriority(s, task.id, clampPriority(task.priority + 1)));
+      updateTasks((s) => moveTask(s, task.id, 'up').store);
       render();
     });
 
-    ops.appendChild(down);
-    ops.appendChild(prio);
+    const down = el('button', {
+      class: 'sztb-btn sztb-bkxk-tk-tiny',
+      text: '下移',
+      attrs: {
+        type: 'button',
+        title: canDown ? '在抢课顺序里往后挪一位' : '已经在最后面了',
+        ...(canDown ? {} : { disabled: 'true' }),
+      },
+    });
+    down.addEventListener('click', () => {
+      updateTasks((s) => moveTask(s, task.id, 'down').store);
+      render();
+    });
+
     ops.appendChild(up);
+    ops.appendChild(down);
+    ops.appendChild(
+      el('span', {
+        class: 'sztb-bkxk-tk-prio',
+        text: priorityHint(task.priority),
+        attrs: { title: '抢课顺序按它排：数字越小越先抢' },
+      }),
+    );
 
     const mode = el('select', { class: 'sztb-select sztb-bkxk-tk-mode', attrs: { title: '失败后怎么处理' } });
     for (const value of MODE_ORDER) {

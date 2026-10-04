@@ -318,3 +318,63 @@ export function priorityHint(p: number): string {
   if (p > 0) return `优先级 ${String(p)}（比默认更后抢）`;
   return '优先级 0（默认）';
 }
+
+// ---------------------------------------------------------------- 排序
+
+/** 上移 / 下移 */
+export type MoveDir = 'up' | 'down';
+
+/**
+ * 在【抢课顺序】里把一条挪一位。
+ *
+ * 实现方式是**重排整个 `priority`**（不是换数组顺序）：`activeTasks()` 的排序键是
+ * `(priority, seq)`，而 `seq` 是「加入队列的先后」（见 `addTask`）、数组顺序也不参与排序，
+ * 所以只有 `priority` 能决定先后。
+ *
+ * ⚠️ 为什么不是「相邻两条交换一下 `priority`」：默认状态下队列里每条的 `priority`
+ * 都是 0，交换两个 0 等于什么都没做；三条以上时还会出现 `[1,0,0]` 这种
+ * 「想排到最后的人反而排到了最前」（因为 0 < 1）。所以这里改成
+ * **把界面上看到的顺序原样写回成 0,1,2,…**，再交换目标两位 ——
+ * 结果只取决于「顺序」本身，与 `priority` 原先是什么值无关，也就不会踩到这类坑。
+ *
+ * 排序口径与 `activeTasks()` 完全一致（只有勾选中的任务参与；`priority` 小的在前，
+ * 同 `priority` 按 `seq`；再同就保持原有先后 —— `Array.prototype.sort` 是稳定的）。
+ * 未勾选的任务**不动**：它不参与抢课，排它没有意义。
+ *
+ * 旧仓库 `tasks.js:205-222` 的 `moveTask` 只比较 `priority`，两条同号就静默不动，
+ * 而那正是默认状态 ⇒ 那边的上移按钮在默认队列里根本按不动；这里顺带修掉。
+ *
+ * @returns 变更后的 store 与「到底有没有动」；边界（已在首位还要上移）返回同一个 store 引用
+ */
+export function moveTask(store: TaskStore, id: string, dir: MoveDir): { store: TaskStore; moved: boolean } {
+  // 用 activeTasks 的同一套规则排序，保证界面上看到的顺序就是这里的顺序
+  const ordered = [...activeTasks(store.items)];
+  const idx = ordered.findIndex((t) => t.id === id);
+  if (idx < 0) return { store, moved: false };
+  const target = dir === 'up' ? idx - 1 : idx + 1;
+  if (target < 0 || target >= ordered.length) return { store, moved: false };
+
+  const seq = ordered.map((t) => t.id);
+  const tmp = seq[idx];
+  const other = seq[target];
+  if (tmp === undefined || other === undefined) return { store, moved: false };
+  seq[idx] = other;
+  seq[target] = tmp;
+
+  // 顺序 → priority：第 i 名写 i。只碰参与排序的那些，未勾选的保持原值
+  const rankOf = new Map(seq.map((tid, i) => [tid, i] as const));
+  const items = store.items.map((t) => {
+    const rank = rankOf.get(t.id);
+    return rank === undefined ? t : { ...t, priority: rank };
+  });
+  return { store: { ...store, items }, moved: true };
+}
+
+/** 某个 id 现在能不能上移 / 下移（界面用它决定按钮是否禁用） */
+export function canMoveTask(store: TaskStore, id: string, dir: MoveDir): boolean {
+  const ordered = activeTasks(store.items);
+  const idx = ordered.findIndex((t) => t.id === id);
+  if (idx < 0) return false;
+  const target = dir === 'up' ? idx - 1 : idx + 1;
+  return target >= 0 && target < ordered.length;
+}

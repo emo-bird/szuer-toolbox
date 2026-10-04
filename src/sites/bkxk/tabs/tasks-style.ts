@@ -88,16 +88,14 @@ export const TASKS_TAB_CSS = `
   justify-content: flex-end;
 }
 
-/* 很小的按钮：优先级加减、删除。两个类名压住公共 .sztb-btn 的内边距 */
+/* 很小的按钮：上移 / 下移、删除。两个类名压住公共 .sztb-btn 的内边距 */
 .sztb-btn.sztb-bkxk-tk-tiny {
   padding: 1px 7px;
   font-size: 11.5px;
 }
 
 .sztb-bkxk-tk-prio {
-  min-width: 20px;
-  text-align: center;
-  font-size: 12px;
+  font-size: 11.5px;
   color: var(--sztb-text-dim);
 }
 

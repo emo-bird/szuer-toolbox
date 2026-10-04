@@ -30,6 +30,7 @@ import {
   TASK_STATUS,
   activeTasks,
   byId,
+  canMoveTask,
   clampPriority,
   classifyMsg,
   clearStaleTasks,
@@ -37,6 +38,7 @@ import {
   isActiveTask,
   isRetryMode,
   kindLabel,
+  moveTask,
   normalizeRetryMode,
   normalizeStatus,
   normalizeStore,
@@ -397,6 +399,91 @@ describe('bkxk 抢课 —— 展示文案', () => {
     const high = priorityHint(1);
     assert(low.includes('先抢'), `负优先级应当说「更先抢」，实际 ${low}`);
     assert(high.includes('后抢'), `正优先级应当说「更后抢」，实际 ${high}`);
+  });
+});
+
+// ------------------------------------------------------------- 上移 / 下移
+
+describe('bkxk 抢课 —— 上移 / 下移（抢课顺序）', () => {
+  /** 按 activeTasks 的顺序取 id，便于断言「界面上看到的顺序」 */
+  function order(store: TaskStore): string[] {
+    return activeTasks(store.items).map((t) => t.id);
+  }
+
+  it('默认三条（priority 全是 0）时，上移真的能换位', () => {
+    // 这正是旧仓库 moveTask 的静默 no-op 场景：只比 priority，同号就不动
+    const s1 = store(task({ id: 'a' }), task({ id: 'b' }), task({ id: 'c' }));
+    const r1 = moveTask(s1, 'b', 'up');
+    assertEqual(r1.moved, true);
+    assertDeepEqual(order(r1.store), ['b', 'a', 'c']);
+  });
+
+  it('下移同理，且交换的是 priority 而不是数组顺序', () => {
+    const s1 = store(task({ id: 'a' }), task({ id: 'b' }), task({ id: 'c' }));
+    const r1 = moveTask(s1, 'a', 'down');
+    assertEqual(r1.moved, true);
+    assertDeepEqual(order(r1.store), ['b', 'a', 'c']);
+    // seq 是「加入队列的先后」，不该被排序操作改动
+    assertDeepEqual(
+      r1.store.items.map((t) => t.seq),
+      [1, 1, 1],
+    );
+  });
+
+  it('已有一条在 -1（钳位边界）时上移仍然有效，且不会两条都撞到 -1 卡死', () => {
+    const s1 = store(task({ id: 'a', priority: -1 }), task({ id: 'b', priority: 0 }));
+    const r1 = moveTask(s1, 'b', 'up');
+    assertEqual(r1.moved, true);
+    assertDeepEqual(order(r1.store), ['b', 'a']);
+    // 重排把顺序原样写回 0,1,…，所以 b 现在是最前面、值就是 0
+    assertEqual(byId(r1.store, 'b')?.priority, 0);
+    assertEqual(byId(r1.store, 'a')?.priority, 1);
+    // 再点一次 a 的上移，应当还能换回来（说明没有卡死）
+    assertDeepEqual(order(moveTask(r1.store, 'a', 'up').store), ['a', 'b']);
+  });
+
+  it('已在首位上移 / 已在末位下移 → 同一个 store 引用，moved=false', () => {
+    const s1 = store(task({ id: 'a' }), task({ id: 'b' }));
+    const up = moveTask(s1, 'a', 'up');
+    assertEqual(up.moved, false);
+    assertEqual(up.store, s1);
+    const down = moveTask(s1, 'b', 'down');
+    assertEqual(down.moved, false);
+    assertEqual(down.store, s1);
+  });
+
+  it('id 不存在 → 同一个 store 引用（既有约定的延续）', () => {
+    const s1 = store(task({ id: 'a' }));
+    const r1 = moveTask(s1, 'zzz', 'up');
+    assertEqual(r1.moved, false);
+    assertEqual(r1.store, s1);
+  });
+
+  it('不勾选的任务不参与排序移动', () => {
+    const s1 = store(task({ id: 'a' }), task({ id: 'b', enabled: false }), task({ id: 'c' }));
+    // b 未勾选 ⇒ activeTasks 里根本没有它 ⇒ 不能动
+    assertEqual(canMoveTask(s1, 'b', 'up'), false);
+    assertEqual(moveTask(s1, 'b', 'up').moved, false);
+    // a 的下一条是 c（跳过 b），下移后 a 应当排到 c 后面
+    assertDeepEqual(order(moveTask(s1, 'a', 'down').store), ['c', 'a']);
+  });
+
+  it('canMoveTask 与 moveTask 的判据一致（按钮不会亮着却点了没反应）', () => {
+    const s1 = store(task({ id: 'a' }), task({ id: 'b' }), task({ id: 'c' }));
+    for (const id of ['a', 'b', 'c']) {
+      for (const dir of ['up', 'down'] as const) {
+        assertEqual(canMoveTask(s1, id, dir), moveTask(s1, id, dir).moved, `${id} ${dir} 判据不一致`);
+      }
+    }
+    assertEqual(canMoveTask(s1, 'zzz', 'up'), false);
+  });
+
+  it('反复上移能把末位一路挪到首位，且顺序始终不重复', () => {
+    const s1 = store(task({ id: 'a' }), task({ id: 'b' }), task({ id: 'c' }), task({ id: 'd' }));
+    let cur = s1;
+    for (let i = 0; i < 3; i += 1) cur = moveTask(cur, 'd', 'up').store;
+    assertDeepEqual(order(cur), ['d', 'a', 'b', 'c']);
+    assertEqual(canMoveTask(cur, 'd', 'up'), false);
   });
 });
 
