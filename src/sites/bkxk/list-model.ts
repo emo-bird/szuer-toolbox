@@ -330,7 +330,7 @@ export function removeTaskByTcId(
 /**
  * 「添加抢课」也是开关（**用户 m00846 拍板，推翻本文件原来的口径**）。
  *
- * 移出队列 ≠ 撤销选课：站点上已经抢到的结果要另走退课，这里只是不再为它发请求，
+ * 移出队列 ≠ 撤销选课：站点上已经抢到的结果要自己回选课页退选，这里只是不再为它发请求，
  * 代价可逆，所以**不加二次确认框**。
  */
 export function toggleTask(store: TaskStore, input: TaskAddInput): { store: TaskStore; on: boolean } {

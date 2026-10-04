@@ -5,7 +5,6 @@
  * 重点不是覆盖率，而是把旧仓库踩过的坑钉死：
  *   - 抢课报文漏 `{"data":…}` 外层 ⇒ 必失败
  *   - 字段顺序错 ⇒ 服务端可能不认
- *   - 抢课与退课的参数名/字段集不同（`addParam` vs `deleteParam`）
  *   - 余量字段缺失时返回 null 而不是 0（0 会被当成「满课」）
  */
 
@@ -19,7 +18,6 @@ import {
   AUTH_MSG,
   appendTimestamp,
   buildCapacityBody,
-  buildDeleteVolunteerBody,
   buildQueryBody,
   buildTeachingTimeBody,
   buildVolunteerBody,
@@ -44,7 +42,6 @@ describe('bkxk/api —— 端点与基础工具', () => {
     assertEqual(EP.CAPACITY, 'elective/teachingclass/capacity.do');
     assertEqual(EP.TEACHING_TIME, 'elective/teachingTime.do');
     assertEqual(EP.VOLUNTEER, 'elective/volunteer.do');
-    assertEqual(EP.DELETE_VOLUNTEER, 'elective/deleteVolunteer.do');
   });
 
   it('endpointUrl 拼出完整地址', () => {
@@ -114,35 +111,6 @@ describe('bkxk/api —— 抢课报文（🔴 不可撤销）', () => {
   it('teachingClassType 原样透传 —— 必须由调用方给出该教学班所属列表的类别', () => {
     const json = unwrap('addParam', buildVolunteerBody({ ...params, teachingClassType: 'XGXK' }));
     assert(json.endsWith('"teachingClassType":"XGXK"}}'), json);
-  });
-});
-
-describe('bkxk/api —— 退课报文（🔴 不可撤销，尚未真机验证）', () => {
-  it('参数名是 deleteParam，不是 addParam', () => {
-    const body = buildDeleteVolunteerBody({
-      studentCode: '20210001',
-      electiveBatchCode: 'B999',
-      teachingClassId: 'TC123',
-    });
-    assert(body.startsWith('deleteParam='), body.slice(0, 30));
-  });
-
-  it('operationType=2，且**不带** campus / teachingClassType', () => {
-    const json = JSON.parse(
-      unwrap(
-        'deleteParam',
-        buildDeleteVolunteerBody({
-          studentCode: '20210001',
-          electiveBatchCode: 'B999',
-          teachingClassId: 'TC123',
-        }),
-      ),
-    ) as { data: Record<string, unknown> };
-    assertEqual(
-      Object.keys(json.data).join(','),
-      'operationType,studentCode,electiveBatchCode,teachingClassId',
-    );
-    assertEqual(json.data['operationType'], '2');
   });
 });
 

@@ -119,8 +119,8 @@ describe('sites 真实注册表 —— 与 userscript header 的 @match 对齐',
     assert(bkxk !== undefined, 'bkxk 适配器应已注册');
     assertEqual(
       bkxk!.toggles?.length,
-      6,
-      '批 1 的 6 个 + 批 3 的列表注入 − v0.29 删掉的「自绘课表」= 6 个',
+      5,
+      '批 1 的 5 个 + 批 3 的列表注入 − v0.29 删掉的「自绘课表」− v0.34 删掉的「列表加列」= 5 个',
     );
     // 🔴 的 default 必须是 false（代码兜底）；🟠 自 v0.24 起允许作者按体验声明默认值
     // ——「课表注入」就是 🟠 且默认开，理由是它最坏只让课表多几门用户自己的课。
@@ -130,7 +130,7 @@ describe('sites 真实注册表 —— 与 userscript header 的 @match 对齐',
       }
       assert(t.desc !== undefined && t.desc !== '', `开关 ${t.id} 必须写 desc`);
     }
-    // 列表注入是 🟢 且默认开 —— 它与「列表加列」是两件事，所以单独一个开关
+    // 列表注入是 🟢 且默认开 —— 点击只写本地队列、不出网，所以单独一个开关
     const inject = bkxk!.toggles?.find((t) => t.id === 'list-inject');
     assert(inject !== undefined, '列表注入开关应当注册');
     assertEqual(inject!.default, true, '列表注入默认开（🟢，点击不出网）');

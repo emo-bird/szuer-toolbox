@@ -28,14 +28,12 @@ export const SITE_ID = 'bkxk';
 
 /** 开关 id 常量：调用方一律引用这里，禁止在别处写裸字符串 */
 export const TOGGLE = {
-  /** 🔴 写接口总开关（抢课 / 退课）。旧仓库红线 R1：默认 false，不得改 */
+  /** 🔴 写接口总开关（抢课）。旧仓库红线 R1：默认 false，不得改 */
   WRITE_API: 'write-api',
   /** 🟠 课表注入：把自定义课程写进 teachingTime.do 的返回，交给站点原生渲染（默认开） */
   HIJACK_TIMETABLE: 'hijack-timetable',
   /** 🟠 列表冲突追加：在站点算好的 isConflict 上追加我们算出的冲突（默认开） */
   HIJACK_LIST_CONFLICT: 'hijack-list-conflict',
-  /** 🟢 列表加列 */
-  LIST_EXTRA_COLUMNS: 'list-extra-columns',
   /** 🟢 列表注入（教学班ID / 抢课按钮） */
   LIST_INJECT: 'list-inject',
   /** 🟢 自定义课程 */
@@ -78,9 +76,9 @@ const STALE_VALUE_IDS: readonly string[] = ['monitorCategory'];
 export const BKXK_TOGGLES: readonly SiteToggleDef[] = [
   {
     id: TOGGLE.WRITE_API,
-    label: '写接口总开关（抢课 / 退课）',
+    label: '写接口总开关（抢课）',
     desc:
-      '开启后才会真正提交选课与退课请求。这类操作不可撤销，且会在学校系统留痕。' +
+      '开启后才会真正提交选课请求。这类操作不可撤销，且会在学校系统留痕。' +
       '默认关闭；打开时需要二次确认。',
     risk: 'irreversible',
     default: false,
@@ -103,14 +101,6 @@ export const BKXK_TOGGLES: readonly SiteToggleDef[] = [
       '在站点自己算好的 isConflict 之上，追加上自定义课程造成的冲突。' +
       '只追加、不清除站点原值。需要拦截页面请求，会改变站点看到的返回内容。默认开启。',
     risk: 'trace',
-    default: true,
-    group: '选课列表',
-  },
-  {
-    id: TOGGLE.LIST_EXTRA_COLUMNS,
-    label: '列表加列（冲突 / 余量）',
-    desc: '在选课列表里补上冲突提示与实时余量。用 flex 布局，不写死列宽。',
-    risk: 'safe',
     default: true,
     group: '选课列表',
   },

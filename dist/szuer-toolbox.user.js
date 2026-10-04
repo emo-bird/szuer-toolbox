@@ -49,7 +49,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-04T18:53:45.661Z（构建号 46） */
+/* 构建信息：2026-10-04T19:51:32.324Z（构建号 47） */
 
 "use strict";
 (() => {
@@ -1932,14 +1932,12 @@ ${options.desc ?? ""}
   var log6 = scoped("bkxk/settings");
   var SITE_ID = "bkxk";
   var TOGGLE = {
-    /** 🔴 写接口总开关（抢课 / 退课）。旧仓库红线 R1：默认 false，不得改 */
+    /** 🔴 写接口总开关（抢课）。旧仓库红线 R1：默认 false，不得改 */
     WRITE_API: "write-api",
     /** 🟠 课表注入：把自定义课程写进 teachingTime.do 的返回，交给站点原生渲染（默认开） */
     HIJACK_TIMETABLE: "hijack-timetable",
     /** 🟠 列表冲突追加：在站点算好的 isConflict 上追加我们算出的冲突（默认开） */
     HIJACK_LIST_CONFLICT: "hijack-list-conflict",
-    /** 🟢 列表加列 */
-    LIST_EXTRA_COLUMNS: "list-extra-columns",
     /** 🟢 列表注入（教学班ID / 抢课按钮） */
     LIST_INJECT: "list-inject",
     /** 🟢 自定义课程 */
@@ -1957,8 +1955,8 @@ ${options.desc ?? ""}
   var BKXK_TOGGLES = [
     {
       id: TOGGLE.WRITE_API,
-      label: "写接口总开关（抢课 / 退课）",
-      desc: "开启后才会真正提交选课与退课请求。这类操作不可撤销，且会在学校系统留痕。默认关闭；打开时需要二次确认。",
+      label: "写接口总开关（抢课）",
+      desc: "开启后才会真正提交选课请求。这类操作不可撤销，且会在学校系统留痕。默认关闭；打开时需要二次确认。",
       risk: "irreversible",
       default: false,
       group: "选课"
@@ -1976,14 +1974,6 @@ ${options.desc ?? ""}
       label: "列表冲突追加",
       desc: "在站点自己算好的 isConflict 之上，追加上自定义课程造成的冲突。只追加、不清除站点原值。需要拦截页面请求，会改变站点看到的返回内容。默认开启。",
       risk: "trace",
-      default: true,
-      group: "选课列表"
-    },
-    {
-      id: TOGGLE.LIST_EXTRA_COLUMNS,
-      label: "列表加列（冲突 / 余量）",
-      desc: "在选课列表里补上冲突提示与实时余量。用 flex 布局，不写死列宽。",
-      risk: "safe",
       default: true,
       group: "选课列表"
     },
@@ -3149,8 +3139,7 @@ ${options.desc ?? ""}
     TEACHING_TIME: "elective/teachingTime.do",
     NO_ARRANGED: "elective/noArranged.do",
     // 写：默认关闭（红线 R1）
-    VOLUNTEER: "elective/volunteer.do",
-    DELETE_VOLUNTEER: "elective/deleteVolunteer.do"
+    VOLUNTEER: "elective/volunteer.do"
   };
   var CATEGORY_NAME = {
     FANKC: "方案内",
@@ -5308,7 +5297,7 @@ ${text}
       const on = isEnabled(SITE_ID, TOGGLE.WRITE_API);
       gateWarn.hidden = on;
       if (!on) {
-        gateWarn.textContent = "写接口总开关未开启：点【开始抢课】不会发出任何请求。要真的抢课，请到【设置】页打开「写接口总开关（抢课 / 退课）」。";
+        gateWarn.textContent = "写接口总开关未开启：点【开始抢课】不会发出任何请求。要真的抢课，请到【设置】页打开「写接口总开关（抢课）」。";
       }
       return on;
     }
@@ -5723,7 +5712,7 @@ ${text}
       const on = isEnabled(SITE_ID, TOGGLE.WRITE_API);
       gateWarn.hidden = on;
       if (!on) {
-        gateWarn.textContent = "写接口总开关未开启：监控命中也只会提醒，不会自动抢。要自动抢，请到【设置】页打开「写接口总开关（抢课 / 退课）」。";
+        gateWarn.textContent = "写接口总开关未开启：监控命中也只会提醒，不会自动抢。要自动抢，请到【设置】页打开「写接口总开关（抢课）」。";
       }
       return on;
     }
@@ -6635,8 +6624,8 @@ ${text}
   // src/main.ts
   var log20 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-04T18:53:45.661Z" : null;
-  var BUILD_NO = true ? 46 : null;
+  var BUILD_TIME = true ? "2026-10-04T19:51:32.324Z" : null;
+  var BUILD_NO = true ? 47 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();

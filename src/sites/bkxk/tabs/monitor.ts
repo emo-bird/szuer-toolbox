@@ -208,7 +208,7 @@ function mountMonitorTab(root: HTMLElement, ctx: TabContext): () => void {
     if (!on) {
       gateWarn.textContent =
         '写接口总开关未开启：监控命中也只会提醒，不会自动抢。' +
-        '要自动抢，请到【设置】页打开「写接口总开关（抢课 / 退课）」。';
+        '要自动抢，请到【设置】页打开「写接口总开关（抢课）」。';
     }
     return on;
   }

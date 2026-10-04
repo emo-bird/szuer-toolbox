@@ -37,7 +37,6 @@ export const EP = {
   NO_ARRANGED: 'elective/noArranged.do',
   // 写：默认关闭（红线 R1）
   VOLUNTEER: 'elective/volunteer.do',
-  DELETE_VOLUNTEER: 'elective/deleteVolunteer.do',
 } as const;
 
 export type Endpoint = (typeof EP)[keyof typeof EP];
@@ -185,7 +184,7 @@ export function endpointUrl(ep: Endpoint | string, origin: string): string {
  *
  * ⚠️ **不要默认加**：HAR 实测 `volunteer.do` / `capacity.do` / `programCourse.do` /
  * `publicCourse.do` / `recommendedCourse.do` **都没有** query；只有
- * `courseResult.do` / `deleteVolunteer.do` 等少数端点带。
+ * `courseResult.do` 等少数端点带。
  */
 export function appendTimestamp(url: string, nowMs?: number): string {
   const ts = typeof nowMs === 'number' ? nowMs : Date.now();
@@ -232,32 +231,6 @@ export function buildVolunteerBody(p: VolunteerParams): string {
     },
   };
   return `addParam=${encodeURIComponent(JSON.stringify(payload))}`;
-}
-
-export interface DeleteVolunteerParams {
-  studentCode: string;
-  electiveBatchCode: string;
-  teachingClassId: string;
-}
-
-/**
- * 构造退课请求体（🔴 写接口）。
- *
- * 【与抢课的差异，别抄错】参数名是 `deleteParam`；`operationType="2"`；
- * **不带** campus / teachingClassType。
- * 该端点实测带 `timestamp`，调用方要显式 `timestamp: true`。
- * （旧仓库未实现退课，本函数只按文档与抓包形状构造，**尚未真机验证**。）
- */
-export function buildDeleteVolunteerBody(p: DeleteVolunteerParams): string {
-  const payload = {
-    data: {
-      operationType: '2',
-      studentCode: String(p.studentCode),
-      electiveBatchCode: String(p.electiveBatchCode),
-      teachingClassId: String(p.teachingClassId),
-    },
-  };
-  return `deleteParam=${encodeURIComponent(JSON.stringify(payload))}`;
 }
 
 /** 构造查容量请求体（只读，监控轮询首选 —— 比拉整页列表轻得多） */
