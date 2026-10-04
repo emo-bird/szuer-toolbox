@@ -29,13 +29,13 @@
  */
 
 import { scoped } from '../../common/core/log.ts';
-import { read, write } from '../../common/core/storage.ts';
 import { getValue, isEnabled } from '../../common/core/settings.ts';
 import { el, whenDomReady } from '../../common/utils/dom.ts';
 import { copyText } from '../../common/utils/clipboard.ts';
 import { LIST_CSS, LIST_STYLE_ID } from './list-style.ts';
-import { BKXK_STORE_KEY } from './legacy.ts';
 import { SITE_ID, TOGGLE, VALUE } from './settings.ts';
+import { loadMonitorStore, updateMonitor } from './monitor.ts';
+import { loadTaskStore, updateTasks } from './tasks.ts';
 import {
   addMonitor,
   addTask,
@@ -49,8 +49,6 @@ import {
   monitorButtonLabel,
   placeFromTimeText,
   pickTcId,
-  readMonitorStore,
-  readTaskStore,
   removeMonitor,
   teacherFromTitle,
   CLASS_COLLECTION_IMG,
@@ -59,9 +57,7 @@ import {
   orderH5Children,
   planCollectionImg,
   planDeleteVolunteer,
-  type MonitorStore,
   type TargetInfo,
-  type TaskStore,
 } from './list-model.ts';
 import type { PanelApi } from '../types.ts';
 
@@ -86,9 +82,6 @@ const TITLE_CELL_SELECTOR = '.cv-title-col, .cv-course';
 
 interface Ctx {
   readonly panel: PanelApi;
-  /** 抢课队列（读时规范化，点击后写回） */
-  tasks: TaskStore;
-  monitor: MonitorStore;
   /** 本次扫描已注入的块数 */
   budget: number;
 }
@@ -234,18 +227,24 @@ async function copyId(tcId: string, panel: PanelApi): Promise<void> {
 }
 
 function onGrab(info: TargetInfo, ctx: Ctx, btn: HTMLButtonElement): void {
-  if (hasTask(ctx.tasks, info.tcId)) {
+  if (hasTask(loadTaskStore(), info.tcId)) {
     ctx.panel.toast('这个教学班已经在抢课队列里了（不重复添加）', 'info');
     return;
   }
-  const res = addTask(ctx.tasks, {
-    ...info,
-    now: Date.now(),
-    retryMode: getValue<string>(SITE_ID, VALUE.RETRY_MODE),
+  // 走引擎的 updateTasks：本模块**不再持有队列快照**（曾经用页面加载时读的那份
+  // 内存副本整份写盘，会把引擎刚写进去的状态 —— 已抢到、attempts、失败原因 ——
+  // 连同监控的 remain / hits 一起回滚；抢课期间这条路径是热的）。
+  let added = false;
+  updateTasks((store) => {
+    const res = addTask(store, {
+      ...info,
+      now: Date.now(),
+      retryMode: getValue<string>(SITE_ID, VALUE.RETRY_MODE),
+    });
+    added = res.added;
+    return res.store;
   });
-  if (!res.added) return;
-  ctx.tasks = res.store;
-  write(BKXK_STORE_KEY.TASKS, ctx.tasks);
+  if (!added) return;
   btn.textContent = grabButtonLabel(true);
   btn.classList.add('sztb-bkxk-btn-on');
   log.info(`已加入抢课队列：${targetText(info)}（本轮只入队，不会发送任何请求）`);
@@ -253,19 +252,26 @@ function onGrab(info: TargetInfo, ctx: Ctx, btn: HTMLButtonElement): void {
 }
 
 function onMonitorToggle(info: TargetInfo, ctx: Ctx, btn: HTMLButtonElement): void {
-  const wasOn = hasMonitor(ctx.monitor, info.tcId);
-  if (wasOn) {
-    ctx.monitor = removeMonitor(ctx.monitor, info.tcId).store;
+  // 判定与改动在同一次 updateMonitor 里完成：在回调之外先判「在不在」再写盘，
+  // 中间隔着一个 await 点（监控轮询可能刚写过），判定就过期了。
+  let nowOn = false;
+  updateMonitor((store) => {
+    if (hasMonitor(store, info.tcId)) {
+      nowOn = false;
+      return removeMonitor(store, info.tcId).store;
+    }
+    nowOn = true;
+    return addMonitor(store, { ...info, now: Date.now() }).store;
+  });
+  btn.textContent = monitorButtonLabel(nowOn);
+  btn.classList.toggle('sztb-bkxk-btn-on', nowOn);
+  if (nowOn) {
+    log.info(`已加入监控列表：${targetText(info)}（到监控页点【开始监控】才会轮询）`);
+    ctx.panel.toast('已加入监控', 'success');
+  } else {
     log.info(`已移出监控列表：${targetText(info)}`);
     ctx.panel.toast('已移出监控', 'info');
-  } else {
-    ctx.monitor = addMonitor(ctx.monitor, { ...info, now: Date.now() }).store;
-    log.info(`已加入监控列表：${targetText(info)}（本轮只入队，不会轮询）`);
-    ctx.panel.toast('已加入监控', 'success');
   }
-  write(BKXK_STORE_KEY.MONITOR, ctx.monitor);
-  btn.textContent = monitorButtonLabel(!wasOn);
-  btn.classList.toggle('sztb-bkxk-btn-on', !wasOn);
 }
 
 function buildBlock(info: TargetInfo, ctx: Ctx): HTMLElement {
@@ -281,7 +287,7 @@ function buildBlock(info: TargetInfo, ctx: Ctx): HTMLElement {
     },
   });
 
-  const queued = hasTask(ctx.tasks, info.tcId);
+  const queued = hasTask(loadTaskStore(), info.tcId);
   const grab = el('button', {
     class: `sztb-bkxk-btn${queued ? ' sztb-bkxk-btn-on' : ''}`,
     text: grabButtonLabel(queued),
@@ -294,7 +300,7 @@ function buildBlock(info: TargetInfo, ctx: Ctx): HTMLElement {
     },
   });
 
-  const monitored = hasMonitor(ctx.monitor, info.tcId);
+  const monitored = hasMonitor(loadMonitorStore(), info.tcId);
   const mon = el('button', {
     class: `sztb-bkxk-btn${monitored ? ' sztb-bkxk-btn-on' : ''}`,
     text: monitorButtonLabel(monitored),
@@ -510,8 +516,6 @@ export function startListInjection(panel: PanelApi): () => void {
 
   const ctx: Ctx = {
     panel,
-    tasks: readTaskStore(read<unknown>(BKXK_STORE_KEY.TASKS, null)),
-    monitor: readMonitorStore(read<unknown>(BKXK_STORE_KEY.MONITOR, null)),
     budget: 0,
   };
 
@@ -532,8 +536,8 @@ export function startListInjection(panel: PanelApi): () => void {
     observer = new MutationObserver(schedule);
     observer.observe(document.body, { childList: true, subtree: true });
     log.info(
-      `选课列表注入已就绪：抢课队列 ${String(ctx.tasks.items.length)} 条 / ` +
-        `监控 ${String(ctx.monitor.items.length)} 条（本轮点击只入队，不发请求）`,
+      `选课列表注入已就绪：抢课队列 ${String(loadTaskStore().items.length)} 条 / ` +
+        `监控 ${String(loadMonitorStore().items.length)} 条（本轮点击只入队，不发请求）`,
     );
   });
 

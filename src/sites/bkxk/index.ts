@@ -27,6 +27,10 @@ import { runCustomCarry, runMigration } from './legacy.ts';
 import { installHijack } from './hijack.ts';
 import { startListInjection } from './list.ts';
 import { startTimetableInjection } from './timetable.ts';
+import { bindMonitorPanel } from './monitor.ts';
+import { bindTaskPanel } from './tasks.ts';
+import { BKXK_TASKS_TAB } from './tabs/tasks.ts';
+import { BKXK_MONITOR_TAB } from './tabs/monitor.ts';
 import { BKXK_CUSTOM_TAB } from './tabs/custom.ts';
 import { BKXK_SETTINGS_TAB } from './tabs/settings.ts';
 
@@ -52,11 +56,9 @@ export const bkxkAdapter: SiteAdapter = {
   name: '本科选课',
   hosts: HOSTS,
   pages: PAGES,
-  // 标签页分批补齐（用户拍板的五个：任务 / 监控 / 自定义 / 设置 / 日志）：
-  //   本批有【自定义】(order 150) 与【设置】(200) —— 自定义课程本来是批 4 的活儿，
-  //   用户拍板提前到本轮，理由是批 3 的 hijack / timetable 没有数据就没法验收。
-  //   剩下两个（任务 / 监控）在批 4 接入，【日志】是公共标签页、不用站点注册。
-  tabs: [BKXK_CUSTOM_TAB, BKXK_SETTINGS_TAB],
+  // 标签页按 order 排（只在站点组内生效）：任务 100 / 监控 120 / 自定义 150 /【设置】200。
+  // 【日志】是公共标签页，不用站点注册。
+  tabs: [BKXK_TASKS_TAB, BKXK_MONITOR_TAB, BKXK_CUSTOM_TAB, BKXK_SETTINGS_TAB],
   toggles: BKXK_TOGGLES,
 
   /**
@@ -87,17 +89,21 @@ export const bkxkAdapter: SiteAdapter = {
   init(ctx) {
     applyBkxkSettings();
 
+    // 两个执行引擎要调 toast / 订阅刷新，先把悬浮窗接口交给它们。
+    bindTaskPanel(ctx.panel);
+    bindMonitorPanel(ctx.panel);
+
     const session = readSession();
     if (!session.loggedIn) {
       log.warn('未读到有效登录态：学号或 token 缺失，功能接口会失败。请先在站内完成登录。');
     } else {
       log.info(`站点已就绪：${sessionSummary(session)}`);
     }
-    log.info(`功能页=${String(ctx.isFeaturePage)}（自定义 / 设置两个站点标签页已就绪，任务与监控在批 4 接入）`);
+    log.info(`功能页=${String(ctx.isFeaturePage)}（任务 / 监控 / 自定义 / 设置四个站点标签页已就绪）`);
 
     // 选课页注入教学班ID 与抢课/监控按钮。模块自己判页面（课表页也有 .cv-row，
     // 不是我们该动的地方），所以这里不重复判断。
-    // 本轮点击**只入队**，不发请求 —— 执行引擎在批 4。
+    // 这里只入队 —— 真正的出网在【任务】/【监控】两个标签页里由用户点开始。
     startListInjection(ctx.panel);
 
     // 课表页把自定义课程画进站点自己的列里（模块自判页面：只在 curriculum.do 生效）。

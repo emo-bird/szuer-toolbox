@@ -39,6 +39,17 @@ const checks = [
   // 所以既要看到适配器本体（显示名），也要看到它真的被 registerAdapter 注册。
   ['含 bkxk 适配器', text.includes('name: "本科选课"')],
   ['bkxk 适配器已注册进注册表', text.includes('registerAdapter(bkxkAdapter)')],
+  // 同一条教训的延伸：标签页只在注册表里，注册漏了一个不会报错，
+  // 表现是「这个页面永远不出现」，日志里同样一行说明都没有。
+  // 用「某个 tabs: [...] 里同时含这四个名字」判定，避免因排版变化误报。
+  [
+    'bkxk 四个站点标签页齐备（任务 / 监控 / 自定义 / 设置）',
+    [...text.matchAll(/tabs: \[([^\]]*)\]/g)].some((m) =>
+      ['BKXK_TASKS_TAB', 'BKXK_MONITOR_TAB', 'BKXK_CUSTOM_TAB', 'BKXK_SETTINGS_TAB'].every((n) =>
+        m[1].includes(n),
+      ),
+    ),
+  ],
   ['未把 .css 拆成单独文件', !text.includes('.sztb-panel{') || true],
 ];
 
