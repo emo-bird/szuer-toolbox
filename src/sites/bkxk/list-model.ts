@@ -311,8 +311,38 @@ export function removeMonitor(
 }
 
 /**
+ * 从列表页按**教学班 id** 把任务移出队列。
+ *
+ * 为什么不直接用 `tasks-model.ts` 的 `removeTask`：那个是按 `TaskItem.id`（`t<seq>`，
+ * 见 `addTask`）删的，而列表页手上只有教学班 id。本层自持形状，不与存储层耦合（见文件头）。
+ */
+export function removeTaskByTcId(
+  store: TaskStore,
+  tcId: string,
+): { store: TaskStore; removed: boolean } {
+  const items = store.items.filter((t) => t.teachingClassID !== tcId);
+  if (items.length === store.items.length) return { store, removed: false };
+  // 保留 seq：它只能前进，删掉条目后再加新条目不会与 old id 撞车
+  return { store: { ...store, items }, removed: true };
+}
+
+/**
+ * 「添加抢课」也是开关（**用户 m00846 拍板，推翻本文件原来的口径**）。
+ *
+ * 移出队列 ≠ 撤销选课：站点上已经抢到的结果要另走退课，这里只是不再为它发请求，
+ * 代价可逆，所以**不加二次确认框**。
+ */
+export function toggleTask(store: TaskStore, input: TaskAddInput): { store: TaskStore; on: boolean } {
+  if (hasTask(store, input.tcId)) {
+    const { store: next } = removeTaskByTcId(store, input.tcId);
+    return { store: next, on: false };
+  }
+  const { store: next } = addTask(store, input);
+  return { store: next, on: true };
+}
+
+/**
  * 「添加监控」是个开关：已在列表里就移除（与旧仓库 `list.js:217-236` 一致）。
- * 抢课**不是**开关 —— 任务带重试与进度，误点一下不该把它删掉。
  */
 export function toggleMonitor(
   store: MonitorStore,
@@ -328,7 +358,7 @@ export function toggleMonitor(
 
 /** 按钮文案：直接反映状态，免得「蓝了不知道再点会取消」 */
 export function grabButtonLabel(on: boolean): string {
-  return on ? '已加抢课' : '添加抢课';
+  return on ? '移除抢课' : '添加抢课';
 }
 
 export function monitorButtonLabel(on: boolean): string {

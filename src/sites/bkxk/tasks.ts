@@ -313,6 +313,9 @@ async function attempt(task: TaskItem): Promise<void> {
     finish(task.id, { status: TASK_STATUS.FAILED, lastMsg: AUTH_MSG, lastKind: TASK_KIND.AUTH });
     log.error('登录态失效，已停止全部任务');
     panel?.toast('登录态失效，已停止全部任务，请刷新页面重新登录', 'error');
+    // 全屏提示（用户 m00846 新需求 2）：toast 只在面板里一闪而过，
+    // 用户多半正盯着选课页面本身，会以为还在这儿抢着
+    panel?.alertAuthExpired();
     return;
   }
 

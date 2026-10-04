@@ -3,7 +3,7 @@
  *
  * 为什么值得单独钉：这些声明的形态直接决定设置界面的样子，而界面形态是本轮
  * 用户反馈的重点 ——
- *   - 监控模式 / 监控类别 / 重试策略必须是**下拉**（旧脚本就是下拉；
+ *   - 监控模式 / 重试策略必须是**下拉**（旧脚本就是下拉；
  *     自由文本框会让用户打错一个字母就静默不生效）；
  *   - 三个时间参数必须**带校验**（低于建议下限要当场提示，而不是等出事）；
  *   - 请求间隔必须**带 apply 钩子**（改完立刻生效，不用刷新）。
@@ -31,12 +31,12 @@ function def(id: string): ValueDef<unknown> {
 }
 
 describe('bkxk 配置项 —— 形态', () => {
-  it('共 7 个配置项，id 全部来自 VALUE 常量', () => {
+  it('共 6 个配置项，id 全部来自 VALUE 常量', () => {
     boot();
     const ids = valuesOf(SITE_ID).map((v) => v.id).sort();
     const expected = Object.values(VALUE).sort();
     assertEqual(ids.join(','), expected.join(','), '配置项清单应与 VALUE 常量一一对应');
-    assertEqual(ids.length, 7);
+    assertEqual(ids.length, 6);
   });
 
   it('三个时间参数用数字框，其余用文本/下拉', () => {
@@ -47,9 +47,9 @@ describe('bkxk 配置项 —— 形态', () => {
     assertEqual(def(VALUE.BATCH_CODE).kind, 'text');
   });
 
-  it('监控模式 / 监控类别 / 重试策略是下拉，且选项都是「值 + 中文名」', () => {
+  it('监控模式 / 重试策略是下拉，且选项都是「值 + 中文名」', () => {
     boot();
-    for (const id of [VALUE.MONITOR_MODE, VALUE.MONITOR_CATEGORY, VALUE.RETRY_MODE]) {
+    for (const id of [VALUE.MONITOR_MODE, VALUE.RETRY_MODE]) {
       const d = def(id);
       assertEqual(d.kind, 'select', `${id} 必须是下拉（用户明确要求）`);
       assert((d.options?.length ?? 0) > 0, `${id} 下拉必须有选项`);
@@ -65,11 +65,9 @@ describe('bkxk 配置项 —— 形态', () => {
     }
   });
 
-  it('监控类别列出全部 8 个类别代码', () => {
+  it('「监控类别」配置项已被删除（引擎按监控项自带的类别自己分组）', () => {
     boot();
-    const values = (def(VALUE.MONITOR_CATEGORY).options ?? []).map((o) => o.value);
-    assertEqual(values.length, 8);
-    assert(values.includes('FANKC') && values.includes('MOOC'), `实际：${values.join(',')}`);
+    assertEqual(valuesOf(SITE_ID).some((v) => v.id === 'monitorCategory'), false);
   });
 
   it('每个配置项都有 desc（渲染成标签下面独立一行）', () => {

@@ -49,12 +49,12 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-04T16:34:10.536Z（构建号 44） */
+/* 构建信息：2026-10-04T18:02:32.036Z（构建号 45） */
 
 "use strict";
 (() => {
   // src/common/ui/style.css
-  var style_default = '/* ============================================================\n   深大人工具箱 —— 悬浮窗基础样式\n   本文件被 esbuild 以 --loader:.css=text 打成字符串，\n   运行时整段塞进 shadow root 的 <style>。\n   因为处在 Shadow DOM 内，天然不受宿主页面 CSS 影响，\n   反向也绝不会污染宿主页面。\n   ============================================================ */\n\n:host,\n.sztb-root {\n  --sztb-accent: #1e6fff;\n  --sztb-accent-hover: #175be0;\n  --sztb-bg: #ffffff;\n  --sztb-bg-alt: #f5f6f8;\n  --sztb-border: #e3e5e9;\n  --sztb-text: #1f2329;\n  --sztb-text-dim: #8a9099;\n  --sztb-danger: #e5484d;\n  --sztb-warn: #f5a623;\n  --sztb-ok: #30a46c;\n\n  all: initial;\n  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;\n  font-size: 13px;\n  line-height: 1.5;\n  color: var(--sztb-text);\n  box-sizing: border-box;\n}\n\n.sztb-root *,\n.sztb-root *::before,\n.sztb-root *::after {\n  box-sizing: border-box;\n}\n\n/* ---------------------------------------------------------- 悬浮球 */\n.sztb-ball {\n  position: fixed;\n  z-index: 2147483000;\n  width: 44px;\n  height: 44px;\n  border-radius: 50%;\n  background: var(--sztb-accent);\n  color: #fff;\n  display: none;\n  align-items: center;\n  justify-content: center;\n  font-size: 15px;\n  font-weight: 600;\n  cursor: grab;\n  user-select: none;\n  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.22);\n  transition: transform 0.15s ease, background 0.15s ease;\n}\n\n.sztb-root[data-collapsed="true"] .sztb-ball {\n  display: flex;\n}\n\n.sztb-ball:hover {\n  background: var(--sztb-accent-hover);\n  transform: scale(1.06);\n}\n\n.sztb-ball:active {\n  cursor: grabbing;\n}\n\n/* ---------------------------------------------------------- 面板 */\n.sztb-panel {\n  position: fixed;\n  z-index: 2147483001;\n  display: flex;\n  flex-direction: column;\n  background: var(--sztb-bg);\n  border: 1px solid var(--sztb-border);\n  border-radius: 10px;\n  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);\n  overflow: hidden;\n  min-width: 260px;\n  min-height: 180px;\n}\n\n.sztb-root[data-collapsed="true"] .sztb-panel {\n  display: none;\n}\n\n/* ---------------------------------------------------------- 标题栏 */\n.sztb-head {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  padding: 8px 10px;\n  background: var(--sztb-bg-alt);\n  border-bottom: 1px solid var(--sztb-border);\n  cursor: move;\n  user-select: none;\n  flex: 0 0 auto;\n}\n\n.sztb-title {\n  flex: 1 1 auto;\n  font-weight: 600;\n  font-size: 13px;\n  white-space: nowrap;\n  overflow: hidden;\n  text-overflow: ellipsis;\n}\n\n.sztb-site {\n  color: var(--sztb-text-dim);\n  font-weight: 400;\n}\n\n.sztb-iconbtn {\n  flex: 0 0 auto;\n  width: 22px;\n  height: 22px;\n  padding: 0;\n  border: none;\n  border-radius: 5px;\n  background: transparent;\n  color: var(--sztb-text-dim);\n  font-size: 14px;\n  line-height: 1;\n  cursor: pointer;\n}\n\n.sztb-iconbtn:hover {\n  background: rgba(0, 0, 0, 0.07);\n  color: var(--sztb-text);\n}\n\n/* ---------------------------------------------------------- 标签栏 */\n.sztb-tabbar {\n  display: flex;\n  flex-wrap: wrap;\n  gap: 2px;\n  padding: 6px 8px 0;\n  border-bottom: 1px solid var(--sztb-border);\n  background: var(--sztb-bg);\n  flex: 0 0 auto;\n}\n\n.sztb-tab {\n  padding: 5px 10px;\n  border: none;\n  border-bottom: 2px solid transparent;\n  background: transparent;\n  color: var(--sztb-text-dim);\n  font-size: 12.5px;\n  cursor: pointer;\n  border-radius: 6px 6px 0 0;\n  white-space: nowrap;\n}\n\n.sztb-tab:hover {\n  color: var(--sztb-text);\n  background: var(--sztb-bg-alt);\n}\n\n.sztb-tab[aria-selected="true"] {\n  color: var(--sztb-accent);\n  border-bottom-color: var(--sztb-accent);\n  font-weight: 600;\n}\n\n/**\n * 站点组与公共组之间的分组竖线。\n *\n * - `align-self: center` 而不是 `stretch`：标签按钮自带上下内边距，\n *   竖线只有它们高度的一部分才像「分组线」而不是「分割框」。\n * - 用固定 px 高度（约标签按钮高度的 60%）而不是百分比：\n *   `flex-wrap` 换行后每行的行高由内容决定，百分比会跟着抖。\n * - `flex: 0 0 auto` 防止它在窄面板里被压扁。\n * - 标签栏本身有 `gap: 2px`，所以左右各留 4px 即可得到 6px 的视觉间距。\n */\n.sztb-tab-sep {\n  align-self: center;\n  flex: 0 0 auto;\n  width: 1px;\n  height: 14px;\n  margin: 0 4px;\n  background: var(--sztb-border);\n}\n\n/* ---------------------------------------------------------- 内容区 */\n.sztb-body {\n  flex: 1 1 auto;\n  overflow: auto;\n  padding: 10px;\n}\n\n.sztb-pane {\n  display: none;\n  flex-direction: column;\n  gap: 8px;\n}\n\n.sztb-pane[data-active="true"] {\n  display: flex;\n}\n\n/* ---------------------------------------------------------- 表单控件 */\n.sztb-row {\n  display: flex;\n  align-items: flex-start;\n  gap: 8px;\n  padding: 7px 8px;\n  border-radius: 6px;\n}\n\n.sztb-row:hover {\n  background: var(--sztb-bg-alt);\n}\n\n.sztb-row input[type="checkbox"] {\n  flex: 0 0 auto;\n  margin: 2px 0 0;\n  width: 15px;\n  height: 15px;\n  accent-color: var(--sztb-accent);\n  cursor: pointer;\n}\n\n.sztb-row-main {\n  flex: 1 1 auto;\n  min-width: 0;\n}\n\n.sztb-row-label {\n  display: block;\n  font-size: 13px;\n  cursor: pointer;\n}\n\n.sztb-row-desc {\n  display: block;\n  color: var(--sztb-text-dim);\n  font-size: 12px;\n  margin-top: 1px;\n  word-break: break-word;\n}\n\n.sztb-risk {\n  display: inline-block;\n  margin-left: 6px;\n  padding: 0 5px;\n  border-radius: 4px;\n  font-size: 11px;\n  font-weight: 600;\n  vertical-align: 1px;\n}\n\n.sztb-risk[data-risk="trace"] {\n  background: rgba(245, 166, 35, 0.16);\n  color: #b3730a;\n}\n\n.sztb-risk[data-risk="irreversible"] {\n  background: rgba(229, 72, 77, 0.14);\n  color: var(--sztb-danger);\n}\n\n.sztb-field {\n  display: flex;\n  flex-direction: column;\n  gap: 3px;\n  margin-bottom: 10px;\n  padding: 0 8px;\n}\n\n.sztb-field-label {\n  font-size: 13px;\n  color: var(--sztb-text);\n}\n\n/* 配置项提示：单独一行，紧跟在标签下面（不塞进输入框里） */\n.sztb-field-desc {\n  font-size: 12px;\n  line-height: 1.45;\n  color: var(--sztb-text-dim);\n  word-break: break-word;\n}\n\n.sztb-input,\n.sztb-select {\n  width: 100%;\n  padding: 5px 8px;\n  border: 1px solid var(--sztb-border);\n  border-radius: 6px;\n  font-size: 13px;\n  font-family: inherit;\n  color: var(--sztb-text);\n  background: var(--sztb-bg);\n  box-sizing: border-box;\n}\n\n.sztb-input:focus,\n.sztb-select:focus {\n  outline: none;\n  border-color: var(--sztb-accent);\n}\n\n/* 空值时显示的灰色默认值 */\n.sztb-input::placeholder {\n  color: var(--sztb-text-dim);\n  opacity: 0.8;\n}\n\n.sztb-select {\n  cursor: pointer;\n}\n\n/* 校验提示：校验通过时用 hidden 收起来，不占高度 */\n.sztb-field-hint {\n  font-size: 12px;\n  line-height: 1.45;\n  color: #b3730a;\n}\n\n.sztb-field-hint[hidden] {\n  display: none;\n}\n\n.sztb-field[data-invalid="true"] .sztb-input,\n.sztb-field[data-invalid="true"] .sztb-select {\n  border-color: #d9a340;\n}\n\n.sztb-btn {\n  padding: 5px 12px;\n  border: 1px solid var(--sztb-border);\n  border-radius: 6px;\n  background: var(--sztb-bg);\n  color: var(--sztb-text);\n  font-size: 12.5px;\n  font-family: inherit;\n  cursor: pointer;\n}\n\n.sztb-btn:hover {\n  background: var(--sztb-bg-alt);\n}\n\n.sztb-btn[data-variant="primary"] {\n  background: var(--sztb-accent);\n  border-color: var(--sztb-accent);\n  color: #fff;\n}\n\n.sztb-btn[data-variant="primary"]:hover {\n  background: var(--sztb-accent-hover);\n}\n\n.sztb-btn[data-variant="danger"] {\n  background: var(--sztb-danger);\n  border-color: var(--sztb-danger);\n  color: #fff;\n}\n\n.sztb-group-title {\n  margin: 10px 0 2px;\n  font-size: 12px;\n  font-weight: 600;\n  color: var(--sztb-text-dim);\n}\n\n.sztb-group-title:first-child {\n  margin-top: 0;\n}\n\n.sztb-empty {\n  padding: 16px 8px;\n  text-align: center;\n  color: var(--sztb-text-dim);\n  font-size: 12.5px;\n}\n\n/* 段首说明文字：站点自己的设置标签页用它交代门禁规则 */\n.sztb-note {\n  margin: 0 0 8px;\n  padding: 7px 9px;\n  border-left: 2px solid var(--sztb-border);\n  border-radius: 0 5px 5px 0;\n  background: var(--sztb-bg-alt);\n  color: var(--sztb-text-dim);\n  font-size: 12px;\n  line-height: 1.6;\n}\n\n/* ---------------------------------------------------------- 日志面板 */\n.sztb-log {\n  font-family: Consolas, "Cascadia Mono", monospace;\n  font-size: 11.5px;\n  line-height: 1.6;\n  white-space: pre-wrap;\n  word-break: break-all;\n  margin: 0;\n  flex: 1 1 auto;\n}\n\n.sztb-log-line[data-level="warn"] {\n  color: #b3730a;\n}\n\n.sztb-log-line[data-level="error"] {\n  color: var(--sztb-danger);\n}\n\n.sztb-log-line[data-level="debug"] {\n  color: var(--sztb-text-dim);\n}\n\n.sztb-toolbar {\n  display: flex;\n  gap: 6px;\n  flex: 0 0 auto;\n  align-items: center;\n}\n\n/* ---------------------------------------------------------- Toast */\n.sztb-toasts {\n  position: fixed;\n  z-index: 2147483003;\n  display: flex;\n  flex-direction: column;\n  gap: 6px;\n  align-items: flex-end;\n  pointer-events: none;\n}\n\n.sztb-toast {\n  max-width: 260px;\n  padding: 7px 11px;\n  border-radius: 7px;\n  background: rgba(31, 35, 41, 0.94);\n  color: #fff;\n  font-size: 12.5px;\n  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.24);\n  animation: sztb-toast-in 0.16s ease;\n  word-break: break-word;\n}\n\n.sztb-toast[data-kind="error"] {\n  background: var(--sztb-danger);\n}\n\n.sztb-toast[data-kind="warn"] {\n  background: #b3730a;\n}\n\n.sztb-toast[data-kind="success"] {\n  background: var(--sztb-ok);\n}\n\n@keyframes sztb-toast-in {\n  from {\n    opacity: 0;\n    transform: translateY(-6px);\n  }\n  to {\n    opacity: 1;\n    transform: none;\n  }\n}\n\n/* ---------------------------------------------------------- 确认框 */\n.sztb-modal-mask {\n  position: fixed;\n  inset: 0;\n  z-index: 2147483002;\n  background: rgba(0, 0, 0, 0.35);\n  display: flex;\n  align-items: center;\n  justify-content: center;\n}\n\n.sztb-modal {\n  width: 300px;\n  max-width: calc(100vw - 32px);\n  background: var(--sztb-bg);\n  border-radius: 10px;\n  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);\n  overflow: hidden;\n}\n\n.sztb-modal-title {\n  padding: 12px 14px 0;\n  font-weight: 600;\n  font-size: 13.5px;\n}\n\n.sztb-modal-title[data-danger="true"] {\n  color: var(--sztb-danger);\n}\n\n.sztb-modal-body {\n  padding: 8px 14px 14px;\n  font-size: 12.5px;\n  color: var(--sztb-text-dim);\n  white-space: pre-wrap;\n  word-break: break-word;\n}\n\n.sztb-modal-foot {\n  display: flex;\n  justify-content: flex-end;\n  gap: 8px;\n  padding: 10px 14px;\n  background: var(--sztb-bg-alt);\n  border-top: 1px solid var(--sztb-border);\n}\n\n/* ---------------------------------------------------------- 缩放手柄 */\n.sztb-resize {\n  position: absolute;\n  right: 0;\n  bottom: 0;\n  width: 14px;\n  height: 14px;\n  cursor: nwse-resize;\n  background: linear-gradient(\n    135deg,\n    transparent 0 50%,\n    var(--sztb-border) 50% 60%,\n    transparent 60% 72%,\n    var(--sztb-border) 72% 82%,\n    transparent 82%\n  );\n}\n';
+  var style_default = '/* ============================================================\n   深大人工具箱 —— 悬浮窗基础样式\n   本文件被 esbuild 以 --loader:.css=text 打成字符串，\n   运行时整段塞进 shadow root 的 <style>。\n   因为处在 Shadow DOM 内，天然不受宿主页面 CSS 影响，\n   反向也绝不会污染宿主页面。\n   ============================================================ */\n\n:host,\n.sztb-root {\n  --sztb-accent: #1e6fff;\n  --sztb-accent-hover: #175be0;\n  --sztb-bg: #ffffff;\n  --sztb-bg-alt: #f5f6f8;\n  --sztb-border: #e3e5e9;\n  --sztb-text: #1f2329;\n  --sztb-text-dim: #8a9099;\n  --sztb-danger: #e5484d;\n  --sztb-warn: #f5a623;\n  --sztb-ok: #30a46c;\n\n  all: initial;\n  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;\n  font-size: 13px;\n  line-height: 1.5;\n  color: var(--sztb-text);\n  box-sizing: border-box;\n}\n\n.sztb-root *,\n.sztb-root *::before,\n.sztb-root *::after {\n  box-sizing: border-box;\n}\n\n/* ---------------------------------------------------------- 悬浮球 */\n.sztb-ball {\n  position: fixed;\n  z-index: 2147483000;\n  width: 44px;\n  height: 44px;\n  border-radius: 50%;\n  background: var(--sztb-accent);\n  color: #fff;\n  display: none;\n  align-items: center;\n  justify-content: center;\n  font-size: 15px;\n  font-weight: 600;\n  cursor: grab;\n  user-select: none;\n  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.22);\n  transition: transform 0.15s ease, background 0.15s ease;\n}\n\n.sztb-root[data-collapsed="true"] .sztb-ball {\n  display: flex;\n}\n\n.sztb-ball:hover {\n  background: var(--sztb-accent-hover);\n  transform: scale(1.06);\n}\n\n.sztb-ball:active {\n  cursor: grabbing;\n}\n\n/* ---------------------------------------------------------- 面板 */\n.sztb-panel {\n  position: fixed;\n  z-index: 2147483001;\n  display: flex;\n  flex-direction: column;\n  background: var(--sztb-bg);\n  border: 1px solid var(--sztb-border);\n  border-radius: 10px;\n  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);\n  overflow: hidden;\n  min-width: 260px;\n  min-height: 180px;\n}\n\n.sztb-root[data-collapsed="true"] .sztb-panel {\n  display: none;\n}\n\n/* ---------------------------------------------------------- 标题栏 */\n.sztb-head {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  padding: 8px 10px;\n  background: var(--sztb-bg-alt);\n  border-bottom: 1px solid var(--sztb-border);\n  cursor: move;\n  user-select: none;\n  flex: 0 0 auto;\n}\n\n.sztb-title {\n  flex: 1 1 auto;\n  font-weight: 600;\n  font-size: 13px;\n  white-space: nowrap;\n  overflow: hidden;\n  text-overflow: ellipsis;\n}\n\n.sztb-site {\n  color: var(--sztb-text-dim);\n  font-weight: 400;\n}\n\n.sztb-iconbtn {\n  flex: 0 0 auto;\n  width: 22px;\n  height: 22px;\n  padding: 0;\n  border: none;\n  border-radius: 5px;\n  background: transparent;\n  color: var(--sztb-text-dim);\n  font-size: 14px;\n  line-height: 1;\n  cursor: pointer;\n}\n\n.sztb-iconbtn:hover {\n  background: rgba(0, 0, 0, 0.07);\n  color: var(--sztb-text);\n}\n\n/* ---------------------------------------------------------- 标签栏 */\n.sztb-tabbar {\n  display: flex;\n  flex-wrap: wrap;\n  gap: 2px;\n  padding: 6px 8px 0;\n  border-bottom: 1px solid var(--sztb-border);\n  background: var(--sztb-bg);\n  flex: 0 0 auto;\n}\n\n.sztb-tab {\n  padding: 5px 10px;\n  border: none;\n  border-bottom: 2px solid transparent;\n  background: transparent;\n  color: var(--sztb-text-dim);\n  font-size: 12.5px;\n  cursor: pointer;\n  border-radius: 6px 6px 0 0;\n  white-space: nowrap;\n}\n\n.sztb-tab:hover {\n  color: var(--sztb-text);\n  background: var(--sztb-bg-alt);\n}\n\n.sztb-tab[aria-selected="true"] {\n  color: var(--sztb-accent);\n  border-bottom-color: var(--sztb-accent);\n  font-weight: 600;\n}\n\n/**\n * 站点组与公共组之间的分组竖线。\n *\n * - `align-self: center` 而不是 `stretch`：标签按钮自带上下内边距，\n *   竖线只有它们高度的一部分才像「分组线」而不是「分割框」。\n * - 用固定 px 高度（约标签按钮高度的 60%）而不是百分比：\n *   `flex-wrap` 换行后每行的行高由内容决定，百分比会跟着抖。\n * - `flex: 0 0 auto` 防止它在窄面板里被压扁。\n * - 标签栏本身有 `gap: 2px`，所以左右各留 4px 即可得到 6px 的视觉间距。\n */\n.sztb-tab-sep {\n  align-self: center;\n  flex: 0 0 auto;\n  width: 1px;\n  height: 14px;\n  margin: 0 4px;\n  background: var(--sztb-border);\n}\n\n/* ---------------------------------------------------------- 内容区 */\n.sztb-body {\n  flex: 1 1 auto;\n  overflow: auto;\n  padding: 10px;\n}\n\n.sztb-pane {\n  display: none;\n  flex-direction: column;\n  gap: 8px;\n}\n\n.sztb-pane[data-active="true"] {\n  display: flex;\n}\n\n/* ---------------------------------------------------------- 表单控件 */\n.sztb-row {\n  display: flex;\n  align-items: flex-start;\n  gap: 8px;\n  padding: 7px 8px;\n  border-radius: 6px;\n}\n\n.sztb-row:hover {\n  background: var(--sztb-bg-alt);\n}\n\n.sztb-row input[type="checkbox"] {\n  flex: 0 0 auto;\n  margin: 2px 0 0;\n  width: 15px;\n  height: 15px;\n  accent-color: var(--sztb-accent);\n  cursor: pointer;\n}\n\n.sztb-row-main {\n  flex: 1 1 auto;\n  min-width: 0;\n}\n\n.sztb-row-label {\n  display: block;\n  font-size: 13px;\n  cursor: pointer;\n}\n\n.sztb-row-desc {\n  display: block;\n  color: var(--sztb-text-dim);\n  font-size: 12px;\n  margin-top: 1px;\n  word-break: break-word;\n}\n\n.sztb-risk {\n  display: inline-block;\n  margin-left: 6px;\n  padding: 0 5px;\n  border-radius: 4px;\n  font-size: 11px;\n  font-weight: 600;\n  vertical-align: 1px;\n}\n\n.sztb-risk[data-risk="trace"] {\n  background: rgba(245, 166, 35, 0.16);\n  color: #b3730a;\n}\n\n.sztb-risk[data-risk="irreversible"] {\n  background: rgba(229, 72, 77, 0.14);\n  color: var(--sztb-danger);\n}\n\n.sztb-field {\n  display: flex;\n  flex-direction: column;\n  gap: 3px;\n  margin-bottom: 10px;\n  padding: 0 8px;\n}\n\n.sztb-field-label {\n  font-size: 13px;\n  color: var(--sztb-text);\n}\n\n/* 配置项提示：单独一行，紧跟在标签下面（不塞进输入框里） */\n.sztb-field-desc {\n  font-size: 12px;\n  line-height: 1.45;\n  color: var(--sztb-text-dim);\n  word-break: break-word;\n}\n\n.sztb-input,\n.sztb-select {\n  width: 100%;\n  padding: 5px 8px;\n  border: 1px solid var(--sztb-border);\n  border-radius: 6px;\n  font-size: 13px;\n  font-family: inherit;\n  color: var(--sztb-text);\n  background: var(--sztb-bg);\n  box-sizing: border-box;\n}\n\n.sztb-input:focus,\n.sztb-select:focus {\n  outline: none;\n  border-color: var(--sztb-accent);\n}\n\n/* 空值时显示的灰色默认值 */\n.sztb-input::placeholder {\n  color: var(--sztb-text-dim);\n  opacity: 0.8;\n}\n\n.sztb-select {\n  cursor: pointer;\n}\n\n/* 校验提示：校验通过时用 hidden 收起来，不占高度 */\n.sztb-field-hint {\n  font-size: 12px;\n  line-height: 1.45;\n  color: #b3730a;\n}\n\n.sztb-field-hint[hidden] {\n  display: none;\n}\n\n.sztb-field[data-invalid="true"] .sztb-input,\n.sztb-field[data-invalid="true"] .sztb-select {\n  border-color: #d9a340;\n}\n\n.sztb-btn {\n  padding: 5px 12px;\n  border: 1px solid var(--sztb-border);\n  border-radius: 6px;\n  background: var(--sztb-bg);\n  color: var(--sztb-text);\n  font-size: 12.5px;\n  font-family: inherit;\n  cursor: pointer;\n}\n\n.sztb-btn:hover {\n  background: var(--sztb-bg-alt);\n}\n\n.sztb-btn[data-variant="primary"] {\n  background: var(--sztb-accent);\n  border-color: var(--sztb-accent);\n  color: #fff;\n}\n\n.sztb-btn[data-variant="primary"]:hover {\n  background: var(--sztb-accent-hover);\n}\n\n.sztb-btn[data-variant="danger"] {\n  background: var(--sztb-danger);\n  border-color: var(--sztb-danger);\n  color: #fff;\n}\n\n.sztb-group-title {\n  margin: 10px 0 2px;\n  font-size: 12px;\n  font-weight: 600;\n  color: var(--sztb-text-dim);\n}\n\n.sztb-group-title:first-child {\n  margin-top: 0;\n}\n\n.sztb-empty {\n  padding: 16px 8px;\n  text-align: center;\n  color: var(--sztb-text-dim);\n  font-size: 12.5px;\n}\n\n/* 段首说明文字：站点自己的设置标签页用它交代门禁规则 */\n.sztb-note {\n  margin: 0 0 8px;\n  padding: 7px 9px;\n  border-left: 2px solid var(--sztb-border);\n  border-radius: 0 5px 5px 0;\n  background: var(--sztb-bg-alt);\n  color: var(--sztb-text-dim);\n  font-size: 12px;\n  line-height: 1.6;\n}\n\n/* ---------------------------------------------------------- 日志面板 */\n.sztb-log {\n  font-family: Consolas, "Cascadia Mono", monospace;\n  font-size: 11.5px;\n  line-height: 1.6;\n  white-space: pre-wrap;\n  word-break: break-all;\n  margin: 0;\n  flex: 1 1 auto;\n}\n\n.sztb-log-line[data-level="warn"] {\n  color: #b3730a;\n}\n\n.sztb-log-line[data-level="error"] {\n  color: var(--sztb-danger);\n}\n\n.sztb-log-line[data-level="debug"] {\n  color: var(--sztb-text-dim);\n}\n\n.sztb-toolbar {\n  display: flex;\n  gap: 6px;\n  flex: 0 0 auto;\n  align-items: center;\n}\n\n/* ---------------------------------------------------------- Toast */\n.sztb-toasts {\n  position: fixed;\n  z-index: 2147483003;\n  display: flex;\n  flex-direction: column;\n  gap: 6px;\n  align-items: flex-end;\n  pointer-events: none;\n}\n\n.sztb-toast {\n  max-width: 260px;\n  padding: 7px 11px;\n  border-radius: 7px;\n  background: rgba(31, 35, 41, 0.94);\n  color: #fff;\n  font-size: 12.5px;\n  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.24);\n  animation: sztb-toast-in 0.16s ease;\n  word-break: break-word;\n}\n\n.sztb-toast[data-kind="error"] {\n  background: var(--sztb-danger);\n}\n\n.sztb-toast[data-kind="warn"] {\n  background: #b3730a;\n}\n\n.sztb-toast[data-kind="success"] {\n  background: var(--sztb-ok);\n}\n\n@keyframes sztb-toast-in {\n  from {\n    opacity: 0;\n    transform: translateY(-6px);\n  }\n  to {\n    opacity: 1;\n    transform: none;\n  }\n}\n\n/* ---------------------------------------------------------- 确认框 */\n.sztb-modal-mask {\n  position: fixed;\n  inset: 0;\n  z-index: 2147483002;\n  background: rgba(0, 0, 0, 0.35);\n  display: flex;\n  align-items: center;\n  justify-content: center;\n}\n\n.sztb-modal {\n  width: 300px;\n  max-width: calc(100vw - 32px);\n  background: var(--sztb-bg);\n  border-radius: 10px;\n  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);\n  overflow: hidden;\n}\n\n.sztb-modal-title {\n  padding: 12px 14px 0;\n  font-weight: 600;\n  font-size: 13.5px;\n}\n\n.sztb-modal-title[data-danger="true"] {\n  color: var(--sztb-danger);\n}\n\n.sztb-modal-body {\n  padding: 8px 14px 14px;\n  font-size: 12.5px;\n  color: var(--sztb-text-dim);\n  white-space: pre-wrap;\n  word-break: break-word;\n}\n\n.sztb-modal-foot {\n  display: flex;\n  justify-content: flex-end;\n  gap: 8px;\n  padding: 10px 14px;\n  background: var(--sztb-bg-alt);\n  border-top: 1px solid var(--sztb-border);\n}\n\n/* ------------------------------------------ 登录态失效（全屏提示） */\n/* 比确认框更重：遮罩再深一点、层级再高一点（万一确认框正开着） */\n.sztb-auth-mask {\n  z-index: 2147483003;\n  background: rgba(0, 0, 0, 0.45);\n}\n\n/* 正文比确认框长，放宽一行；窄屏仍受 max-width 约束 */\n.sztb-auth-box {\n  width: 360px;\n}\n\n/* ---------------------------------------------------------- 缩放手柄 */\n.sztb-resize {\n  position: absolute;\n  right: 0;\n  bottom: 0;\n  width: 14px;\n  height: 14px;\n  cursor: nwse-resize;\n  background: linear-gradient(\n    135deg,\n    transparent 0 50%,\n    var(--sztb-border) 50% 60%,\n    transparent 60% 72%,\n    var(--sztb-border) 72% 82%,\n    transparent 82%\n  );\n}\n';
 
   // src/common/core/log.ts
   var LEVEL_RANK = { debug: 10, info: 20, warn: 30, error: 40 };
@@ -293,6 +293,9 @@
   }
   function write(key, value) {
     backend.set(nsKey(key), value);
+  }
+  function remove(key) {
+    backend.delete(nsKey(key));
   }
 
   // src/common/ui/tab-order.ts
@@ -577,6 +580,42 @@
     });
   }
 
+  // src/common/ui/widgets/auth-alert.ts
+  var AUTH_MASK_CLASS = "sztb-auth-mask";
+  var TITLE = "登录态已失效";
+  var BODY = "选课站点已经把本次会话踢下线，继续抢课 / 监控不会成功。\n请刷新网页并重新登录，然后回到【任务】页点【开始抢课】继续。";
+  function showAuthAlert(shadowRoot) {
+    if (shadowRoot.querySelector(`.${AUTH_MASK_CLASS}`) !== null) return;
+    const laterBtn = el("button", {
+      class: "sztb-btn",
+      text: "稍后",
+      attrs: { type: "button" }
+    });
+    const reloadBtn = el("button", {
+      class: "sztb-btn",
+      text: "刷新网页重新登录",
+      attrs: { type: "button", "data-variant": "primary" },
+      on: {
+        click: () => {
+          location.reload();
+        }
+      }
+    });
+    const modal = el(
+      "div",
+      { class: "sztb-modal sztb-auth-box" },
+      el("div", { class: "sztb-modal-title", text: TITLE, data: { danger: "true" } }),
+      el("div", { class: "sztb-modal-body", text: BODY }),
+      el("div", { class: "sztb-modal-foot" }, laterBtn, reloadBtn)
+    );
+    const mask = el("div", { class: `sztb-modal-mask ${AUTH_MASK_CLASS}` }, modal);
+    laterBtn.addEventListener("click", () => {
+      mask.remove();
+    });
+    shadowRoot.appendChild(mask);
+    reloadBtn.focus();
+  }
+
   // src/common/ui/panel.ts
   var log2 = scoped("ui/panel");
   var SIZE_KEY = "ui:size";
@@ -793,6 +832,7 @@
       isCollapsed: () => collapsed,
       toast: (message, kind) => toasts.show(message, kind ?? "info"),
       confirm: (opts) => showConfirm(shadow, opts),
+      alertAuthExpired: () => showAuthAlert(shadow),
       activateTab: (tabId) => tabView.activate(tabId),
       setTabs: (next) => {
         const siteToId = /* @__PURE__ */ new Map();
@@ -937,6 +977,11 @@
       def?.apply?.(value);
     } catch {
     }
+  }
+  function removeValue(siteId, id) {
+    const key = `value:${siteId}:${id}`;
+    if (read(key, void 0) === void 0) return;
+    remove(key);
   }
 
   // src/common/ui/widgets/checkbox.ts
@@ -1883,240 +1928,8 @@ ${options.desc ?? ""}
     }
   };
 
-  // src/sites/bkxk/api.ts
-  var log6 = scoped("bkxk/api");
-  var BASE_PATH = "/xsxkapp/sys/xsxkapp/";
-  var EP = {
-    // 只读：课程查询（按类别分派）
-    PROGRAM_COURSE: "elective/programCourse.do",
-    PUBLIC_COURSE: "elective/publicCourse.do",
-    RECOMMENDED_COURSE: "elective/recommendedCourse.do",
-    QUERY_COURSE: "elective/queryCourse.do",
-    // 只读：其它
-    COURSE_RESULT: "elective/courseResult.do",
-    CAPACITY: "elective/teachingclass/capacity.do",
-    TEACHING_TIME: "elective/teachingTime.do",
-    NO_ARRANGED: "elective/noArranged.do",
-    // 写：默认关闭（红线 R1）
-    VOLUNTEER: "elective/volunteer.do",
-    DELETE_VOLUNTEER: "elective/deleteVolunteer.do"
-  };
-  var CATEGORIES = [
-    "FANKC",
-    "FAWKC",
-    "TJKC",
-    "XGXK",
-    "CXKC",
-    "TYKC",
-    "FXKC",
-    "MOOC"
-  ];
-  var CATEGORY_NAME = {
-    FANKC: "方案内",
-    FAWKC: "方案外",
-    TJKC: "推荐",
-    XGXK: "校公选",
-    CXKC: "重修",
-    TYKC: "体育",
-    FXKC: "辅修",
-    MOOC: "慕课"
-  };
-  var CATEGORY_EP = {
-    FANKC: EP.PROGRAM_COURSE,
-    FAWKC: EP.PROGRAM_COURSE,
-    // 未实测
-    TJKC: EP.RECOMMENDED_COURSE,
-    XGXK: EP.PUBLIC_COURSE,
-    CXKC: EP.PROGRAM_COURSE,
-    // 未实测
-    TYKC: EP.PROGRAM_COURSE,
-    // 未实测
-    FXKC: EP.PROGRAM_COURSE,
-    // 未实测
-    MOOC: EP.PUBLIC_COURSE
-  };
-  var RESP_KIND = {
-    OK: "ok",
-    BUSINESS: "business",
-    UNAUTHENTICATED: "unauthenticated",
-    UNKNOWN: "unknown"
-  };
-  var RESP_CODE = {
-    SUCCESS: "1",
-    BUSINESS_ERROR: "2",
-    UNAUTHENTICATED: "302"
-  };
-  var AUTH_MSG = /登录|认证/;
-  var MAX_BATCH_SCAN_NODES = 2e4;
-  function isAuthStatus(status) {
-    return status === 401 || status === 403;
-  }
-  function classify(input) {
-    const out = {
-      kind: RESP_KIND.UNKNOWN,
-      code: null,
-      msg: "",
-      data: null,
-      json: null
-    };
-    if (isAuthStatus(input.status)) {
-      return { ...out, kind: RESP_KIND.UNAUTHENTICATED, msg: `HTTP ${input.status}` };
-    }
-    let json = null;
-    try {
-      json = JSON.parse(input.text);
-    } catch {
-      return { ...out, kind: RESP_KIND.UNKNOWN, msg: "响应不是 JSON" };
-    }
-    if (json === null || typeof json !== "object" || Array.isArray(json)) {
-      return { ...out, kind: RESP_KIND.UNKNOWN, msg: "JSON 顶层不是对象" };
-    }
-    const obj = json;
-    const rawCode = obj["code"];
-    const code = rawCode === void 0 || rawCode === null ? null : String(rawCode);
-    const msg = obj["msg"] === void 0 || obj["msg"] === null ? "" : String(obj["msg"]);
-    let kind;
-    if (code === RESP_CODE.SUCCESS) kind = RESP_KIND.OK;
-    else if (code === RESP_CODE.BUSINESS_ERROR) kind = RESP_KIND.BUSINESS;
-    else if (code === RESP_CODE.UNAUTHENTICATED) kind = RESP_KIND.UNAUTHENTICATED;
-    else if (AUTH_MSG.test(msg)) kind = RESP_KIND.UNAUTHENTICATED;
-    else kind = RESP_KIND.UNKNOWN;
-    return { kind, code, msg, data: obj["data"] === void 0 ? null : obj["data"], json };
-  }
-  function endpointUrl(ep, origin) {
-    return `${origin}${BASE_PATH}${ep}`;
-  }
-  function appendTimestamp(url, nowMs) {
-    const ts = typeof nowMs === "number" ? nowMs : Date.now();
-    return `${url}${url.includes("?") ? "&" : "?"}timestamp=${ts}`;
-  }
-  function formBody(obj) {
-    const parts = [];
-    for (const [k, v] of Object.entries(obj)) {
-      parts.push(`${encodeURIComponent(k)}=${encodeURIComponent(v === void 0 || v === null ? "" : String(v))}`);
-    }
-    return parts.join("&");
-  }
-  function buildVolunteerBody(p) {
-    const payload = {
-      data: {
-        operationType: "1",
-        studentCode: String(p.studentCode),
-        electiveBatchCode: String(p.electiveBatchCode),
-        teachingClassId: String(p.teachingClassId),
-        isMajor: p.isMajor === void 0 || p.isMajor === null ? "1" : String(p.isMajor),
-        campus: p.campus === void 0 || p.campus === null ? "01" : String(p.campus),
-        teachingClassType: String(p.teachingClassType)
-      }
-    };
-    return `addParam=${encodeURIComponent(JSON.stringify(payload))}`;
-  }
-  function buildCapacityBody(teachingClassId, batchCode) {
-    return formBody({ teachingClassId, batchCode });
-  }
-  function buildQueryBody(p) {
-    const setting = {
-      data: {
-        studentCode: String(p.studentCode),
-        campus: p.campus === void 0 || p.campus === null ? "01" : String(p.campus),
-        electiveBatchCode: String(p.electiveBatchCode),
-        isMajor: p.isMajor === void 0 || p.isMajor === null ? "1" : String(p.isMajor),
-        teachingClassType: String(p.teachingClassType),
-        checkConflict: "2",
-        checkCapacity: "2",
-        queryContent: p.queryContent === void 0 ? "YCJX:2,MOOC:2," : String(p.queryContent)
-      },
-      pageSize: String(p.pageSize === void 0 ? 10 : p.pageSize),
-      pageNumber: String(p.pageNumber === void 0 ? 0 : p.pageNumber),
-      order: p.order === void 0 ? "" : String(p.order),
-      orderBy: p.orderBy === void 0 ? "courseNumber" : String(p.orderBy)
-    };
-    return `querySetting=${encodeURIComponent(JSON.stringify(setting))}`;
-  }
-  function headers(token) {
-    return { token: String(token), "X-Requested-With": "XMLHttpRequest" };
-  }
-  function capacityRemain(data) {
-    if (data === null || typeof data !== "object") return null;
-    const d = data;
-    if (d["mainClassCapacity"] === void 0 || d["mainClassCapacity"] === null) return null;
-    if (d["mainElectiveNumber"] === void 0 || d["mainElectiveNumber"] === null) return null;
-    const cap = Number(d["mainClassCapacity"]);
-    const used = Number(d["mainElectiveNumber"]);
-    if (!Number.isFinite(cap) || !Number.isFinite(used)) return null;
-    return cap - used;
-  }
-  function extractBatchCode(json) {
-    let found = null;
-    const counts = {};
-    let budget = MAX_BATCH_SCAN_NODES;
-    function walk(node, depth) {
-      if (budget <= 0 || depth > 6 || node === null || typeof node !== "object") return;
-      if (Array.isArray(node)) {
-        for (const item of node) walk(item, depth + 1);
-        return;
-      }
-      budget -= 1;
-      const obj = node;
-      const bc = obj["electiveBatchCode"];
-      if (typeof bc === "string" && bc !== "") {
-        counts[bc] = (counts[bc] ?? 0) + 1;
-        if (found === null) found = bc;
-      }
-      for (const v of Object.values(obj)) walk(v, depth + 1);
-    }
-    walk(json, 0);
-    return { batchCode: found, counts };
-  }
-  function dumpUnknown(input) {
-    const text = input.text ?? "";
-    const block = `
-──────── [未识别返回] ────────
-action: ${input.action}
-url: ${input.url}
-body: ${input.body ?? ""}
-code: ${input.code ?? ""} | msg: ${input.msg}
-长度: ${text.length} 字符
-原文:
-${text}
-──────────────────────────────
-`;
-    log6.error(
-      `未识别返回（已全量落档） code=${input.code ?? ""}${input.msg !== "" ? ` msg=${input.msg}` : ""}`
-    );
-    console.log(`%c${block}`, "color:#c00");
-    return block;
-  }
-  async function bkxkSend(o) {
-    const token = o.token ?? "";
-    const extra = o.extraHeaders ?? {};
-    const requestHeaders = token !== "" ? { ...headers(token), ...extra } : { ...extra };
-    if (o.body !== void 0) requestHeaders["Content-Type"] = "application/x-www-form-urlencoded";
-    const url = o.timestamp === true ? appendTimestamp(o.url) : o.url;
-    log6.info(`[请求] ${o.action} ${o.url}`);
-    const raw = await request({
-      url,
-      method: o.method ?? "POST",
-      headers: requestHeaders,
-      ...o.body !== void 0 ? { data: o.body } : {},
-      ...o.priority !== void 0 ? { priority: o.priority } : {}
-    });
-    const cls = classify({ status: raw.status, text: raw.text });
-    if (cls.kind === RESP_KIND.UNKNOWN) {
-      dumpUnknown({
-        action: o.action,
-        url,
-        body: o.body ?? "",
-        text: raw.text,
-        code: cls.code,
-        msg: cls.msg
-      });
-    }
-    return { status: raw.status, text: raw.text, cls, raw };
-  }
-
   // src/sites/bkxk/settings.ts
-  var log7 = scoped("bkxk/settings");
+  var log6 = scoped("bkxk/settings");
   var SITE_ID = "bkxk";
   var TOGGLE = {
     /** 🔴 写接口总开关（抢课 / 退课）。旧仓库红线 R1：默认 false，不得改 */
@@ -2138,9 +1951,9 @@ ${text}
     POLL_INTERVAL_MS: "pollIntervalMs",
     BATCH_CODE: "batchCode",
     MONITOR_MODE: "monitorMode",
-    MONITOR_CATEGORY: "monitorCategory",
     RETRY_MODE: "retryMode"
   };
+  var STALE_VALUE_IDS = ["monitorCategory"];
   var BKXK_TOGGLES = [
     {
       id: TOGGLE.WRITE_API,
@@ -2192,6 +2005,7 @@ ${text}
     }
   ];
   function registerBkxkSettings() {
+    for (const id of STALE_VALUE_IDS) removeValue(SITE_ID, id);
     registerInterval(
       VALUE.INTERVAL_MS,
       "intervalMs",
@@ -2229,18 +2043,6 @@ ${text}
         { value: "category", label: "类别监控（拉类别列表，一次拿一类）" },
         { value: "single", label: "单独监控（逐课查容量，精确）" }
       ]
-    });
-    registerValue({
-      siteId: SITE_ID,
-      id: VALUE.MONITOR_CATEGORY,
-      label: "监控类别",
-      desc: "类别监控模式下盯哪一类课。方案外 / 重修 / 体育 / 辅修的端点映射尚未实测。",
-      default: "FANKC",
-      kind: "select",
-      options: CATEGORIES.map((code) => ({
-        value: code,
-        label: `${CATEGORY_NAME[code]}（${code}）`
-      }))
     });
     registerValue({
       siteId: SITE_ID,
@@ -2282,7 +2084,7 @@ ${text}
     const raw = getValue(SITE_ID, VALUE.INTERVAL_MS);
     const ms = clampLimit("intervalMs", raw);
     if (isBelowRecommended("intervalMs", ms)) {
-      log7.warn(`请求间隔被设为 ${ms}ms，低于建议下限 ${LIMITS.intervalMs.recommended}ms`);
+      log6.warn(`请求间隔被设为 ${ms}ms，低于建议下限 ${LIMITS.intervalMs.recommended}ms`);
     }
     setIntervalMs(ms);
   }
@@ -2310,7 +2112,7 @@ ${text}
   }
 
   // src/sites/bkxk/session.ts
-  var log8 = scoped("bkxk/session");
+  var log7 = scoped("bkxk/session");
   var DEFAULT_CAMPUS = "01";
   var EMPTY_SESSION = {
     studentCode: "",
@@ -2369,7 +2171,7 @@ ${text}
   function readSession() {
     const ss = pageSessionStorage();
     if (ss === null) {
-      log8.warn("读不到 sessionStorage，按未登录处理");
+      log7.warn("读不到 sessionStorage，按未登录处理");
       return EMPTY_SESSION;
     }
     try {
@@ -2379,7 +2181,7 @@ ${text}
         token: ss.getItem("token")
       });
     } catch (err) {
-      log8.warn("读取会话失败，按未登录处理", err);
+      log7.warn("读取会话失败，按未登录处理", err);
       return EMPTY_SESSION;
     }
   }
@@ -2482,7 +2284,7 @@ ${text}
   }
 
   // src/sites/bkxk/legacy.ts
-  var log9 = scoped("bkxk/legacy");
+  var log8 = scoped("bkxk/legacy");
   var LEGACY_SETTINGS_KEY = "szubkxk.settings.v2";
   var LEGACY_STORE_PREFIX = "szubkxk.v2.";
   var LEGACY_DATA_KEY = {
@@ -2503,7 +2305,8 @@ ${text}
     { from: "pollIntervalMs", to: "pollIntervalMs", kind: "number" },
     { from: "batchCode", to: "batchCode", kind: "text" },
     { from: "monitorMode", to: "monitorMode", kind: "text" },
-    { from: "monitorCategory", to: "monitorCategory", kind: "text" },
+    // `monitorCategory` 不在表里：这个配置项在 v0.31 被删掉（引擎自己找出要查哪些类别），
+    // 迁过来只会留下一个没人读的键。老用户机上的历史键由 `registerBkxkSettings()` 清掉。
     { from: "retryMode", to: "retryMode", kind: "text" }
   ];
   var DANGER_TOGGLE_MAP = [
@@ -2622,12 +2425,12 @@ ${text}
     const plan = planCustomCarry(site, common);
     write(CARRY_FLAG_KEY, true);
     if (plan.empty) {
-      for (const line of plan.notices) log9.warn(`搬运 · ${line}`);
+      for (const line of plan.notices) log8.warn(`搬运 · ${line}`);
       return [];
     }
     for (const e of plan.entries) write(e.key, e.value);
-    log9.info(`自定义课程搬运完成：${plan.report.join("；")}`);
-    for (const line of plan.notices) log9.warn(`搬运 · ${line}`);
+    log8.info(`自定义课程搬运完成：${plan.report.join("；")}`);
+    for (const line of plan.notices) log8.warn(`搬运 · ${line}`);
     return [...plan.report, ...plan.notices];
   }
   function readLegacySnapshot() {
@@ -2667,7 +2470,7 @@ ${text}
     const lines = [];
     if (plan.empty && plan.notices.length === 0) {
       write(MIGRATION_FLAG_KEY, true);
-      log9.info("未发现旧版数据，跳过迁移");
+      log8.info("未发现旧版数据，跳过迁移");
       return [];
     }
     for (const e of plan.entries) {
@@ -2675,9 +2478,9 @@ ${text}
     }
     write(MIGRATION_FLAG_KEY, true);
     lines.push(...plan.report, ...plan.notices);
-    log9.info(`旧数据迁移完成：写入 ${plan.entries.length} 项`);
-    for (const line of plan.report) log9.info(`迁移 · ${line}`);
-    for (const line of plan.notices) log9.warn(`迁移 · ${line}`);
+    log8.info(`旧数据迁移完成：写入 ${plan.entries.length} 项`);
+    for (const line of plan.report) log8.info(`迁移 · ${line}`);
+    for (const line of plan.notices) log8.warn(`迁移 · ${line}`);
     return lines;
   }
 
@@ -2862,7 +2665,7 @@ ${text}
   }
 
   // src/sites/bkxk/hijack.ts
-  var log10 = scoped("bkxk/hijack");
+  var log9 = scoped("bkxk/hijack");
   var CUSTOM_ID_PREFIX = "szu-custom-";
   var LIST_RE = /elective\/(?:programCourse|unProgramCourse|publicCourse|recommendedCourse|queryCourse|course|minorCourse|retakeCourse|sportCourse)\.do/i;
   var TIMETABLE_RE = /elective\/teachingTime\.do/i;
@@ -2995,7 +2798,7 @@ ${text}
     if (String(root["code"]) !== "1") return null;
     const res = kind === "timetable" ? augmentTimetable(root, items2) : augmentList(root, items2);
     if (res.changed === 0) return null;
-    log10.info(`[接管] ${kind} 改写了 ${res.changed} 处`);
+    log9.info(`[接管] ${kind} 改写了 ${res.changed} 处`);
     return JSON.stringify(res.json);
   }
   function transformCurrentResponse(kind, text) {
@@ -3028,7 +2831,7 @@ ${text}
         Object.defineProperty(xhr, "response", { configurable: true, get: () => JSON.parse(next) });
       }
     } catch {
-      log10.warn("接管响应失败（无法改写 responseText）");
+      log9.warn("接管响应失败（无法改写 responseText）");
       return false;
     }
     return true;
@@ -3070,7 +2873,7 @@ ${text}
         const next = transformCurrentResponse(kind, text);
         if (next === null) return res;
         if (typeof ResponseCtor !== "function") {
-          log10.warn("接管响应失败（环境里没有 Response 构造器）");
+          log9.warn("接管响应失败（环境里没有 Response 构造器）");
           return res;
         }
         const Ctor = ResponseCtor;
@@ -3084,7 +2887,7 @@ ${text}
   function installHijack(target = pageRealm()) {
     const xhr = installXhr(target);
     const fetch2 = installFetch(target);
-    if (xhr || fetch2) log10.info(`响应接管已安装（XHR=${String(xhr)} fetch=${String(fetch2)}）`);
+    if (xhr || fetch2) log9.info(`响应接管已安装（XHR=${String(xhr)} fetch=${String(fetch2)}）`);
     return xhr || fetch2;
   }
 
@@ -3329,6 +3132,230 @@ ${text}
   }
   function pageOrigin() {
     return typeof location === "undefined" ? "" : location.origin;
+  }
+
+  // src/sites/bkxk/api.ts
+  var log10 = scoped("bkxk/api");
+  var BASE_PATH = "/xsxkapp/sys/xsxkapp/";
+  var EP = {
+    // 只读：课程查询（按类别分派）
+    PROGRAM_COURSE: "elective/programCourse.do",
+    PUBLIC_COURSE: "elective/publicCourse.do",
+    RECOMMENDED_COURSE: "elective/recommendedCourse.do",
+    QUERY_COURSE: "elective/queryCourse.do",
+    // 只读：其它
+    COURSE_RESULT: "elective/courseResult.do",
+    CAPACITY: "elective/teachingclass/capacity.do",
+    TEACHING_TIME: "elective/teachingTime.do",
+    NO_ARRANGED: "elective/noArranged.do",
+    // 写：默认关闭（红线 R1）
+    VOLUNTEER: "elective/volunteer.do",
+    DELETE_VOLUNTEER: "elective/deleteVolunteer.do"
+  };
+  var CATEGORY_NAME = {
+    FANKC: "方案内",
+    FAWKC: "方案外",
+    // 显示名（用户 m00846 口径：这个页签叫「本班」）。
+    // ⚠️ 只改这个字符串，**请求里的 teachingClassType 仍然是 TJKC** —— 那是站点自己的码。
+    TJKC: "本班",
+    XGXK: "校公选",
+    CXKC: "重修",
+    TYKC: "体育",
+    FXKC: "辅修",
+    MOOC: "慕课"
+  };
+  var CATEGORY_EP = {
+    FANKC: EP.PROGRAM_COURSE,
+    FAWKC: EP.PROGRAM_COURSE,
+    // 未实测
+    TJKC: EP.RECOMMENDED_COURSE,
+    XGXK: EP.PUBLIC_COURSE,
+    CXKC: EP.PROGRAM_COURSE,
+    // 未实测
+    TYKC: EP.PROGRAM_COURSE,
+    // 未实测
+    FXKC: EP.PROGRAM_COURSE,
+    // 未实测
+    MOOC: EP.PUBLIC_COURSE
+  };
+  var RESP_KIND = {
+    OK: "ok",
+    BUSINESS: "business",
+    UNAUTHENTICATED: "unauthenticated",
+    UNKNOWN: "unknown"
+  };
+  var RESP_CODE = {
+    SUCCESS: "1",
+    BUSINESS_ERROR: "2",
+    UNAUTHENTICATED: "302"
+  };
+  var AUTH_MSG = /登录|认证/;
+  var MAX_BATCH_SCAN_NODES = 2e4;
+  function isAuthStatus(status) {
+    return status === 401 || status === 403;
+  }
+  function classify(input) {
+    const out = {
+      kind: RESP_KIND.UNKNOWN,
+      code: null,
+      msg: "",
+      data: null,
+      json: null
+    };
+    if (isAuthStatus(input.status)) {
+      return { ...out, kind: RESP_KIND.UNAUTHENTICATED, msg: `HTTP ${input.status}` };
+    }
+    let json = null;
+    try {
+      json = JSON.parse(input.text);
+    } catch {
+      return { ...out, kind: RESP_KIND.UNKNOWN, msg: "响应不是 JSON" };
+    }
+    if (json === null || typeof json !== "object" || Array.isArray(json)) {
+      return { ...out, kind: RESP_KIND.UNKNOWN, msg: "JSON 顶层不是对象" };
+    }
+    const obj = json;
+    const rawCode = obj["code"];
+    const code = rawCode === void 0 || rawCode === null ? null : String(rawCode);
+    const msg = obj["msg"] === void 0 || obj["msg"] === null ? "" : String(obj["msg"]);
+    let kind;
+    if (code === RESP_CODE.SUCCESS) kind = RESP_KIND.OK;
+    else if (code === RESP_CODE.BUSINESS_ERROR) kind = RESP_KIND.BUSINESS;
+    else if (code === RESP_CODE.UNAUTHENTICATED) kind = RESP_KIND.UNAUTHENTICATED;
+    else if (AUTH_MSG.test(msg)) kind = RESP_KIND.UNAUTHENTICATED;
+    else kind = RESP_KIND.UNKNOWN;
+    return { kind, code, msg, data: obj["data"] === void 0 ? null : obj["data"], json };
+  }
+  function endpointUrl(ep, origin) {
+    return `${origin}${BASE_PATH}${ep}`;
+  }
+  function appendTimestamp(url, nowMs) {
+    const ts = typeof nowMs === "number" ? nowMs : Date.now();
+    return `${url}${url.includes("?") ? "&" : "?"}timestamp=${ts}`;
+  }
+  function formBody(obj) {
+    const parts = [];
+    for (const [k, v] of Object.entries(obj)) {
+      parts.push(`${encodeURIComponent(k)}=${encodeURIComponent(v === void 0 || v === null ? "" : String(v))}`);
+    }
+    return parts.join("&");
+  }
+  function buildVolunteerBody(p) {
+    const payload = {
+      data: {
+        operationType: "1",
+        studentCode: String(p.studentCode),
+        electiveBatchCode: String(p.electiveBatchCode),
+        teachingClassId: String(p.teachingClassId),
+        isMajor: p.isMajor === void 0 || p.isMajor === null ? "1" : String(p.isMajor),
+        campus: p.campus === void 0 || p.campus === null ? "01" : String(p.campus),
+        teachingClassType: String(p.teachingClassType)
+      }
+    };
+    return `addParam=${encodeURIComponent(JSON.stringify(payload))}`;
+  }
+  function buildCapacityBody(teachingClassId, batchCode) {
+    return formBody({ teachingClassId, batchCode });
+  }
+  function buildQueryBody(p) {
+    const setting = {
+      data: {
+        studentCode: String(p.studentCode),
+        campus: p.campus === void 0 || p.campus === null ? "01" : String(p.campus),
+        electiveBatchCode: String(p.electiveBatchCode),
+        isMajor: p.isMajor === void 0 || p.isMajor === null ? "1" : String(p.isMajor),
+        teachingClassType: String(p.teachingClassType),
+        checkConflict: "2",
+        checkCapacity: "2",
+        queryContent: p.queryContent === void 0 ? "YCJX:2,MOOC:2," : String(p.queryContent)
+      },
+      pageSize: String(p.pageSize === void 0 ? 10 : p.pageSize),
+      pageNumber: String(p.pageNumber === void 0 ? 0 : p.pageNumber),
+      order: p.order === void 0 ? "" : String(p.order),
+      orderBy: p.orderBy === void 0 ? "courseNumber" : String(p.orderBy)
+    };
+    return `querySetting=${encodeURIComponent(JSON.stringify(setting))}`;
+  }
+  function headers(token) {
+    return { token: String(token), "X-Requested-With": "XMLHttpRequest" };
+  }
+  function capacityRemain(data) {
+    if (data === null || typeof data !== "object") return null;
+    const d = data;
+    if (d["mainClassCapacity"] === void 0 || d["mainClassCapacity"] === null) return null;
+    if (d["mainElectiveNumber"] === void 0 || d["mainElectiveNumber"] === null) return null;
+    const cap = Number(d["mainClassCapacity"]);
+    const used = Number(d["mainElectiveNumber"]);
+    if (!Number.isFinite(cap) || !Number.isFinite(used)) return null;
+    return cap - used;
+  }
+  function extractBatchCode(json) {
+    let found = null;
+    const counts = {};
+    let budget = MAX_BATCH_SCAN_NODES;
+    function walk(node, depth) {
+      if (budget <= 0 || depth > 6 || node === null || typeof node !== "object") return;
+      if (Array.isArray(node)) {
+        for (const item of node) walk(item, depth + 1);
+        return;
+      }
+      budget -= 1;
+      const obj = node;
+      const bc = obj["electiveBatchCode"];
+      if (typeof bc === "string" && bc !== "") {
+        counts[bc] = (counts[bc] ?? 0) + 1;
+        if (found === null) found = bc;
+      }
+      for (const v of Object.values(obj)) walk(v, depth + 1);
+    }
+    walk(json, 0);
+    return { batchCode: found, counts };
+  }
+  function dumpUnknown(input) {
+    const text = input.text ?? "";
+    const block = `
+──────── [未识别返回] ────────
+action: ${input.action}
+url: ${input.url}
+body: ${input.body ?? ""}
+code: ${input.code ?? ""} | msg: ${input.msg}
+长度: ${text.length} 字符
+原文:
+${text}
+──────────────────────────────
+`;
+    log10.error(
+      `未识别返回（已全量落档） code=${input.code ?? ""}${input.msg !== "" ? ` msg=${input.msg}` : ""}`
+    );
+    console.log(`%c${block}`, "color:#c00");
+    return block;
+  }
+  async function bkxkSend(o) {
+    const token = o.token ?? "";
+    const extra = o.extraHeaders ?? {};
+    const requestHeaders = token !== "" ? { ...headers(token), ...extra } : { ...extra };
+    if (o.body !== void 0) requestHeaders["Content-Type"] = "application/x-www-form-urlencoded";
+    const url = o.timestamp === true ? appendTimestamp(o.url) : o.url;
+    log10.info(`[请求] ${o.action} ${o.url}`);
+    const raw = await request({
+      url,
+      method: o.method ?? "POST",
+      headers: requestHeaders,
+      ...o.body !== void 0 ? { data: o.body } : {},
+      ...o.priority !== void 0 ? { priority: o.priority } : {}
+    });
+    const cls = classify({ status: raw.status, text: raw.text });
+    if (cls.kind === RESP_KIND.UNKNOWN) {
+      dumpUnknown({
+        action: o.action,
+        url,
+        body: o.body ?? "",
+        text: raw.text,
+        code: cls.code,
+        msg: cls.msg
+      });
+    }
+    return { status: raw.status, text: raw.text, cls, raw };
   }
 
   // src/sites/bkxk/courses.ts
@@ -3648,8 +3675,21 @@ ${text}
     if (items2.length === store.items.length) return { store, removed: false };
     return { store: { ...store, items: items2 }, removed: true };
   }
+  function removeTaskByTcId(store, tcId) {
+    const items2 = store.items.filter((t) => t.teachingClassID !== tcId);
+    if (items2.length === store.items.length) return { store, removed: false };
+    return { store: { ...store, items: items2 }, removed: true };
+  }
+  function toggleTask(store, input) {
+    if (hasTask(store, input.tcId)) {
+      const { store: next2 } = removeTaskByTcId(store, input.tcId);
+      return { store: next2, on: false };
+    }
+    const { store: next } = addTask(store, input);
+    return { store: next, on: true };
+  }
   function grabButtonLabel(on) {
-    return on ? "已加抢课" : "添加抢课";
+    return on ? "移除抢课" : "添加抢课";
   }
   function monitorButtonLabel(on) {
     return on ? "移除监控" : "添加监控";
@@ -4016,7 +4056,7 @@ ${text}
   async function fetchCategoryAll(category) {
     const ctx = bkxkContext();
     const out = [];
-    for (let page = 1; page <= MAX_PAGES; page += 1) {
+    for (let page = 0; page < MAX_PAGES; page += 1) {
       let r;
       try {
         r = await fetchCategory({
@@ -4029,12 +4069,12 @@ ${text}
           origin: pageOrigin()
         });
       } catch (err) {
-        log12.warn(`类别 ${category} 第 ${page} 页请求异常`, err);
+        log12.warn(`类别 ${category} 请求异常（pageNumber=${String(page)}）`, err);
         return out.length > 0 ? out : null;
       }
       if (r.kind !== RESP_KIND.OK) {
         noteAuthLost(r.kind);
-        log12.warn(`类别 ${category} 第 ${page} 页拉取失败（${r.kind}）：${r.msg}`);
+        log12.warn(`类别 ${category} 拉取失败（pageNumber=${String(page)}，${r.kind}）：${r.msg}`);
         return out.length > 0 ? out : null;
       }
       for (const c of r.classes) out.push(c);
@@ -4087,6 +4127,7 @@ ${text}
     stopPolling();
     log12.error("登录态失效，已停止监控轮询");
     panel?.toast("登录态失效，已停止监控，请刷新页面重新登录", "error");
+    panel?.alertAuthExpired();
     return true;
   }
   function nameOf(store, tcId) {
@@ -4255,7 +4296,7 @@ ${text}
     if (!isRetryMode(mode)) return store;
     return patchTask(store, id, { retryMode: mode });
   }
-  function toggleTask(store, id) {
+  function toggleTask2(store, id) {
     const t = byId2(store, id);
     if (t === null) return { store, enabled: false };
     const enabled = !t.enabled;
@@ -4512,6 +4553,7 @@ ${text}
       finish(task.id, { status: TASK_STATUS.FAILED, lastMsg: AUTH_MSG2, lastKind: TASK_KIND.AUTH });
       log13.error("登录态失效，已停止全部任务");
       panel2?.toast("登录态失效，已停止全部任务，请刷新页面重新登录", "error");
+      panel2?.alertAuthExpired();
       return;
     }
     const cls = kind === RESP_KIND.BUSINESS ? classifyMsg(msg) : TASK_KIND.UNKNOWN;
@@ -4626,26 +4668,49 @@ ${text}
     log14.warn(`复制教学班ID 失败：${res.detail}（可手动选中那一行复制）`);
     panel3.toast("复制失败，请手动选中复制", "warn");
   }
-  function onGrab(info, ctx, btn) {
-    if (hasTask(loadTaskStore(), info.tcId)) {
-      ctx.panel.toast("这个教学班已经在抢课队列里了（不重复添加）", "info");
-      return;
+  function applyGrabButton(btn, on) {
+    btn.textContent = grabButtonLabel(on);
+    btn.classList.toggle("sztb-bkxk-btn-on", on);
+  }
+  function applyMonitorButton(btn, on) {
+    btn.textContent = monitorButtonLabel(on);
+    btn.classList.toggle("sztb-bkxk-btn-on", on);
+  }
+  function syncInjectedButtons() {
+    const blocks = document.querySelectorAll("[data-sztb-tcid]");
+    if (blocks.length === 0) return;
+    const tasks = loadTaskStore();
+    const monitors = loadMonitorStore();
+    for (const block of blocks) {
+      const tcId = block.getAttribute("data-sztb-tcid") ?? "";
+      const grab = block.querySelector('button[data-role="grab"]');
+      if (grab !== null) applyGrabButton(grab, hasTask(tasks, tcId));
+      const mon = block.querySelector('button[data-role="monitor"]');
+      if (mon !== null) applyMonitorButton(mon, hasMonitor(monitors, tcId));
     }
-    let added = false;
+  }
+  function onGrab(info, ctx, btn) {
+    let nowOn = false;
     updateTasks((store) => {
-      const res = addTask(store, {
+      const res = toggleTask(store, {
         ...info,
         now: Date.now(),
         retryMode: getValue(SITE_ID, VALUE.RETRY_MODE)
       });
-      added = res.added;
+      nowOn = res.on;
       return res.store;
     });
-    if (!added) return;
-    btn.textContent = grabButtonLabel(true);
-    btn.classList.add("sztb-bkxk-btn-on");
-    log14.info(`已加入抢课队列：${targetText(info)}（本轮只入队，不会发送任何请求）`);
-    ctx.panel.toast(`已加入抢课队列：${info.courseName === "" ? info.tcId : info.courseName}`, "success");
+    applyGrabButton(btn, nowOn);
+    if (nowOn) {
+      log14.info(`已加入抢课队列：${targetText(info)}（本轮只入队，不会发送任何请求）`);
+      ctx.panel.toast(
+        `已加入抢课队列：${info.courseName === "" ? info.tcId : info.courseName}`,
+        "success"
+      );
+    } else {
+      log14.info(`已移出抢课队列：${targetText(info)}（站点上已经选到的课不会被退掉）`);
+      ctx.panel.toast("已移出抢课队列（不会退掉已经选上的课）", "info");
+    }
   }
   function onMonitorToggle(info, ctx, btn) {
     let nowOn = false;
@@ -4657,8 +4722,7 @@ ${text}
       nowOn = true;
       return addMonitor(store, { ...info, now: Date.now() }).store;
     });
-    btn.textContent = monitorButtonLabel(nowOn);
-    btn.classList.toggle("sztb-bkxk-btn-on", nowOn);
+    applyMonitorButton(btn, nowOn);
     if (nowOn) {
       log14.info(`已加入监控列表：${targetText(info)}（到监控页点【开始监控】才会轮询）`);
       ctx.panel.toast("已加入监控", "success");
@@ -4683,7 +4747,7 @@ ${text}
     const grab = el("button", {
       class: `sztb-bkxk-btn${queued ? " sztb-bkxk-btn-on" : ""}`,
       text: grabButtonLabel(queued),
-      attrs: { type: "button" },
+      attrs: { type: "button", "data-role": "grab" },
       on: {
         click: (ev) => {
           swallow(ev);
@@ -4695,7 +4759,7 @@ ${text}
     const mon = el("button", {
       class: `sztb-bkxk-btn${monitored ? " sztb-bkxk-btn-on" : ""}`,
       text: monitorButtonLabel(monitored),
-      attrs: { type: "button" },
+      attrs: { type: "button", "data-role": "monitor" },
       on: {
         click: (ev) => {
           swallow(ev);
@@ -4840,6 +4904,7 @@ ${text}
         scan(ctx);
       }, RESCAN_DELAY_MS);
     };
+    const unsubscribes = [subscribeTasks(syncInjectedButtons), subscribeMonitor(syncInjectedButtons)];
     whenDomReady(() => {
       scan(ctx);
       observer = new MutationObserver(schedule2);
@@ -4849,6 +4914,7 @@ ${text}
       );
     });
     return () => {
+      for (const off of unsubscribes) off();
       observer?.disconnect();
       observer = null;
       if (timer3 !== null) {
@@ -5247,7 +5313,7 @@ ${text}
       const check = el("input", { attrs: { type: "checkbox", title: "这条任务是否参与抢课" } });
       check.checked = task.enabled;
       check.addEventListener("change", () => {
-        updateTasks((s) => toggleTask(s, task.id).store);
+        updateTasks((s) => toggleTask2(s, task.id).store);
         log16.info(
           `${task.enabled ? "取消勾选" : "勾选"}任务「${task.courseName === "" ? task.teachingClassID : task.courseName}」`
         );
@@ -5557,22 +5623,8 @@ ${text}
       log17.info(`监控模式改为 ${modeSelect.value}`);
       render();
     });
-    const catRow = el("div", { class: "sztb-bkxk-mo-row" });
-    catRow.appendChild(el("span", { text: "按类别查询" }));
-    const catSelect = el("select", { class: "sztb-select sztb-bkxk-mo-mode" });
-    for (const code of CATEGORIES) {
-      const opt = el("option", { text: `${CATEGORY_NAME[code]}（${code}）` });
-      opt.value = code;
-      catSelect.appendChild(opt);
-    }
-    catRow.appendChild(catSelect);
-    const catHint = el("span", { class: "sztb-bkxk-mo-meta" });
-    catRow.appendChild(catHint);
-    catSelect.addEventListener("change", () => {
-      setValue(SITE_ID, VALUE.MONITOR_CATEGORY, catSelect.value);
-      log17.info(`监控按类别查询的类别改为 ${catSelect.value}`);
-      render();
-    });
+    const modeHint = el("span", { class: "sztb-bkxk-mo-meta" });
+    modeRow.appendChild(modeHint);
     const summary = el("div", { class: "sztb-group-title" });
     const runningBox = el("div", { class: "sztb-bkxk-mo-now" });
     runningBox.hidden = true;
@@ -5595,7 +5647,6 @@ ${text}
     root.appendChild(note);
     root.appendChild(gateWarn);
     root.appendChild(modeRow);
-    root.appendChild(catRow);
     root.appendChild(summary);
     root.appendChild(runningBox);
     root.appendChild(toolbar);
@@ -5606,10 +5657,8 @@ ${text}
       agoNodes.clear();
       const mode = normalizeMonitorMode(getValue(SITE_ID, VALUE.MONITOR_MODE));
       modeSelect.value = mode;
-      const category = getValue(SITE_ID, VALUE.MONITOR_CATEGORY);
-      catSelect.value = category;
-      catRow.hidden = mode !== MONITOR_MODE.CATEGORY;
-      catHint.textContent = mode === MONITOR_MODE.CATEGORY ? "按类别查只覆盖这个类别；监控项缺类别代码时会被跳过。" : "";
+      const categoryMode = mode === MONITOR_MODE.CATEGORY;
+      modeHint.textContent = categoryMode ? "自动按监控列表里出现过的类别逐类拉列表（请求少）。" : "每条监控各查一次容量（精确，但请求数是监控条数）。";
       const store = loadMonitorStore();
       const stats = pollStats();
       const now = Date.now();
@@ -6562,8 +6611,8 @@ ${text}
   // src/main.ts
   var log20 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-04T16:34:10.536Z" : null;
-  var BUILD_NO = true ? 44 : null;
+  var BUILD_TIME = true ? "2026-10-04T18:02:32.036Z" : null;
+  var BUILD_NO = true ? 45 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();

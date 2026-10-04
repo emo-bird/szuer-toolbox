@@ -4,7 +4,7 @@
  * 这一套守的是三条**安全约定**，不是功能覆盖：
  *   1. 迁移**绝不**替用户打开 🟠 / 🔴 开关（用户拍板方案 A）
  *   2. 迁移是「清洗」不是「照搬」——认不出的形状要丢弃并报告，不能带进新结构
- *   3. 安全配置项（间隔 / 批次码 / 监控类别…）要正常搬过来
+ *   3. 安全配置项（间隔 / 批次码 / 监控模式…）要正常搬过来
  */
 
 import { describe, it, assert, assertEqual, assertDeepEqual } from '../harness.ts';
@@ -85,7 +85,6 @@ describe('bkxk/legacy —— 安全配置项正常迁移', () => {
         pollIntervalMs: 1200,
         batchCode: 'B999',
         monitorMode: 'class',
-        monitorCategory: 'XGXK',
         retryMode: 'always',
       }),
       false,
@@ -97,11 +96,15 @@ describe('bkxk/legacy —— 安全配置项正常迁移', () => {
       'value:bkxk:pollIntervalMs',
       'value:bkxk:batchCode',
       'value:bkxk:monitorMode',
-      'value:bkxk:monitorCategory',
       'value:bkxk:retryMode',
     ]) {
       assert(keys.includes(k), `应迁移 ${k}，实际：${keys.join(',')}`);
     }
+  });
+
+  it('已删掉的配置项（monitorCategory）不再迁移', () => {
+    const plan = planMigration(settingsOf({ monitorCategory: 'XGXK' }), false);
+    assertEqual(entryKeys(plan).includes('value:bkxk:monitorCategory'), false);
   });
 
   it('数字项被转成字符串（配置项统一以字符串存储）', () => {

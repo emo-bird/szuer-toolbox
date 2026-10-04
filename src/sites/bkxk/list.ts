@@ -34,11 +34,10 @@ import { el, whenDomReady } from '../../common/utils/dom.ts';
 import { copyText } from '../../common/utils/clipboard.ts';
 import { LIST_CSS, LIST_STYLE_ID } from './list-style.ts';
 import { SITE_ID, TOGGLE, VALUE } from './settings.ts';
-import { loadMonitorStore, updateMonitor } from './monitor.ts';
-import { loadTaskStore, updateTasks } from './tasks.ts';
+import { loadMonitorStore, subscribeMonitor, updateMonitor } from './monitor.ts';
+import { loadTaskStore, subscribeTasks, updateTasks } from './tasks.ts';
 import {
   addMonitor,
-  addTask,
   categoryOfBodyId,
   cleanText,
   grabButtonLabel,
@@ -51,6 +50,7 @@ import {
   pickTcId,
   removeMonitor,
   teacherFromTitle,
+  toggleTask,
   CLASS_COLLECTION_IMG,
   CLASS_DELETE_VOLUNTEER,
   elementKey,
@@ -226,29 +226,71 @@ async function copyId(tcId: string, panel: PanelApi): Promise<void> {
   panel.toast('复制失败，请手动选中复制', 'warn');
 }
 
-function onGrab(info: TargetInfo, ctx: Ctx, btn: HTMLButtonElement): void {
-  if (hasTask(loadTaskStore(), info.tcId)) {
-    ctx.panel.toast('这个教学班已经在抢课队列里了（不重复添加）', 'info');
-    return;
+/** 把抢课按钮刷成 `on` 的状态（点击后、引擎通知后都走这里） */
+function applyGrabButton(btn: HTMLButtonElement, on: boolean): void {
+  btn.textContent = grabButtonLabel(on);
+  btn.classList.toggle('sztb-bkxk-btn-on', on);
+}
+
+/** 把监控按钮刷成 `on` 的状态 */
+function applyMonitorButton(btn: HTMLButtonElement, on: boolean): void {
+  btn.textContent = monitorButtonLabel(on);
+  btn.classList.toggle('sztb-bkxk-btn-on', on);
+}
+
+/**
+ * 把页面上**已经注入的**所有按钮刷成与存储一致。
+ *
+ * 为什么需要它（用户 m00846 报的 BUG 3）：两个按钮的文案是**注入那一刻**算出来的，
+ * 而存储会被别处改 —— 任务页删一条 / 引擎抢到一门 / 监控页清空列表，列表页都不知道。
+ * 按钮与事实不一致比没有按钮更糟：队列里已经没有了却还写着「移除抢课」，
+ * 下一次点击会意外地又加回去（反之亦然）。
+ *
+ * 两个按钮的 class 完全相同，所以用 `data-role` 认自己那个；只改文案与一个类，
+ * **不重建节点**（重建会打断用户正在进行的点击/悬停，也白白丢掉站点的事件绑定）。
+ */
+function syncInjectedButtons(): void {
+  const blocks = document.querySelectorAll<HTMLElement>('[data-sztb-tcid]');
+  if (blocks.length === 0) return;
+  const tasks = loadTaskStore();
+  const monitors = loadMonitorStore();
+  for (const block of blocks) {
+    const tcId = block.getAttribute('data-sztb-tcid') ?? '';
+    const grab = block.querySelector<HTMLButtonElement>('button[data-role="grab"]');
+    if (grab !== null) applyGrabButton(grab, hasTask(tasks, tcId));
+    const mon = block.querySelector<HTMLButtonElement>('button[data-role="monitor"]');
+    if (mon !== null) applyMonitorButton(mon, hasMonitor(monitors, tcId));
   }
+}
+
+function onGrab(info: TargetInfo, ctx: Ctx, btn: HTMLButtonElement): void {
+  // 判定与改动在同一次 updateTasks 里完成（与 onMonitorToggle 同理由）：在回调之外
+  // 先判「在不在」再写盘，中间隔着一个 await 点（抢课循环可能刚写过），判定就过期了。
+  //
   // 走引擎的 updateTasks：本模块**不再持有队列快照**（曾经用页面加载时读的那份
   // 内存副本整份写盘，会把引擎刚写进去的状态 —— 已抢到、attempts、失败原因 ——
   // 连同监控的 remain / hits 一起回滚；抢课期间这条路径是热的）。
-  let added = false;
+  let nowOn = false;
   updateTasks((store) => {
-    const res = addTask(store, {
+    const res = toggleTask(store, {
       ...info,
       now: Date.now(),
       retryMode: getValue<string>(SITE_ID, VALUE.RETRY_MODE),
     });
-    added = res.added;
+    nowOn = res.on;
     return res.store;
   });
-  if (!added) return;
-  btn.textContent = grabButtonLabel(true);
-  btn.classList.add('sztb-bkxk-btn-on');
-  log.info(`已加入抢课队列：${targetText(info)}（本轮只入队，不会发送任何请求）`);
-  ctx.panel.toast(`已加入抢课队列：${info.courseName === '' ? info.tcId : info.courseName}`, 'success');
+  applyGrabButton(btn, nowOn);
+  if (nowOn) {
+    log.info(`已加入抢课队列：${targetText(info)}（本轮只入队，不会发送任何请求）`);
+    ctx.panel.toast(
+      `已加入抢课队列：${info.courseName === '' ? info.tcId : info.courseName}`,
+      'success',
+    );
+  } else {
+    log.info(`已移出抢课队列：${targetText(info)}（站点上已经选到的课不会被退掉）`);
+    ctx.panel.toast('已移出抢课队列（不会退掉已经选上的课）', 'info');
+  }
 }
 
 function onMonitorToggle(info: TargetInfo, ctx: Ctx, btn: HTMLButtonElement): void {
@@ -263,8 +305,7 @@ function onMonitorToggle(info: TargetInfo, ctx: Ctx, btn: HTMLButtonElement): vo
     nowOn = true;
     return addMonitor(store, { ...info, now: Date.now() }).store;
   });
-  btn.textContent = monitorButtonLabel(nowOn);
-  btn.classList.toggle('sztb-bkxk-btn-on', nowOn);
+  applyMonitorButton(btn, nowOn);
   if (nowOn) {
     log.info(`已加入监控列表：${targetText(info)}（到监控页点【开始监控】才会轮询）`);
     ctx.panel.toast('已加入监控', 'success');
@@ -291,7 +332,7 @@ function buildBlock(info: TargetInfo, ctx: Ctx): HTMLElement {
   const grab = el('button', {
     class: `sztb-bkxk-btn${queued ? ' sztb-bkxk-btn-on' : ''}`,
     text: grabButtonLabel(queued),
-    attrs: { type: 'button' },
+    attrs: { type: 'button', 'data-role': 'grab' },
     on: {
       click: (ev) => {
         swallow(ev);
@@ -304,7 +345,7 @@ function buildBlock(info: TargetInfo, ctx: Ctx): HTMLElement {
   const mon = el('button', {
     class: `sztb-bkxk-btn${monitored ? ' sztb-bkxk-btn-on' : ''}`,
     text: monitorButtonLabel(monitored),
-    attrs: { type: 'button' },
+    attrs: { type: 'button', 'data-role': 'monitor' },
     on: {
       click: (ev) => {
         swallow(ev);
@@ -530,6 +571,10 @@ export function startListInjection(panel: PanelApi): () => void {
     }, RESCAN_DELAY_MS);
   };
 
+  // 存储被别处改动时同步卡片按钮（用户 m00846 报的 BUG 3）。
+  // 两个引擎各订阅一次：任务页删条目 / 引擎状态推进 / 监控页清空，都会走到这里。
+  const unsubscribes = [subscribeTasks(syncInjectedButtons), subscribeMonitor(syncInjectedButtons)];
+
   whenDomReady(() => {
     scan(ctx);
     // 站点的页签切换 / 翻页全是 XHR + 重绘，必须跟着补注入
@@ -542,6 +587,7 @@ export function startListInjection(panel: PanelApi): () => void {
   });
 
   return () => {
+    for (const off of unsubscribes) off();
     observer?.disconnect();
     observer = null;
     if (timer !== null) {

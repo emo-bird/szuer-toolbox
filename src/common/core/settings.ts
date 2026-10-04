@@ -17,7 +17,7 @@
  * 本模块不持有任何凭证；API Key 之类是用户自己填的配置，按普通值存。
  */
 
-import { read, write, listKeys } from './storage.ts';
+import { read, write, remove, listKeys } from './storage.ts';
 import type { RiskLevel, SiteToggleDef } from '../../sites/types.ts';
 
 export interface RegisteredToggle extends SiteToggleDef {
@@ -234,6 +234,18 @@ export function setValue(siteId: string, id: string, value: unknown): void {
 /** 已写入存储的设置键（供「重置设置」使用） */
 export function storedSettingKeys(): string[] {
   return listKeys().filter((k) => k.startsWith('toggle:') || k.startsWith('value:'));
+}
+
+/**
+ * 删掉一个配置项的存储。
+ *
+ * 专供**已经被删掉的配置项**收尾：它已经不在注册表里，用户没法从设置页清掉它，
+ * 而键还占着存储。键不存在时什么都不做（`remove` 本身是幂等的，这里只是省一次写）。
+ */
+export function removeValue(siteId: string, id: string): void {
+  const key = `value:${siteId}:${id}`;
+  if (read<undefined>(key, undefined) === undefined) return;
+  remove(key);
 }
 
 /** 测试用：清空注册表（不动存储） */

@@ -11,12 +11,15 @@
  * 误以为「这个功能默认是开着的」，是纯粹的陷阱。
  */
 
-import { registerValue, getValue as getStoredValue } from '../../common/core/settings.ts';
+import {
+  registerValue,
+  removeValue,
+  getValue as getStoredValue,
+} from '../../common/core/settings.ts';
 import type { SiteToggleDef } from '../types.ts';
 import { scoped } from '../../common/core/log.ts';
 import { setIntervalMs } from '../../common/core/http.ts';
 import { LIMITS, clampLimit, isBelowRecommended } from '../../common/core/limits.ts';
-import { CATEGORIES, CATEGORY_NAME } from './api.ts';
 
 const log = scoped('bkxk/settings');
 
@@ -45,9 +48,18 @@ export const VALUE = {
   POLL_INTERVAL_MS: 'pollIntervalMs',
   BATCH_CODE: 'batchCode',
   MONITOR_MODE: 'monitorMode',
-  MONITOR_CATEGORY: 'monitorCategory',
   RETRY_MODE: 'retryMode',
 } as const;
+
+/**
+ * 已经废弃、但可能还留在存储里的配置项键。
+ *
+ * 「监控类别」（`monitorCategory`）在 v0.31 被删掉 —— 每条监控项自己带着类别，
+ * 引擎按 `groupByCategory()` 自己找出当前有哪些类别，不需要用户再指定一个。
+ * 设置项一删就没人再读这个键，而全仓也没有别的地方会清它，所以在这里顺手清一次，
+ * 别在存储里留一个没有消费方的死设置。
+ */
+const STALE_VALUE_IDS: readonly string[] = ['monitorCategory'];
 
 /**
  * 开关清单。
@@ -129,11 +141,13 @@ export const BKXK_TOGGLES: readonly SiteToggleDef[] = [
  * 由 `src/sites/index.ts` 的 `registerSites()` 统一灌进设置注册表（单一来源）。
  * 本函数只补适配器表达不了的东西：输入框 / 下拉型配置项。
  *
- * ⚠️ 凡是取值来自**有限枚举**的配置项（监控模式 / 监控类别 / 重试策略）一律用
+ * ⚠️ 凡是取值来自**有限枚举**的配置项（监控模式 / 重试策略）一律用
  * `kind: 'select'` —— 旧脚本本来就是下拉（`C:\Project\szu_bkxk\src\ui.js:377,620`），
  * 换成自由文本框只会让用户打错一个字母就静默不生效。
  */
 export function registerBkxkSettings(): void {
+  for (const id of STALE_VALUE_IDS) removeValue(SITE_ID, id);
+
   registerInterval(VALUE.INTERVAL_MS, 'intervalMs', '请求间隔（毫秒）',
     '全局串行队列里相邻两条请求的最小间隔。');
   registerInterval(VALUE.RETRY_INTERVAL_MS, 'retryIntervalMs', '抢课重试间隔（毫秒）',
@@ -160,18 +174,6 @@ export function registerBkxkSettings(): void {
       { value: 'category', label: '类别监控（拉类别列表，一次拿一类）' },
       { value: 'single', label: '单独监控（逐课查容量，精确）' },
     ],
-  });
-  registerValue<string>({
-    siteId: SITE_ID,
-    id: VALUE.MONITOR_CATEGORY,
-    label: '监控类别',
-    desc: '类别监控模式下盯哪一类课。方案外 / 重修 / 体育 / 辅修的端点映射尚未实测。',
-    default: 'FANKC',
-    kind: 'select',
-    options: CATEGORIES.map((code) => ({
-      value: code,
-      label: `${CATEGORY_NAME[code]}（${code}）`,
-    })),
   });
   registerValue<string>({
     siteId: SITE_ID,

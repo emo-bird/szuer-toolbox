@@ -40,9 +40,11 @@ import {
   readMonitorStore,
   readTaskStore,
   removeMonitor,
+  removeTaskByTcId,
   tcIdFromCardId,
   teacherFromTitle,
   toggleMonitor,
+  toggleTask,
 } from '../../src/sites/bkxk/list-model.ts';
 
 /** 采样里出现过的真教学班 id（21 位） */
@@ -135,7 +137,7 @@ describe('bkxk 列表注入 —— 类别映射', () => {
 describe('bkxk 列表注入 —— 按钮与 id 行文案', () => {
   it('按钮文案反映状态', () => {
     assertEqual(grabButtonLabel(false), '添加抢课');
-    assertEqual(grabButtonLabel(true), '已加抢课');
+    assertEqual(grabButtonLabel(true), '移除抢课', '抢课也是开关（用户 m00846 拍板），再点会移出队列');
     assertEqual(monitorButtonLabel(false), '添加监控');
     assertEqual(monitorButtonLabel(true), '移除监控', '监控是开关，文案要说明再点会取消');
   });
@@ -279,6 +281,57 @@ describe('bkxk 列表注入 —— 监控列表与开关语义', () => {
     assertEqual(res.store.items.length, 1);
     assertEqual(res.store.items[0]!.teachingClassID, REAL_TC2);
     assert(hasMonitor(res.store, REAL_TC2), '另一个教学班要留着');
+  });
+
+  // 「添加抢课」也是开关 —— 用户 m00846 拍板（推翻原来的「抢课不是开关」）。
+  // 判据：移出队列 ≠ 撤销选课（那要另走退课），所以不需要二次确认框。
+  // 本段的输入自己一份（上面那个 `base` 是监控用的，没有 retryMode）
+  const taskBase = {
+    tcId: REAL_TC,
+    courseName: '大学英语（1）',
+    teacherName: '教师N',
+    category: 'FANKC' as const,
+    teachingPlace: '汇文楼H3-104',
+    now: 1700000000000,
+    retryMode: 'smart',
+  };
+
+  it('抢课按钮也是开关：点两次回到原样', () => {
+    const s0 = { seq: 0, items: [] };
+    const s1 = toggleTask(s0, taskBase);
+    assert(s1.on, '第一次应当是「已加入」');
+    assertEqual(s1.store.items.length, 1);
+    const s2 = toggleTask(s1.store, taskBase);
+    assert(!s2.on, '第二次应当移出队列');
+    assertEqual(s2.store.items.length, 0);
+  });
+
+  it('移出后 seq 仍然只前进（不许退回，否则新任务会拿到旧 id）', () => {
+    const s1 = toggleTask({ seq: 0, items: [] }, taskBase);
+    assertEqual(s1.store.seq, 1);
+    const s2 = toggleTask(s1.store, taskBase);
+    assertEqual(s2.store.seq, 1, '删除不该让 seq 回退');
+    const s3 = toggleTask(s2.store, taskBase);
+    assert(s3.on, '移出之后应当还能再加回来');
+    assertEqual(s3.store.items[0]!.id, 't2', '新任务必须是新 id，不能复用 t1');
+  });
+
+  it('移出按教学班 id 命中（不是 TaskItem.id —— 那是 t<seq>）', () => {
+    const a = addTask({ seq: 0, items: [] }, taskBase).store;
+    const b = addTask(a, { ...taskBase, tcId: REAL_TC2 }).store;
+    assertEqual(b.items[0]!.id, 't1', '先确认 id 确实不是教学班 id');
+    const res = removeTaskByTcId(b, REAL_TC);
+    assert(res.removed, '这一项在队列里，应当 removed=true');
+    assertEqual(res.store.items.length, 1);
+    assertEqual(res.store.items[0]!.teachingClassID, REAL_TC2);
+  });
+
+  it('移出队列里没有的任务：removed=false 且原引用返回', () => {
+    const s0 = { seq: 7, items: [] };
+    const res = removeTaskByTcId(s0, REAL_TC);
+    assert(!res.removed, '队列里没有这个教学班');
+    assertEqual(res.store, s0);
+    assertEqual(res.store.seq, 7, '不该动 seq');
   });
 });
 

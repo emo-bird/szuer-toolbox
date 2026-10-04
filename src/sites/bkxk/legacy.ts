@@ -74,7 +74,8 @@ const SETTING_VALUE_MAP: ReadonlyArray<{ from: string; to: string; kind: 'number
   { from: 'pollIntervalMs', to: 'pollIntervalMs', kind: 'number' },
   { from: 'batchCode', to: 'batchCode', kind: 'text' },
   { from: 'monitorMode', to: 'monitorMode', kind: 'text' },
-  { from: 'monitorCategory', to: 'monitorCategory', kind: 'text' },
+  // `monitorCategory` 不在表里：这个配置项在 v0.31 被删掉（引擎自己找出要查哪些类别），
+  // 迁过来只会留下一个没人读的键。老用户机上的历史键由 `registerBkxkSettings()` 清掉。
   { from: 'retryMode', to: 'retryMode', kind: 'text' },
 ];
 

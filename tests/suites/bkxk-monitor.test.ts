@@ -85,8 +85,9 @@ function store(...items: readonly MonitorItem[]): MonitorStore {
   return { items, hitCount: 0 };
 }
 
-function fakePanel(): { panel: PanelApi; toasts: string[] } {
+function fakePanel(): { panel: PanelApi; toasts: string[]; authAlerts: () => number } {
   const toasts: string[] = [];
+  let authAlerts = 0;
   const panel = {
     collapse: () => undefined,
     expand: () => undefined,
@@ -95,9 +96,12 @@ function fakePanel(): { panel: PanelApi; toasts: string[] } {
       toasts.push(msg);
     },
     confirm: () => Promise.resolve(false),
+    alertAuthExpired: () => {
+      authAlerts += 1;
+    },
     activateTab: () => undefined,
   } as unknown as PanelApi;
-  return { panel, toasts };
+  return { panel, toasts, authAlerts: () => authAlerts };
 }
 
 function bootSettings(): void {

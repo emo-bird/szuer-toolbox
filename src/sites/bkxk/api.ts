@@ -59,7 +59,9 @@ export type CategoryCode = (typeof CATEGORIES)[number];
 export const CATEGORY_NAME: Record<CategoryCode, string> = {
   FANKC: '方案内',
   FAWKC: '方案外',
-  TJKC: '推荐',
+  // 显示名（用户 m00846 口径：这个页签叫「本班」）。
+  // ⚠️ 只改这个字符串，**请求里的 teachingClassType 仍然是 TJKC** —— 那是站点自己的码。
+  TJKC: '本班',
   XGXK: '校公选',
   CXKC: '重修',
   TYKC: '体育',

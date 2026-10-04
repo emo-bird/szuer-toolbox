@@ -48,6 +48,7 @@ import {
 import type { Pos } from './panel-geometry.ts';
 import { ToastStack } from './widgets/toast.ts';
 import { showConfirm } from './widgets/confirm.ts';
+import { showAuthAlert } from './widgets/auth-alert.ts';
 import type { ConfirmOptions, PanelApi, TabContext, TabRegistration } from '../../sites/types.ts';
 
 const log = scoped('ui/panel');
@@ -404,6 +405,7 @@ export function createPanel(
     isCollapsed: () => collapsed,
     toast: (message, kind) => toasts.show(message, kind ?? 'info'),
     confirm: (opts: ConfirmOptions) => showConfirm(shadow, opts),
+    alertAuthExpired: () => showAuthAlert(shadow),
     activateTab: (tabId) => tabView.activate(tabId),
     setTabs: (next: readonly TabEntry[]) => {
       const siteToId = new Map<string, string>();

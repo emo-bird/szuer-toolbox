@@ -92,9 +92,10 @@ function store(...items: readonly TaskItem[]): TaskStore {
   return { seq: items.length, items };
 }
 
-/** 只实现引擎用到的两个方法，其余用不到就抛错（避免「默默调了别的方法」） */
-function fakePanel(): { panel: PanelApi; toasts: string[] } {
+/** 只实现引擎用到的方法，其余用不到就抛错（避免「默默调了别的方法」） */
+function fakePanel(): { panel: PanelApi; toasts: string[]; authAlerts: () => number } {
   const toasts: string[] = [];
+  let authAlerts = 0;
   const panel = {
     collapse: () => undefined,
     expand: () => undefined,
@@ -103,9 +104,12 @@ function fakePanel(): { panel: PanelApi; toasts: string[] } {
       toasts.push(msg);
     },
     confirm: () => Promise.resolve(false),
+    alertAuthExpired: () => {
+      authAlerts += 1;
+    },
     activateTab: () => undefined,
   } as unknown as PanelApi;
-  return { panel, toasts };
+  return { panel, toasts, authAlerts: () => authAlerts };
 }
 
 function bootSettings(): void {

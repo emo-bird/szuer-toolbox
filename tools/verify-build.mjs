@@ -51,6 +51,10 @@ const checks = [
     ),
   ],
   ['未把 .css 拆成单独文件', !text.includes('.sztb-panel{') || true],
+  // 类别查询的 pageNumber **从 0 开始**（站点约定；旧仓库 monitor.js:218 也是 `var page = 0`）。
+  // 写成 1 不会报任何错：整类课返回 0 条，而「这一页不满一页」被当成正常终止，
+  // 表现是每条监控都报「按类别查询未找到该教学班」—— 用户 m00846 就是这么撞上的。
+  ['类别查询从 pageNumber=0 起（写错只会静默查不到）', /for \(let page = 0; page < MAX_PAGES/.test(text)],
 ];
 
 let bad = 0;

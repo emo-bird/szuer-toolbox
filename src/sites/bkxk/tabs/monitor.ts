@@ -20,7 +20,7 @@
 import { el } from '../../../common/utils/dom.ts';
 import { scoped } from '../../../common/core/log.ts';
 import { getValue, isEnabled, setValue } from '../../../common/core/settings.ts';
-import { CATEGORIES, CATEGORY_NAME } from '../api.ts';
+import { CATEGORY_NAME } from '../api.ts';
 import { SITE_ID, TOGGLE, VALUE } from '../settings.ts';
 import type { MonitorItem } from '../list-model.ts';
 import {
@@ -103,23 +103,11 @@ function mountMonitorTab(root: HTMLElement, ctx: TabContext): () => void {
     render();
   });
 
-  // 类别（只影响「按类别」模式）
-  const catRow = el('div', { class: 'sztb-bkxk-mo-row' });
-  catRow.appendChild(el('span', { text: '按类别查询' }));
-  const catSelect = el('select', { class: 'sztb-select sztb-bkxk-mo-mode' });
-  for (const code of CATEGORIES) {
-    const opt = el('option', { text: `${CATEGORY_NAME[code]}（${code}）` });
-    opt.value = code;
-    catSelect.appendChild(opt);
-  }
-  catRow.appendChild(catSelect);
-  const catHint = el('span', { class: 'sztb-bkxk-mo-meta' });
-  catRow.appendChild(catHint);
-  catSelect.addEventListener('change', () => {
-    setValue(SITE_ID, VALUE.MONITOR_CATEGORY, catSelect.value);
-    log.info(`监控按类别查询的类别改为 ${catSelect.value}`);
-    render();
-  });
+  // 类别：**没有这个下拉**（用户 m00846 拍板删掉）。
+  // 每条监控项自己带着类别，引擎按 `groupByCategory()` 找出「当前有哪些类别」再逐类拉列表，
+  // 不需要用户再指定一个类别；原先那个下拉只会让人误以为「只查我选的这一类」。
+  const modeHint = el('span', { class: 'sztb-bkxk-mo-meta' });
+  modeRow.appendChild(modeHint);
 
   const summary = el('div', { class: 'sztb-group-title' });
 
@@ -147,7 +135,6 @@ function mountMonitorTab(root: HTMLElement, ctx: TabContext): () => void {
   root.appendChild(note);
   root.appendChild(gateWarn);
   root.appendChild(modeRow);
-  root.appendChild(catRow);
   root.appendChild(summary);
   root.appendChild(runningBox);
   root.appendChild(toolbar);
@@ -164,13 +151,10 @@ function mountMonitorTab(root: HTMLElement, ctx: TabContext): () => void {
     const mode = normalizeMonitorMode(getValue<string>(SITE_ID, VALUE.MONITOR_MODE));
     modeSelect.value = mode;
 
-    const category = getValue<string>(SITE_ID, VALUE.MONITOR_CATEGORY);
-    catSelect.value = category;
-    catRow.hidden = mode !== MONITOR_MODE.CATEGORY;
-    catHint.textContent =
-      mode === MONITOR_MODE.CATEGORY
-        ? '按类别查只覆盖这个类别；监控项缺类别代码时会被跳过。'
-        : '';
+    const categoryMode = mode === MONITOR_MODE.CATEGORY;
+    modeHint.textContent = categoryMode
+      ? '自动按监控列表里出现过的类别逐类拉列表（请求少）。'
+      : '每条监控各查一次容量（精确，但请求数是监控条数）。';
 
     const store = loadMonitorStore();
     const stats = pollStats();

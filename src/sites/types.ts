@@ -36,6 +36,14 @@ export interface PanelApi {
   toast(message: string, kind?: 'info' | 'warn' | 'error' | 'success'): void;
   /** 弹二次确认框，resolve 为 true 表示用户点了确认 */
   confirm(options: ConfirmOptions): Promise<boolean>;
+  /**
+   * 全屏提示「登录态已失效，请刷新页面重新登录」（灰色遮罩 + 居中提示）。
+   *
+   * 比 toast 重得多，只在**确认站点已经把会话踢下线**时用（HTTP 层认出
+   * 未认证响应）。抢课 / 监控这类会连续发请求的循环一旦遇到它就必须停下，
+   * 否则只会一直撞重定向并刷日志。
+   */
+  alertAuthExpired(): void;
   /** 把面板切到某个标签页 */
   activateTab(tabId: string): void;
 }

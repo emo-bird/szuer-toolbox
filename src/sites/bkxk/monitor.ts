@@ -317,7 +317,11 @@ async function checkOne(
 async function fetchCategoryAll(category: string): Promise<readonly BkxkClass[] | null> {
   const ctx = bkxkContext();
   const out: BkxkClass[] = [];
-  for (let page = 1; page <= MAX_PAGES; page += 1) {
+  // ⚠️ 站点的 pageNumber **从 0 开始**（不是 1）。旧仓库 monitor.js:218 是 `var page = 0`，
+  // HAR 里站点自己发的请求也是 "pageNumber":"0"。写成 1 会让整类课返回 0 条，
+  // 而 0 条会被下面当成「这一页不满」正常终止 —— 表现是每条监控都报
+  // 「按类别查询未找到该教学班」，看起来像站点不认这个类别，实则只是翻了页。
+  for (let page = 0; page < MAX_PAGES; page += 1) {
     let r: CategoryResult;
     try {
       r = await fetchCategory({
@@ -330,12 +334,12 @@ async function fetchCategoryAll(category: string): Promise<readonly BkxkClass[] 
         origin: pageOrigin(),
       });
     } catch (err) {
-      log.warn(`类别 ${category} 第 ${page} 页请求异常`, err);
+      log.warn(`类别 ${category} 请求异常（pageNumber=${String(page)}）`, err);
       return out.length > 0 ? out : null;
     }
     if (r.kind !== RESP_KIND.OK) {
       noteAuthLost(r.kind);
-      log.warn(`类别 ${category} 第 ${page} 页拉取失败（${r.kind}）：${r.msg}`);
+      log.warn(`类别 ${category} 拉取失败（pageNumber=${String(page)}，${r.kind}）：${r.msg}`);
       return out.length > 0 ? out : null;
     }
     for (const c of r.classes) out.push(c);
@@ -400,6 +404,8 @@ function noteAuthLost(kind: RespKind): boolean {
   stopPolling();
   log.error('登录态失效，已停止监控轮询');
   panel?.toast('登录态失效，已停止监控，请刷新页面重新登录', 'error');
+  // 全屏提示（用户 m00846 新需求 2）。本组件自己判重，重复调用只弹一个
+  panel?.alertAuthExpired();
   return true;
 }
 
