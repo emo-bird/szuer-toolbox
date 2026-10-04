@@ -49,7 +49,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-04T10:05:49.314Z（构建号 37） */
+/* 构建信息：2026-10-04T10:12:05.813Z（构建号 38） */
 
 "use strict";
 (() => {
@@ -1941,9 +1941,9 @@ ${options.desc ?? ""}
   var TOGGLE = {
     /** 🔴 写接口总开关（抢课 / 退课）。旧仓库红线 R1：默认 false，不得改 */
     WRITE_API: "write-api",
-    /** 🟠 课表注入：把自定义课程写进 teachingTime.do 的返回，交给站点原生渲染 */
+    /** 🟠 课表注入：把自定义课程写进 teachingTime.do 的返回，交给站点原生渲染（默认开） */
     HIJACK_TIMETABLE: "hijack-timetable",
-    /** 🟠 列表冲突追加：在站点算好的 isConflict 上追加我们算出的冲突 */
+    /** 🟠 列表冲突追加：在站点算好的 isConflict 上追加我们算出的冲突（默认开） */
     HIJACK_LIST_CONFLICT: "hijack-list-conflict",
     /** 🟢 自绘课表 */
     TIMETABLE_SELF_DRAW: "timetable-self-draw",
@@ -1983,9 +1983,9 @@ ${options.desc ?? ""}
     {
       id: TOGGLE.HIJACK_LIST_CONFLICT,
       label: "列表冲突追加",
-      desc: "在站点自己算好的 isConflict 之上，追加上自定义课程造成的冲突。只追加、不清除站点原值。需要拦截页面请求。",
+      desc: "在站点自己算好的 isConflict 之上，追加上自定义课程造成的冲突。只追加、不清除站点原值。需要拦截页面请求，会改变站点看到的返回内容。默认开启。",
       risk: "trace",
-      default: false,
+      default: true,
       group: "选课列表"
     },
     {
@@ -4722,8 +4722,8 @@ ${options.desc ?? ""}
   // src/main.ts
   var log15 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-04T10:05:49.314Z" : null;
-  var BUILD_NO = true ? 37 : null;
+  var BUILD_TIME = true ? "2026-10-04T10:12:05.813Z" : null;
+  var BUILD_NO = true ? 38 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();

@@ -157,15 +157,15 @@ describe('bkxk/hijack —— 端点识别', () => {
     assertEqual(kindOf('elective/programCourse.do.json'), 'list');
   });
 
-  it('开关默认值：课表注入默认开、列表冲突追加默认关（🟠 自 v0.24 按 default 走）', () => {
+  it('开关默认值：两个 🟠 都默认开（v0.24 起 🟠 按 default 走，用户拍板）', () => {
     boot();
-    assertEqual(kindEnabled('timetable'), true, '课表注入默认开（用户拍板，与旧版一致）');
-    assertEqual(kindEnabled('list'), false, '列表冲突追加默认关（怕把课全标成冲突不敢选课）');
+    assertEqual(kindEnabled('timetable'), true, '课表注入默认开（与旧版一致）');
+    assertEqual(kindEnabled('list'), true, '列表冲突追加也默认开（用户知情后要求一并打开）');
     setEnabled(SITE_ID, TOGGLE.HIJACK_TIMETABLE, false);
     assertEqual(kindEnabled('timetable'), false, '显式关掉之后不许被 default 顶回来');
-    setEnabled(SITE_ID, TOGGLE.HIJACK_LIST_CONFLICT, true);
-    assertEqual(kindEnabled('list'), true);
-    assertEqual(kindEnabled('timetable'), false, '两个开关互不影响');
+    assertEqual(kindEnabled('list'), true, '两个开关互不影响');
+    setEnabled(SITE_ID, TOGGLE.HIJACK_LIST_CONFLICT, false);
+    assertEqual(kindEnabled('list'), false);
     assertEqual(readEnabledCustomCourses().length, 0, '空库里读不到自定义课程');
   });
 });
