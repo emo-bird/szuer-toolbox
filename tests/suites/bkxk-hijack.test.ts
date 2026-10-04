@@ -39,6 +39,7 @@ import {
   transformResponse,
 } from '../../src/sites/bkxk/hijack.ts';
 import type { XhrLike } from '../../src/sites/bkxk/hijack.ts';
+import { TT_MARK_ATTR, TT_TAG_HTML, tagMarkedName } from '../../src/sites/bkxk/tt-mark.ts';
 
 // ------------------------------------------------------------- fixture
 
@@ -346,7 +347,9 @@ describe('bkxk/hijack —— 课表响应改写（真实样本）', () => {
     assertEqual(list.length, before + 1);
     const row = list[before]!;
     assertEqual(row['teachingClassID'], `${CUSTOM_ID_PREFIX}c1-0`);
-    assertEqual(row['courseName'], '我的课');
+    // v0.29：课名后面跟着我们的标记（站点把 courseName 原样拼进 HTML，标记只能这么带进去）
+    assertEqual(row['courseName'], tagMarkedName('我的课'));
+    assert(String(row['courseName']).includes(TT_MARK_ATTR), '标记必须带 data-sztb-tt，认课只认它');
     assertEqual(row['teacherName'], '张老师');
     assertEqual(row['dayOfWeekName'], '星期一');
     assertEqual(row['dayOfWeek'], '1');
@@ -358,6 +361,13 @@ describe('bkxk/hijack —— 课表响应改写（真实样本）', () => {
     assertEqual(String(row['timeType']), '1');
     // 位图长度跟随站点（20），不是默认 18
     assertEqual(String(row['week']).length, 20);
+  });
+
+  it('课名里的尖括号被转义（v0.29 起拼 HTML 的是我们）', () => {
+    const weird = item('c9', 'A<B>&C"', '5-18周星期一9-10节 自定义教室');
+    const res = augmentTimetable(JSON.parse(textOf(TIMETABLE)) as RawBody, [weird]);
+    const row = ((res.json as RawBody).dataList as Record<string, unknown>[])[before]!;
+    assertEqual(String(row['courseName']), `A&lt;B&gt;&amp;C&quot;${TT_TAG_HTML}`);
   });
 
   it('位图内容正确：第 5-18 周为 1，长度 20 时后两格为空', () => {

@@ -113,11 +113,15 @@ describe('sites 真实注册表 —— 与 userscript header 的 @match 对齐',
     assertEqual(r.autoExpand, false);
   });
 
-  it('bkxk 适配器声明了 7 个开关，且 🔴 不能被默认打开', () => {
+  it('bkxk 适配器声明了 6 个开关，且 🔴 不能被默认打开', () => {
     bootReal();
     const bkxk = allAdapters().find((a) => a.id === 'bkxk');
     assert(bkxk !== undefined, 'bkxk 适配器应已注册');
-    assertEqual(bkxk!.toggles?.length, 7, '批 1 的 6 个 + 批 3 的列表注入共 7 个开关');
+    assertEqual(
+      bkxk!.toggles?.length,
+      6,
+      '批 1 的 6 个 + 批 3 的列表注入 − v0.29 删掉的「自绘课表」= 6 个',
+    );
     // 🔴 的 default 必须是 false（代码兜底）；🟠 自 v0.24 起允许作者按体验声明默认值
     // ——「课表注入」就是 🟠 且默认开，理由是它最坏只让课表多几门用户自己的课。
     for (const t of bkxk!.toggles ?? []) {

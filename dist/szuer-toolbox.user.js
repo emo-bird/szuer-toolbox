@@ -49,7 +49,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-04T12:21:26.240Z（构建号 41） */
+/* 构建信息：2026-10-04T13:51:52.175Z（构建号 43） */
 
 "use strict";
 (() => {
@@ -1945,8 +1945,6 @@ ${options.desc ?? ""}
     HIJACK_TIMETABLE: "hijack-timetable",
     /** 🟠 列表冲突追加：在站点算好的 isConflict 上追加我们算出的冲突（默认开） */
     HIJACK_LIST_CONFLICT: "hijack-list-conflict",
-    /** 🟢 自绘课表 */
-    TIMETABLE_SELF_DRAW: "timetable-self-draw",
     /** 🟢 列表加列 */
     LIST_EXTRA_COLUMNS: "list-extra-columns",
     /** 🟢 列表注入（教学班ID / 抢课按钮） */
@@ -1987,14 +1985,6 @@ ${options.desc ?? ""}
       risk: "trace",
       default: true,
       group: "选课列表"
-    },
-    {
-      id: TOGGLE.TIMETABLE_SELF_DRAW,
-      label: "自绘课表",
-      desc: "用工具箱自己画一份课表（含自定义课程）。关掉「课表注入」后就只剩这一份。",
-      risk: "safe",
-      default: true,
-      group: "课表"
     },
     {
       id: TOGGLE.LIST_EXTRA_COLUMNS,
@@ -2667,6 +2657,19 @@ ${options.desc ?? ""}
     return n;
   }
 
+  // src/sites/bkxk/tt-mark.ts
+  var TT_TAG_CLASS = "sztb-bkxk-tt-tag";
+  var TT_MARK_ATTR = "data-sztb-tt";
+  var TT_TAG_TEXT = "自定义";
+  var TT_TAG_SELECTOR = `[${TT_MARK_ATTR}]`;
+  var TT_TAG_HTML = `<span class="${TT_TAG_CLASS}" ${TT_MARK_ATTR}="1">${TT_TAG_TEXT}</span>`;
+  function escapeText(s) {
+    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+  function tagMarkedName(name) {
+    return `${escapeText(name)}${TT_TAG_HTML}`;
+  }
+
   // src/sites/bkxk/page-realm.ts
   function pageRealm() {
     if (typeof unsafeWindow !== "undefined") return unsafeWindow;
@@ -2750,10 +2753,12 @@ ${options.desc ?? ""}
       teachingClassID: `${CUSTOM_ID_PREFIX}${c.id}-${index}`,
       courseNumber: "",
       studentCode: "",
-      courseName: c.name,
+      // ⚠️ 站点把 courseName 原样拼进 HTML（不转义、也不渲染任何数据属性）⇒
+      // 「这是我们加的课」这个标记只能随课名一起塞进去。见 `tt-mark.ts`。
+      courseName: tagMarkedName(c.name),
       courseIndex: "",
-      teacherName: c.teacher,
-      teachingPlace: seg.place,
+      teacherName: escapeText(c.teacher),
+      teachingPlace: escapeText(seg.place),
       sportCode: null,
       timeType: "1",
       sportName: null,
@@ -3657,24 +3662,9 @@ ${options.desc ?? ""}
   // src/sites/bkxk/timetable-style.ts
   var TT_STYLE_ID = "sztb-bkxk-tt-style";
   var TT_CSS = `
-/* ---- 我们注入的自定义课程卡片（结构照站点 .cv-course-card-single） ---- */
+/* ---- 站点画的卡片里、我们塞进去的「自定义」标签 ---- */
 
-.sztb-bkxk-tt-card {
-  opacity: .92;
-}
-
-/* 卡片里「装三行文字」的那层（站点同构：卡片 > div > div）。
-   站点给卡片本身（.cv-course-card-single）的 CSS 会把**直接子元素**排成一行，
-   所以课名 / 时间 / 地点 / 教师必须待在这层里，并且显式声明为纵向堆叠。 */
-.sztb-bkxk-tt-lines {
-  display: block;
-}
-
-.sztb-bkxk-tt-lines > div {
-  display: block;
-}
-
-.sztb-bkxk-tt-card .sztb-bkxk-tt-tag {
+.sztb-bkxk-tt-tag {
   display: inline-block;
   font-size: 11px;
   line-height: 1.3;
@@ -3683,138 +3673,19 @@ ${options.desc ?? ""}
   background: #047adc;
   color: #fff;
   margin-left: 3px;
-}
-
-/* 与站点已选课程冲突：整门课高亮（旧仓库口径） */
-.sztb-bkxk-tt-card.sztb-bkxk-tt-conflict {
-  outline: 2px solid #c0392b;
-  outline-offset: -2px;
-}
-
-.sztb-bkxk-tt-card .sztb-bkxk-tt-conflict-tip {
-  color: #c0392b;
-  font-size: 11px;
+  /* 站点的卡片文字可能被设成块级/绝对定位，这里把小标签按行内块摆稳 */
+  vertical-align: middle;
 }
 `;
 
   // src/sites/bkxk/timetable-model.ts
-  var TT_LESSON_CLASS = "sztb-bkxk-tt-lesson";
-  var TT_CARD_CLASS = "sztb-bkxk-tt-card";
-  var TT_CONFLICT_CLASS = "sztb-bkxk-tt-conflict";
-  var TT_TAG_CLASS = "sztb-bkxk-tt-tag";
-  var TT_TIP_CLASS = "sztb-bkxk-tt-conflict-tip";
-  var TT_HOLDER_CLASS = "sztb-bkxk-tt-holder";
-  var TT_DONE_ATTR = "data-sztb-tt";
-  var TT_LINES_CLASS = "sztb-bkxk-tt-lines";
   var SITE_TABLE_ID = "myCourseTable";
   var SITE_TABLE_SELECTOR = ".cv-my-course";
-  var SITE_LEFT_SELECTOR = ".cv-left";
-  var SITE_LESSON_CLASS = "cv-lesson";
-  var SITE_LESSON_SELECTOR = `.${SITE_LESSON_CLASS}`;
   var SITE_CARD_CLASS = "cv-course-card-single";
   var SITE_CARD_SELECTOR = `.${SITE_CARD_CLASS}`;
-  var SITE_DAY_COLUMN_SELECTOR = ".cv-col.cv-right";
-  var SITE_HEAD_SELECTOR = ".cv-head";
-  var SITE_CARD_LINE_SELECTOR = "div div";
-  var SITE_TOP_LINE_CLASS = "cv-top-line";
-  var TT_TAG_TEXT = "自定义";
-  var TT_CONFLICT_TIP = "与已选课程冲突";
-  var DEFAULT_SLOT_H = 54;
-  var DEFAULT_TOP0 = 28;
-  var DAY_COLUMN_NAMES = ["周一", "周二", "周三", "周四", "周五", "周六", "周七"];
-  var WEEK_TEXT_RE = /\d+-\d+周/;
-  function classTokens(className) {
-    if (typeof className !== "string" || className === "") return [];
-    return className.split(/\s+/).filter((t) => t !== "");
-  }
-  function hasClassToken(className, token) {
-    return classTokens(className).includes(token);
-  }
-  function pickSlotH(heights) {
-    for (const raw of heights) {
-      const h = typeof raw === "number" ? raw : Number.parseInt(String(raw ?? ""), 10);
-      if (Number.isFinite(h) && h > 0) return h;
-    }
-    return DEFAULT_SLOT_H;
-  }
-  function slotTop(sectionFrom, slotH = DEFAULT_SLOT_H, top0 = DEFAULT_TOP0) {
-    return top0 + (sectionFrom - 1) * slotH;
-  }
-  function slotHeight(sectionFrom, sectionTo, slotH = DEFAULT_SLOT_H) {
-    return (sectionTo - sectionFrom + 1) * slotH + 1;
-  }
-  function dayColumnName(day) {
-    if (day === null || !Number.isInteger(day)) return "";
-    return DAY_COLUMN_NAMES[day - 1] ?? "";
-  }
-  function findDayColumnIndex(heads, day) {
-    const want = dayColumnName(day);
-    if (want === "") return -1;
-    for (let i = 0; i < heads.length; i += 1) {
-      if ((heads[i] ?? "").includes(want)) return i;
-    }
-    if (day !== null && day >= 1 && day <= heads.length) return day - 1;
-    return -1;
-  }
-  function readExistingCards(cards) {
-    const out = [];
-    for (const card of cards) {
-      if (hasClassToken(card.className, TT_CARD_CLASS)) continue;
-      let name = "";
-      let time = "";
-      for (const part of card.parts) {
-        const text = part.trim();
-        if (name === "" && text !== "") name = text;
-        if (time === "" && WEEK_TEXT_RE.test(text)) time = text;
-      }
-      if (time !== "") out.push({ courseName: name, timeText: time });
-    }
-    return out;
-  }
-  function conflictsWithCards(place, cards) {
-    for (const card of cards) {
-      if (placesConflict(place, card.timeText)) return true;
-    }
-    return false;
-  }
-  function segLabel(seg) {
-    return `${String(seg.weekFrom)}-${String(seg.weekTo)}周${String(seg.sectionFrom)}-${String(seg.sectionTo)}节`;
-  }
-  function renderedCourseNames(cards) {
-    const names = /* @__PURE__ */ new Set();
-    for (const card of cards) {
-      const name = card.courseName.trim();
-      if (name !== "") names.add(name);
-    }
-    return names;
-  }
-  function planInjection(courses, cards, geo = { slotH: DEFAULT_SLOT_H, top0: DEFAULT_TOP0 }) {
-    const out = [];
-    const rendered = renderedCourseNames(cards);
-    for (const course of courses) {
-      if (!course.enabled) continue;
-      if (rendered.has(course.name.trim())) continue;
-      const conflict = conflictsWithCards(course.place, cards);
-      course.segs.forEach((seg, segIndex) => {
-        if (seg.day === null) return;
-        out.push({
-          courseId: course.id,
-          course,
-          seg,
-          segIndex,
-          conflict,
-          top: slotTop(seg.sectionFrom, geo.slotH, geo.top0),
-          height: slotHeight(seg.sectionFrom, seg.sectionTo, geo.slotH)
-        });
-      });
-    }
-    return out;
-  }
-  function needsRescan(injected, enabledCourses2) {
-    return enabledCourses2 > 0 && injected === 0;
-  }
+  var MAX_REFETCH_TRIES = 3;
   function shouldRefetchSite(input) {
-    return input.hijackOn && !input.didRewrite && !input.alreadyTried && input.enabledCourses > 0 && input.siteCards > 0;
+    return input.hijackOn && input.tried < input.maxTries && input.enabledCourses > 0 && input.siteCards > 0 && input.tags === 0;
   }
 
   // src/sites/bkxk/timetable.ts
@@ -3824,160 +3695,73 @@ ${options.desc ?? ""}
   var RETRY_MS = 500;
   var RESCAN_DELAY_MS2 = 300;
   var SITE_TIMETABLE_MODULE = "CVQueryCurriculum";
-  var refetch = { tried: false };
+  var autoRefetch = { tried: 0 };
+  var loggedDrawn = false;
   function findTable(doc = document) {
     return doc.getElementById(SITE_TABLE_ID) ?? doc.querySelector(SITE_TABLE_SELECTOR);
   }
-  function measure(table) {
-    const lesson = table.querySelector(`${SITE_LEFT_SELECTOR} ${SITE_LESSON_SELECTOR}`);
-    if (lesson === null) return DEFAULT_SLOT_H;
-    const first = lesson.firstElementChild;
-    const raw = first instanceof HTMLElement ? first.style.height : "";
-    return pickSlotH([raw]);
+  function countSiteCards(table) {
+    return table.querySelectorAll(`.${SITE_CARD_CLASS}`).length;
   }
-  function columnHeads(table) {
-    const out = [];
-    for (const col of table.querySelectorAll(SITE_DAY_COLUMN_SELECTOR)) {
-      out.push(col.querySelector(SITE_HEAD_SELECTOR)?.textContent?.trim() ?? "");
-    }
-    return out;
+  function countTags(table) {
+    return table.querySelectorAll(TT_TAG_SELECTOR).length;
   }
-  function readRawCards(table) {
-    const out = [];
-    for (const card of table.querySelectorAll(`.${TT_CARD_CLASS}, ${SITE_CARD_SELECTOR}`)) {
-      if (!(card instanceof HTMLElement)) continue;
-      const parts = [];
-      for (const line of card.querySelectorAll(SITE_CARD_LINE_SELECTOR)) {
-        parts.push(line.textContent ?? "");
-      }
-      out.push({ className: card.getAttribute("class"), parts });
-    }
-    return out;
-  }
-  function injectStyle2() {
+  function injectTagStyle() {
     if (document.getElementById(TT_STYLE_ID) !== null) return;
     const style = el("style", { attrs: { id: TT_STYLE_ID } });
     style.textContent = TT_CSS;
     (document.head ?? document.documentElement).appendChild(style);
   }
-  function buildCard(seg, course, conflict) {
-    const head = el("div", {}, course.name);
-    head.appendChild(el("span", { class: TT_TAG_CLASS, text: TT_TAG_TEXT }));
-    const lines = [head, el("div", { text: segLabel(seg) })];
-    if (seg.place !== "") lines.push(el("div", { text: seg.place }));
-    if (course.teacher !== "") lines.push(el("div", { text: course.teacher }));
-    if (conflict) lines.push(el("div", { class: TT_TIP_CLASS, text: TT_CONFLICT_TIP }));
-    const box = el("div", { class: TT_LINES_CLASS }, ...lines);
-    const card = el(
-      "div",
-      {
-        class: `${SITE_CARD_CLASS} ${TT_CARD_CLASS}${conflict ? ` ${TT_CONFLICT_CLASS}` : ""}`,
-        attrs: { [TT_DONE_ATTR]: "1" }
-      },
-      box
-    );
-    if (course.color !== "") card.style.background = course.color;
-    return card;
-  }
-  function injectPlan(table, plan) {
-    const heads = columnHeads(table);
-    const index = findDayColumnIndex(heads, plan.seg.day);
-    if (index < 0) {
-      log12.debug(`第 ${String(plan.seg.day)} 天没有对应列，跳过（列头=${heads.join(",")}）`);
-      return false;
-    }
-    const cols = table.querySelectorAll(SITE_DAY_COLUMN_SELECTOR);
-    const col = cols[index];
-    if (col === void 0) return false;
-    const wrap = el("div", {
-      class: `${SITE_LESSON_SELECTOR.slice(1)} ${SITE_TOP_LINE_CLASS} ${TT_LESSON_CLASS}`,
-      attrs: {
-        start: String(plan.seg.sectionFrom),
-        end: String(plan.seg.sectionTo),
-        [TT_DONE_ATTR]: "1"
-      },
-      style: { height: `${String(plan.height)}px`, top: `${String(plan.top)}px` }
-    });
-    wrap.appendChild(el("div", { class: TT_HOLDER_CLASS }, buildCard(plan.seg, plan.course, plan.conflict)));
-    col.appendChild(wrap);
-    return true;
-  }
-  function clearInjected(table) {
-    const scope = table ?? document;
-    const olds = scope.querySelectorAll(`.${TT_LESSON_CLASS}`);
-    for (const node of olds) node.remove();
-    return olds.length;
-  }
-  function countInjected(table) {
-    const scope = table ?? document;
-    return scope.querySelectorAll(`.${TT_LESSON_CLASS}`).length;
-  }
-  var writing = { busy: false };
-  function render(table, gate) {
-    gate.busy = true;
-    try {
-      clearInjected(table);
-      const courses = readEnabledCustomCourses();
-      const cards = readExistingCards(readRawCards(table));
-      const plans = planInjection(courses, cards, {
-        slotH: measure(table),
-        top0: DEFAULT_TOP0
-      });
-      let count = 0;
-      for (const plan of plans) {
-        if (injectPlan(table, plan)) count += 1;
-      }
-      const rendered = renderedCourseNames(cards);
-      const skipped = courses.filter((c) => c.enabled && rendered.has(c.name.trim())).length;
-      log12.info(
-        `课表注入自定义课程段 ${String(count)} 个（已选课程 ${String(cards.length)} 门${skipped > 0 ? `；站点已自己画出 ${String(skipped)} 门，自绘跳过` : ""}）`
-      );
-      return count;
-    } finally {
-      gate.busy = false;
-    }
-  }
-  function refetchSiteTable(table) {
-    const ok = shouldRefetchSite({
-      hijackOn: kindEnabled("timetable"),
-      didRewrite: didRewriteTimetable(),
-      alreadyTried: refetch.tried,
-      enabledCourses: readEnabledCustomCourses().length,
-      siteCards: table.querySelectorAll(`.${SITE_CARD_CLASS}`).length
-    });
-    if (!ok) return false;
-    refetch.tried = true;
+  function askSiteToRefetch(reason) {
     const mod = pageRecord()[SITE_TIMETABLE_MODULE];
     if (mod === void 0 || typeof mod.init !== "function") {
       log12.warn(
-        `站点没有 ${SITE_TIMETABLE_MODULE}.init（改版了？）—— 放弃晚到补偿，继续用自绘兜底`
+        `站点没有 ${SITE_TIMETABLE_MODULE}.init（改版了？）—— 这一轮的自定义课程不会出现，刷新页面可重来`
       );
       return false;
     }
     log12.info(
-      `站点已自行画完课表、而我们没赶上那条响应 ⇒ 请站点重新请求一次 ${SITE_TIMETABLE_MODULE}.init()（这次会经过我们的包装）`
+      `请站点重新请求一次课表（${reason}；上一发响应${didRewriteTimetable() ? "已被我们改写" : "我们没赶上"}）⇒ ${SITE_TIMETABLE_MODULE}.init()`
     );
     mod.init.call(mod);
     return true;
   }
-  function scan2(gate) {
-    const table = findTable();
-    if (table === null) return 0;
-    if (refetchSiteTable(table)) return 0;
-    if (!isEnabled(SITE_ID, TOGGLE.TIMETABLE_SELF_DRAW)) {
-      const n = clearInjected(table);
-      if (n > 0) log12.info(`自绘课表开关已关闭：移除 ${String(n)} 个注入节点`);
-      return 0;
+  function autoRefetchIfNeeded(table) {
+    const enabled = readEnabledCustomCourses().length;
+    const cards = countSiteCards(table);
+    const tags = countTags(table);
+    const ok = shouldRefetchSite({
+      hijackOn: kindEnabled("timetable"),
+      tried: autoRefetch.tried,
+      maxTries: MAX_REFETCH_TRIES,
+      enabledCourses: enabled,
+      siteCards: cards,
+      tags
+    });
+    if (!ok) {
+      if (!loggedDrawn && tags > 0) {
+        loggedDrawn = true;
+        log12.info(
+          `站点画出的课表里已经带上我们的标记 ${String(tags)} 个（自定义课程 ${String(enabled)} 门）`
+        );
+      }
+      return false;
     }
-    injectStyle2();
-    return render(table, gate);
+    autoRefetch.tried += 1;
+    return askSiteToRefetch(
+      `站点已经画完 ${String(cards)} 张卡片、里面没有我们的标记（第 ${String(autoRefetch.tried)} 次）`
+    );
   }
   function refreshTimetable() {
-    return scan2(writing);
+    const table = findTable();
+    if (table === null) return 0;
+    if (readEnabledCustomCourses().length === 0) return 0;
+    if (!kindEnabled("timetable")) return 0;
+    return askSiteToRefetch("你在【自定义】里改了课程") ? 1 : 0;
   }
   function startTimetableInjection() {
     if (!location.pathname.includes(TT_PAGE_MARK)) {
-      log12.debug(`当前不是课表页（${location.pathname}），跳过自绘课表`);
+      log12.debug(`当前不是课表页（${location.pathname}），跳过课表接管`);
       return () => void 0;
     }
     let observer = null;
@@ -3988,15 +3772,10 @@ ${options.desc ?? ""}
       if (timer2 !== null) return;
       timer2 = window.setTimeout(() => {
         timer2 = null;
-        if (writing.busy) return;
         const table = findTable();
         if (table === null) return;
-        if (!isEnabled(SITE_ID, TOGGLE.TIMETABLE_SELF_DRAW)) {
-          scan2(writing);
-          return;
-        }
-        if (!needsRescan(countInjected(table), readEnabledCustomCourses().length)) return;
-        scan2(writing);
+        injectTagStyle();
+        autoRefetchIfNeeded(table);
       }, RESCAN_DELAY_MS2);
     };
     const attempt = () => {
@@ -4006,15 +3785,18 @@ ${options.desc ?? ""}
         if (tries < MAX_TRIES) {
           retry = window.setTimeout(attempt, RETRY_MS);
         } else {
-          log12.warn(`未找到课表容器 #${SITE_TABLE_ID}，放弃注入（站点的课表可能还没出数据）`);
+          log12.warn(`未找到课表容器 #${SITE_TABLE_ID}，放弃接管（站点的课表可能还没出数据）`);
         }
         return;
       }
-      scan2(writing);
+      injectTagStyle();
+      const courses = readEnabledCustomCourses();
+      log12.info(
+        `课表页接管就绪：自定义课程 ${String(courses.length)} 门；课表由站点自己画，我们只加「自定义」标签`
+      );
+      autoRefetchIfNeeded(table);
       observer = new MutationObserver(schedule2);
       observer.observe(table, { childList: true, subtree: true });
-      const courses = readEnabledCustomCourses();
-      log12.info(`自绘课表已就绪：自定义课程 ${String(courses.length)} 门（单节 ${String(measure(table))}px）`);
     };
     whenDomReady(attempt);
     return () => {
@@ -4028,7 +3810,6 @@ ${options.desc ?? ""}
         window.clearTimeout(retry);
         retry = null;
       }
-      clearInjected(findTable());
     };
   }
 
@@ -4345,7 +4126,7 @@ ${options.desc ?? ""}
     segField.appendChild(segBox);
     const noteTop = el("div", {
       class: "sztb-note",
-      text: "课程名与地点必填，教师可空。时间用下面的下拉与数字框填 —— 不用也不能手写时间文本（写错了自己也不知道）。这里加的课会参与 ① 列表页的冲突提示 ② 课表页的自绘卡片。"
+      text: "课程名与地点必填，教师可空。时间用下面的下拉与数字框填 —— 不用也不能手写时间文本（写错了自己也不知道）。这里加的课会参与 ① 列表页的冲突提示 ② 课表页（站点自己画的课表里会带上「自定义」标签）。"
     });
     body.appendChild(noteTop);
     body.appendChild(formTitle);
@@ -4678,8 +4459,7 @@ ${options.desc ?? ""}
       writeCustomCourses(next);
       renderList();
       renderConflicts();
-      const injected = refreshTimetable();
-      if (injected > 0) log13.info(`课表已重画，注入 ${String(injected)} 个节次`);
+      if (refreshTimetable() > 0) log13.info("已请站点重画课表（这次带的课程就是你刚改的）");
     }
     addSegBtn.addEventListener("click", () => {
       if (!guard()) return;
@@ -4806,8 +4586,8 @@ ${options.desc ?? ""}
   // src/main.ts
   var log15 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-04T12:21:26.240Z" : null;
-  var BUILD_NO = true ? 41 : null;
+  var BUILD_TIME = true ? "2026-10-04T13:51:52.175Z" : null;
+  var BUILD_NO = true ? 43 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();

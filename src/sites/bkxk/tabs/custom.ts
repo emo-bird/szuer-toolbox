@@ -4,7 +4,7 @@
  * 【它是干什么的】用户在这里维护「课表上没有、但实际要上的课」（重修、慕课、外院课…），
  * 这些课不是学校选的课，站点自己不知道，所以由本工具带进两处：
  *   ① 列表页响应里追加冲突描述（`hijack.ts` 的 `augmentList`）；
- *   ② 课表页自绘卡片（`timetable.ts`）。
+ *   ② 课表页响应里追加一行（站点自己画，我们给这一行的课名加「自定义」标签，见 `tt-mark.ts`）。
  *
  * 【为什么提前做】原计划排在批 4。批 3 的 `hijack` / `timetable` 写完才发现：
  * 验收它们**必须先有自定义课程数据**，而全项目当时没有任何写入入口（数据层是只读的），
@@ -153,7 +153,7 @@ function mountCustomTab(root: HTMLElement, ctx: TabContext): void {
     text:
       '课程名与地点必填，教师可空。时间用下面的下拉与数字框填 —— ' +
       '不用也不能手写时间文本（写错了自己也不知道）。' +
-      '这里加的课会参与 ① 列表页的冲突提示 ② 课表页的自绘卡片。',
+      '这里加的课会参与 ① 列表页的冲突提示 ② 课表页（站点自己画的课表里会带上「自定义」标签）。',
   });
 
   body.appendChild(noteTop);
@@ -553,9 +553,8 @@ function mountCustomTab(root: HTMLElement, ctx: TabContext): void {
     writeCustomCourses(next);
     renderList();
     renderConflicts();
-    // 只动 storage 不会触发站点的 MutationObserver，必须主动重画一次课表
-    const injected = refreshTimetable();
-    if (injected > 0) log.info(`课表已重画，注入 ${String(injected)} 个节次`);
+    // 只动 storage 不会触发站点的 MutationObserver，必须主动请站点重画一次课表
+    if (refreshTimetable() > 0) log.info('已请站点重画课表（这次带的课程就是你刚改的）');
   }
 
   // ── 事件 ──────────────────────────────────────────────────────────────

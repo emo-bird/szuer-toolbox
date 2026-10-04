@@ -34,6 +34,7 @@ import {
 import type { TimeSegment } from './time.ts';
 import { readEnabledCustomCourses } from './custom.ts';
 import type { BkxkCustomCourse } from './custom.ts';
+import { escapeText, tagMarkedName } from './tt-mark.ts';
 import { pageRealm } from './page-realm.ts';
 
 const log = scoped('bkxk/hijack');
@@ -159,10 +160,12 @@ function timetableRow(c: BkxkCustomCourse, seg: TimeSegment, index: number, len:
     teachingClassID: `${CUSTOM_ID_PREFIX}${c.id}-${index}`,
     courseNumber: '',
     studentCode: '',
-    courseName: c.name,
+    // ⚠️ 站点把 courseName 原样拼进 HTML（不转义、也不渲染任何数据属性）⇒
+    // 「这是我们加的课」这个标记只能随课名一起塞进去。见 `tt-mark.ts`。
+    courseName: tagMarkedName(c.name),
     courseIndex: '',
-    teacherName: c.teacher,
-    teachingPlace: seg.place,
+    teacherName: escapeText(c.teacher),
+    teachingPlace: escapeText(seg.place),
     sportCode: null,
     timeType: '1',
     sportName: null,

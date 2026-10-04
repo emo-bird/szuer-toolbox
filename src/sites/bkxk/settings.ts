@@ -31,8 +31,6 @@ export const TOGGLE = {
   HIJACK_TIMETABLE: 'hijack-timetable',
   /** 🟠 列表冲突追加：在站点算好的 isConflict 上追加我们算出的冲突（默认开） */
   HIJACK_LIST_CONFLICT: 'hijack-list-conflict',
-  /** 🟢 自绘课表 */
-  TIMETABLE_SELF_DRAW: 'timetable-self-draw',
   /** 🟢 列表加列 */
   LIST_EXTRA_COLUMNS: 'list-extra-columns',
   /** 🟢 列表注入（教学班ID / 抢课按钮） */
@@ -95,14 +93,6 @@ export const BKXK_TOGGLES: readonly SiteToggleDef[] = [
     risk: 'trace',
     default: true,
     group: '选课列表',
-  },
-  {
-    id: TOGGLE.TIMETABLE_SELF_DRAW,
-    label: '自绘课表',
-    desc: '用工具箱自己画一份课表（含自定义课程）。关掉「课表注入」后就只剩这一份。',
-    risk: 'safe',
-    default: true,
-    group: '课表',
   },
   {
     id: TOGGLE.LIST_EXTRA_COLUMNS,
