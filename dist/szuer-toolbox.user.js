@@ -49,7 +49,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-03T19:56:02.619Z（构建号 31） */
+/* 构建信息：2026-10-04T08:23:03.536Z（构建号 33） */
 
 "use strict";
 (() => {
@@ -3224,8 +3224,8 @@ ${options.desc ?? ""}
   // src/main.ts
   var log12 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-03T19:56:02.619Z" : null;
-  var BUILD_NO = true ? 31 : null;
+  var BUILD_TIME = true ? "2026-10-04T08:23:03.536Z" : null;
+  var BUILD_NO = true ? 33 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();
