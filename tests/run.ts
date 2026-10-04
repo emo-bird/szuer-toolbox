@@ -27,5 +27,7 @@ import './suites/bkxk-settings.test.ts';
 import './suites/bkxk-list.test.ts';
 import './suites/bkxk-time.test.ts';
 import './suites/bkxk-courses.test.ts';
+import './suites/custom-courses.test.ts';
+import './suites/bkxk-hijack.test.ts';
 
 await run();

@@ -23,7 +23,8 @@ import { scoped } from '../../common/core/log.ts';
 import type { SiteAdapter } from '../types.ts';
 import { BKXK_TOGGLES, applyBkxkSettings, registerBkxkSettings, SITE_ID } from './settings.ts';
 import { readSession, sessionSummary } from './session.ts';
-import { runMigration } from './legacy.ts';
+import { runCustomCarry, runMigration } from './legacy.ts';
+import { installHijack } from './hijack.ts';
 import { startListInjection } from './list.ts';
 import { BKXK_SETTINGS_TAB } from './tabs/settings.ts';
 
@@ -56,15 +57,25 @@ export const bkxkAdapter: SiteAdapter = {
   toggles: BKXK_TOGGLES,
 
   /**
-   * 启动期：只做「读 storage / 写 storage」，不碰 DOM。
-   * 迁移必须在这里跑完 —— 后面的 courses / list 模块初始化时就要读迁移结果。
+   * 启动期：只做「读 storage / 写 storage」与「装响应接管」，不碰 DOM。
+   *
+   * 响应接管必须**最先**装：站点的 jQuery 请求随时可能发出去，晚一步就漏掉第一条
+   * （`readystatechange` 监听在 XHR 构造时注册，装了之后的请求才归我们管）。
+   *
+   * 迁移必须在这里跑完 —— 后面的 courses / list / hijack 模块初始化时就要读迁移结果。
    */
   earlyInit(ctx) {
+    installHijack();
     const lines = runMigration();
     registerBkxkSettings();
+    const carried = runCustomCarry();
     if (lines.length > 0) {
       log.info(`已从旧版迁移 ${lines.length} 条内容，详情见日志页`);
-    } else {
+    }
+    if (carried.length > 0) {
+      log.info(`自定义课程已搬到通用键（${carried.length} 条说明见日志页）`);
+    }
+    if (lines.length === 0 && carried.length === 0) {
       log.debug(`无旧数据需要迁移（earlyInit @ ${ctx.url.pathname}）`);
     }
   },

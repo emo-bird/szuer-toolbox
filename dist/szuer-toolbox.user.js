@@ -49,7 +49,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-04T08:23:03.536Z（构建号 33） */
+/* 构建信息：2026-10-04T08:50:08.220Z（构建号 34） */
 
 "use strict";
 (() => {
@@ -2219,6 +2219,49 @@ ${options.desc ?? ""}
     return `已登录（学号 ****${tail}，批次 ${s.batchCode ?? "未知"}，校区 ${s.campus}）`;
   }
 
+  // src/common/custom/courses.ts
+  var CUSTOM_COURSES_KEY = "custom:courses";
+  var LEGACY_SITE_CUSTOM_KEY = "bkxk:customCourses";
+  function asRecord(v) {
+    if (v === null || typeof v !== "object" || Array.isArray(v)) return null;
+    return v;
+  }
+  function str(v) {
+    return typeof v === "string" ? v : "";
+  }
+  function slimCustomCourse(item) {
+    const o = asRecord(item);
+    if (o === null) return null;
+    const name = str(o["name"]).trim();
+    if (name === "") return null;
+    const id = str(o["id"]);
+    if (id === "") return null;
+    return {
+      id,
+      name,
+      teacher: str(o["teacher"]),
+      place: str(o["place"]),
+      color: str(o["color"]),
+      // 旧仓库语义：只有显式 false 才算关（`custom.js:106`）
+      enabled: o["enabled"] !== false
+    };
+  }
+  function parseCustomCourses(raw) {
+    if (!Array.isArray(raw)) return [];
+    const out = [];
+    for (const item of raw) {
+      const rec = slimCustomCourse(item);
+      if (rec !== null) out.push(rec);
+    }
+    return out;
+  }
+  function readCustomCourses() {
+    return parseCustomCourses(read(CUSTOM_COURSES_KEY, []));
+  }
+  function enabledCourses(courses) {
+    return courses.filter((c) => c.enabled);
+  }
+
   // src/sites/bkxk/legacy.ts
   var log9 = scoped("bkxk/legacy");
   var LEGACY_SETTINGS_KEY = "szubkxk.settings.v2";
@@ -2229,11 +2272,12 @@ ${options.desc ?? ""}
     TASKS: "tasks"
   };
   var BKXK_STORE_KEY = {
-    CUSTOM_COURSES: "bkxk:customCourses",
     MONITOR: "bkxk:monitor",
     TASKS: "bkxk:tasks"
   };
+  var BKXK_SITE_CUSTOM_KEY = LEGACY_SITE_CUSTOM_KEY;
   var MIGRATION_FLAG_KEY = "migrate:bkxk:v2";
+  var CARRY_FLAG_KEY = "migrate:bkxk:custom-to-common";
   var SETTING_VALUE_MAP = [
     { from: "intervalMs", to: "intervalMs", kind: "number" },
     { from: "retryIntervalMs", to: "retryIntervalMs", kind: "number" },
@@ -2256,25 +2300,9 @@ ${options.desc ?? ""}
       return null;
     }
   }
-  function asRecord(v) {
+  function asRecord2(v) {
     if (v === null || typeof v !== "object" || Array.isArray(v)) return null;
     return v;
-  }
-  function slimCustomCourse(item) {
-    const o = asRecord(item);
-    if (o === null) return null;
-    const name = typeof o["name"] === "string" ? o["name"].trim() : "";
-    if (name === "") return null;
-    const id = typeof o["id"] === "string" && o["id"] !== "" ? o["id"] : "";
-    if (id === "") return null;
-    return {
-      id,
-      name,
-      teacher: typeof o["teacher"] === "string" ? o["teacher"] : "",
-      place: typeof o["place"] === "string" ? o["place"] : "",
-      color: typeof o["color"] === "string" ? o["color"] : "",
-      enabled: o["enabled"] !== false
-    };
   }
   function planMigration(snapshot, alreadyMigrated) {
     const report = [];
@@ -2283,7 +2311,7 @@ ${options.desc ?? ""}
       return { entries: [], report: ["旧数据已迁移过，本次跳过。"], notices: [], empty: true };
     }
     const entries2 = [];
-    const settings = asRecord(parseJson(snapshot.settings));
+    const settings = asRecord2(parseJson(snapshot.settings));
     if (settings === null && snapshot.settings !== null) {
       notices.push("旧设置 `szubkxk.settings.v2` 无法解析，已跳过。");
     }
@@ -2316,15 +2344,10 @@ ${options.desc ?? ""}
     const ccRaw = parseJson(snapshot.customCourses);
     if (ccRaw !== null) {
       if (Array.isArray(ccRaw)) {
-        const slim = [];
-        let dropped = 0;
-        for (const item of ccRaw) {
-          const rec = slimCustomCourse(item);
-          if (rec === null) dropped += 1;
-          else slim.push(rec);
-        }
-        entries2.push({ key: BKXK_STORE_KEY.CUSTOM_COURSES, value: slim });
-        report.push(`自定义课程 ${slim.length} 门`);
+        const slim = parseCustomCourses(ccRaw);
+        const dropped = ccRaw.length - slim.length;
+        entries2.push({ key: CUSTOM_COURSES_KEY, value: slim });
+        report.push(`自定义课程 ${slim.length} 门 → ${CUSTOM_COURSES_KEY}`);
         if (dropped > 0) notices.push(`有 ${dropped} 条自定义课程缺少 name / id，已丢弃。`);
       } else {
         notices.push("旧自定义课程不是数组，已跳过。");
@@ -2337,7 +2360,7 @@ ${options.desc ?? ""}
     for (const blob of blobs) {
       const parsed = parseJson(blob.raw);
       if (parsed === null) continue;
-      if (asRecord(parsed) === null) {
+      if (asRecord2(parsed) === null) {
         notices.push(`旧${blob.label}不是对象，已跳过。`);
         continue;
       }
@@ -2348,6 +2371,45 @@ ${options.desc ?? ""}
       report.push("旧数据里没有可迁移的内容。");
     }
     return { entries: entries2, report, notices, empty: entries2.length === 0 };
+  }
+  function planCustomCarry(siteValue, commonValue) {
+    const rawCount2 = Array.isArray(siteValue) ? siteValue.length : 0;
+    const site = parseCustomCourses(siteValue);
+    if (site.length === 0) {
+      return { entries: [], report: [], notices: [], empty: true };
+    }
+    const notices = [];
+    if (rawCount2 > site.length) {
+      notices.push(`站点键里有 ${rawCount2 - site.length} 条自定义课程缺少 name / id，搬运时丢弃。`);
+    }
+    const common = parseCustomCourses(commonValue);
+    if (common.length > 0) {
+      notices.push(
+        `通用键 ${CUSTOM_COURSES_KEY} 里已有 ${common.length} 门自定义课程，站点键里的 ${site.length} 门**未搬运**（避免覆盖）。如需保留，请自行导出后合并。`
+      );
+      return { entries: [], report: [], notices, empty: true };
+    }
+    return {
+      entries: [{ key: CUSTOM_COURSES_KEY, value: site }],
+      report: [`自定义课程 ${site.length} 门：${BKXK_SITE_CUSTOM_KEY} → ${CUSTOM_COURSES_KEY}`],
+      notices,
+      empty: false
+    };
+  }
+  function runCustomCarry() {
+    if (read(CARRY_FLAG_KEY, false)) return [];
+    const site = read(BKXK_SITE_CUSTOM_KEY, null);
+    const common = read(CUSTOM_COURSES_KEY, []);
+    const plan = planCustomCarry(site, common);
+    write(CARRY_FLAG_KEY, true);
+    if (plan.empty) {
+      for (const line of plan.notices) log9.warn(`搬运 · ${line}`);
+      return [];
+    }
+    for (const e of plan.entries) write(e.key, e.value);
+    log9.info(`自定义课程搬运完成：${plan.report.join("；")}`);
+    for (const line of plan.notices) log9.warn(`搬运 · ${line}`);
+    return [...plan.report, ...plan.notices];
   }
   function readLegacySnapshot() {
     const ls = (() => {
@@ -2398,6 +2460,354 @@ ${options.desc ?? ""}
     for (const line of plan.report) log9.info(`迁移 · ${line}`);
     for (const line of plan.notices) log9.warn(`迁移 · ${line}`);
     return lines;
+  }
+
+  // src/sites/bkxk/time.ts
+  var WEEKDAY = {
+    一: 1,
+    二: 2,
+    三: 3,
+    四: 4,
+    五: 5,
+    六: 6,
+    日: 7,
+    天: 7
+  };
+  var CN_WEEKDAY = [
+    "",
+    "星期一",
+    "星期二",
+    "星期三",
+    "星期四",
+    "星期五",
+    "星期六",
+    "星期日"
+  ];
+  var DEFAULT_WEEK_BITMAP_LEN = 18;
+  var WEEK_RE = /(\d+)(?:\s*-\s*(\d+))?\s*周\s*(?:[（(]\s*(单|双)\s*[)）])?/;
+  var DAY_RE = /星期\s*([一二三四五六日天])/;
+  var SECTION_RE = /(\d+)(?:\s*-\s*(\d+))?\s*节/;
+  function parityMatches(week, parity) {
+    if (parity === null) return true;
+    return parity === "单" ? week % 2 === 1 : week % 2 === 0;
+  }
+  function parseWeekRange(text) {
+    if (typeof text !== "string" || text === "") return null;
+    const m = WEEK_RE.exec(text);
+    if (m === null) return null;
+    const from = Number(m[1]);
+    const to = m[2] === void 0 ? from : Number(m[2]);
+    if (!Number.isFinite(from) || !Number.isFinite(to) || from < 1 || from > to) return null;
+    const p = m[3];
+    return { weekFrom: from, weekTo: to, parity: p === "单" || p === "双" ? p : null };
+  }
+  function parseSegment(seg) {
+    if (typeof seg !== "string") return null;
+    const s = seg.trim();
+    if (s === "") return null;
+    const week = parseWeekRange(s);
+    if (week === null) return null;
+    const section = SECTION_RE.exec(s);
+    if (section === null) return null;
+    const sectionFrom = Number(section[1]);
+    const sectionTo = section[2] === void 0 ? sectionFrom : Number(section[2]);
+    if (!Number.isFinite(sectionFrom) || !Number.isFinite(sectionTo)) return null;
+    const dayText = DAY_RE.exec(s);
+    const day = dayText === null ? null : WEEKDAY[dayText[1] ?? ""] ?? null;
+    return {
+      weekFrom: week.weekFrom,
+      weekTo: week.weekTo,
+      parity: week.parity,
+      day,
+      sectionFrom,
+      sectionTo: Math.max(sectionFrom, sectionTo),
+      // 地点 = 节次匹配之后的剩余文本。用匹配下标而不是 indexOf，
+      // 免得「节次文本恰好也在前面出现过」时截错位置。
+      place: s.slice(section.index + section[0].length).trim(),
+      raw: seg
+    };
+  }
+  function parsePlace(text) {
+    if (typeof text !== "string" || text.trim() === "") return [];
+    const out = [];
+    for (const piece of text.split(/[,，]/)) {
+      const seg = parseSegment(piece);
+      if (seg !== null) out.push(seg);
+    }
+    return out;
+  }
+  function weekMatches(seg, week) {
+    if (!Number.isFinite(week) || week < seg.weekFrom || week > seg.weekTo) return false;
+    return parityMatches(week, seg.parity);
+  }
+  function sectionsOverlap(a, b) {
+    return a.sectionFrom <= b.sectionTo && b.sectionFrom <= a.sectionTo;
+  }
+  function segmentsConflict(a, b) {
+    if (a.day === null || b.day === null) return false;
+    if (a.day !== b.day) return false;
+    if (!sectionsOverlap(a, b)) return false;
+    const from = Math.max(a.weekFrom, b.weekFrom);
+    const to = Math.min(a.weekTo, b.weekTo);
+    for (let w = from; w <= to; w += 1) {
+      if (weekMatches(a, w) && weekMatches(b, w)) return true;
+    }
+    return false;
+  }
+  function placesConflict(a, b) {
+    const left = parsePlace(a);
+    const right = parsePlace(b);
+    if (left.length === 0 || right.length === 0) return false;
+    for (const x of left) {
+      for (const y of right) {
+        if (segmentsConflict(x, y)) return true;
+      }
+    }
+    return false;
+  }
+  function buildWeekBitmap(from, to, parity, len = DEFAULT_WEEK_BITMAP_LEN) {
+    const n = Number.isFinite(len) && len > 0 ? Math.floor(len) : DEFAULT_WEEK_BITMAP_LEN;
+    let out = "";
+    for (let i = 1; i <= n; i += 1) {
+      out += i >= from && i <= to && parityMatches(i, parity) ? "1" : "0";
+    }
+    return out;
+  }
+  function weekText(seg) {
+    const body = seg.weekFrom === seg.weekTo ? `${seg.weekFrom}周` : `${seg.weekFrom}-${seg.weekTo}周`;
+    return seg.parity === null ? body : `${body}(${seg.parity})`;
+  }
+  function maxBitmapLength(bitmaps) {
+    let n = 0;
+    for (const b of bitmaps) if (b.length > n) n = b.length;
+    return n;
+  }
+
+  // src/sites/bkxk/custom.ts
+  function withSegments(courses) {
+    return courses.map((c) => ({ ...c, segs: parsePlace(c.place) }));
+  }
+  function readEnabledCustomCourses() {
+    return withSegments(enabledCourses(readCustomCourses()));
+  }
+
+  // src/sites/bkxk/hijack.ts
+  var log10 = scoped("bkxk/hijack");
+  var CUSTOM_ID_PREFIX = "szu-custom-";
+  var LIST_RE = /elective\/(?:programCourse|unProgramCourse|publicCourse|recommendedCourse|queryCourse|course|minorCourse|retakeCourse|sportCourse)\.do/i;
+  var TIMETABLE_RE = /elective\/teachingTime\.do/i;
+  function kindOf(url) {
+    if (typeof url !== "string" || url === "") return null;
+    if (TIMETABLE_RE.test(url)) return "timetable";
+    if (LIST_RE.test(url)) return "list";
+    return null;
+  }
+  function kindEnabled(kind) {
+    return isEnabled(SITE_ID, kind === "timetable" ? TOGGLE.HIJACK_TIMETABLE : TOGGLE.HIJACK_LIST_CONFLICT);
+  }
+  function asRecord3(v) {
+    if (v === null || typeof v !== "object" || Array.isArray(v)) return null;
+    return v;
+  }
+  function asArray(v) {
+    return Array.isArray(v) ? v : null;
+  }
+  function num(v) {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : 0;
+  }
+  function customConflicts(place, items2) {
+    if (typeof place !== "string" || place === "") return [];
+    const out = [];
+    for (const c of items2) {
+      if (!c.enabled) continue;
+      if (placesConflict(place, c.place)) out.push(c);
+    }
+    return out;
+  }
+  function conflictDescFor(items2) {
+    return items2.map((c) => `自定义课程：${c.name}(${c.place})`).join("；");
+  }
+  function augmentTimetable(json, items2) {
+    const root = asRecord3(json);
+    if (root === null) return { json, changed: 0 };
+    const list = asArray(root["dataList"]);
+    if (list === null) return { json, changed: 0 };
+    const len = Math.max(DEFAULT_WEEK_BITMAP_LEN, maxBitmapLength(weekStringsOf(list)));
+    let changed = 0;
+    for (const c of items2) {
+      if (!c.enabled) continue;
+      for (let k = 0; k < c.segs.length; k++) {
+        const seg = c.segs[k];
+        if (seg === void 0 || seg.day === null) continue;
+        list.push(timetableRow(c, seg, k, len));
+        changed++;
+      }
+    }
+    if (changed > 0) root["totalCount"] = num(root["totalCount"]) + changed;
+    return { json, changed };
+  }
+  function weekStringsOf(list) {
+    const out = [];
+    for (const row3 of list) {
+      const rec = asRecord3(row3);
+      if (rec === null) continue;
+      const w = rec["week"];
+      if (typeof w === "string" && w !== "") out.push(w);
+    }
+    return out;
+  }
+  function timetableRow(c, seg, index, len) {
+    return {
+      dayOfWeekName: seg.day === null ? "" : CN_WEEKDAY[seg.day] ?? "",
+      teachingClassID: `${CUSTOM_ID_PREFIX}${c.id}-${index}`,
+      courseNumber: "",
+      studentCode: "",
+      courseName: c.name,
+      courseIndex: "",
+      teacherName: c.teacher,
+      teachingPlace: seg.place,
+      sportCode: null,
+      timeType: "1",
+      sportName: null,
+      studyMode: "01",
+      weekName: weekText(seg),
+      beginSection: String(seg.sectionFrom),
+      endSection: String(seg.sectionTo),
+      week: buildWeekBitmap(seg.weekFrom, seg.weekTo, seg.parity, len),
+      dayOfWeek: seg.day === null ? "" : String(seg.day),
+      wid: null,
+      /** 我们自己打的标记：站点不会返回这个键，用于辨认与将来的排查 */
+      szuCustom: true
+    };
+  }
+  function augmentList(json, items2) {
+    const root = asRecord3(json);
+    if (root === null) return { json, changed: 0 };
+    const list = asArray(root["dataList"]);
+    if (list === null) return { json, changed: 0 };
+    let changed = 0;
+    for (const row3 of list) {
+      const item = asRecord3(row3);
+      if (item === null) continue;
+      const tcList = asArray(item["tcList"]);
+      const targets = tcList === null ? [item] : tcList.map(asRecord3).filter(isRec);
+      for (const tc of targets) {
+        const place = tc["teachingPlace"];
+        if (typeof place !== "string" || place === "") continue;
+        const mine = customConflicts(place, items2);
+        if (mine.length === 0) continue;
+        const desc = conflictDescFor(mine);
+        const before = tc["conflictDesc"];
+        tc["isConflict"] = "1";
+        tc["conflictDesc"] = typeof before === "string" && before !== "" ? `${before}；${desc}` : desc;
+        tc["szuCustomConflict"] = true;
+        changed++;
+      }
+    }
+    return { json, changed };
+  }
+  function isRec(v) {
+    return v !== null;
+  }
+  function transformResponse(kind, text, items2) {
+    if (text === "" || items2.length === 0) return null;
+    let json;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      return null;
+    }
+    const root = asRecord3(json);
+    if (root === null) return null;
+    if (String(root["code"]) !== "1") return null;
+    const res = kind === "timetable" ? augmentTimetable(root, items2) : augmentList(root, items2);
+    if (res.changed === 0) return null;
+    log10.info(`[接管] ${kind} 改写了 ${res.changed} 处`);
+    return JSON.stringify(res.json);
+  }
+  function transformCurrentResponse(kind, text) {
+    if (!kindEnabled(kind)) return null;
+    return transformResponse(kind, text, readEnabledCustomCourses());
+  }
+  function rewriteXhr(xhr) {
+    const kind = kindOf(typeof xhr.responseURL === "string" ? xhr.responseURL : null);
+    if (kind === null) return false;
+    const rt = typeof xhr.responseType === "string" ? xhr.responseType : "";
+    if (rt !== "" && rt !== "text" && rt !== "json") return false;
+    let text;
+    try {
+      text = typeof xhr.responseText === "string" ? xhr.responseText : "";
+    } catch {
+      return false;
+    }
+    if (text === "") return false;
+    const next = transformCurrentResponse(kind, text);
+    if (next === null) return false;
+    try {
+      Object.defineProperty(xhr, "responseText", { configurable: true, get: () => next });
+      if (rt === "json") {
+        Object.defineProperty(xhr, "response", { configurable: true, get: () => JSON.parse(next) });
+      }
+    } catch {
+      log10.warn("接管响应失败（无法改写 responseText）");
+      return false;
+    }
+    return true;
+  }
+  function makeXhrCtor(Orig) {
+    function Wrapped() {
+      const xhr = new Orig();
+      xhr.addEventListener("readystatechange", () => {
+        if (xhr.readyState === 4) rewriteXhr(xhr);
+      });
+      return xhr;
+    }
+    Wrapped.prototype = Orig.prototype;
+    return Wrapped;
+  }
+  function installXhr(target = globalThis) {
+    const t = target;
+    if (t["__szuXhrInstalled"] === true) return false;
+    const orig = t["XMLHttpRequest"];
+    if (typeof orig !== "function") return false;
+    t["XMLHttpRequest"] = makeXhrCtor(orig);
+    t["__szuXhrInstalled"] = true;
+    return true;
+  }
+  function installFetch(target = globalThis) {
+    const t = target;
+    if (t["__szuFetchInstalled"] === true) return false;
+    const orig = t["fetch"];
+    if (typeof orig !== "function") return false;
+    const ResponseCtor = t["Response"];
+    const patched = (input, init) => {
+      const p = orig(input, init);
+      if (init !== void 0 && init !== null && init["__szuSkip"] === true) return p;
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      const kind = kindOf(url);
+      if (kind === null) return p;
+      return p.then(async (res) => {
+        const text = await res.text();
+        const next = transformCurrentResponse(kind, text);
+        if (next === null) return res;
+        if (typeof ResponseCtor !== "function") {
+          log10.warn("接管响应失败（环境里没有 Response 构造器）");
+          return res;
+        }
+        const Ctor = ResponseCtor;
+        return new Ctor(next, { status: res.status, statusText: res.statusText, headers: res.headers });
+      });
+    };
+    t["fetch"] = patched;
+    t["__szuFetchInstalled"] = true;
+    return true;
+  }
+  function installHijack(target = globalThis) {
+    const xhr = installXhr(target);
+    const fetch2 = installFetch(target);
+    if (xhr || fetch2) log10.info(`响应接管已安装（XHR=${String(xhr)} fetch=${String(fetch2)}）`);
+    return xhr || fetch2;
   }
 
   // src/sites/bkxk/list-style.ts
@@ -2659,73 +3069,73 @@ ${options.desc ?? ""}
     return hit === void 0 ? "" : hit;
   }
   var TASK_STATUS_PENDING = "pending";
-  function asRecord2(v) {
+  function asRecord4(v) {
     if (v === null || typeof v !== "object" || Array.isArray(v)) return null;
     return v;
   }
-  function str(v) {
+  function str2(v) {
     if (typeof v === "string") return v;
     if (typeof v === "number" && Number.isFinite(v)) return String(v);
     return "";
   }
-  function num(v, fallback) {
+  function num2(v, fallback) {
     return typeof v === "number" && Number.isFinite(v) ? v : fallback;
   }
   function bool(v, fallback) {
     return typeof v === "boolean" ? v : fallback;
   }
   function readTaskStore(raw) {
-    const rec = asRecord2(raw);
+    const rec = asRecord4(raw);
     const rawItems = rec === null ? null : rec["items"];
     if (!Array.isArray(rawItems)) return { seq: 0, items: [] };
     const items2 = [];
     for (const it of rawItems) {
-      const o = asRecord2(it);
+      const o = asRecord4(it);
       if (o === null) continue;
-      const teachingClassID = str(o["teachingClassID"]);
+      const teachingClassID = str2(o["teachingClassID"]);
       if (teachingClassID === "") continue;
       items2.push({
-        id: str(o["id"]),
-        seq: num(o["seq"], 0),
+        id: str2(o["id"]),
+        seq: num2(o["seq"], 0),
         teachingClassID,
-        courseName: str(o["courseName"]),
-        teacherName: str(o["teacherName"]),
-        category: str(o["category"]),
-        priority: num(o["priority"], 0),
+        courseName: str2(o["courseName"]),
+        teacherName: str2(o["teacherName"]),
+        category: str2(o["category"]),
+        priority: num2(o["priority"], 0),
         enabled: bool(o["enabled"], true),
-        status: str(o["status"]) === "" ? TASK_STATUS_PENDING : str(o["status"]),
-        retryMode: str(o["retryMode"]),
-        attempts: num(o["attempts"], 0),
-        lastMsg: str(o["lastMsg"]),
-        lastKind: str(o["lastKind"]),
-        addedAt: num(o["addedAt"], 0)
+        status: str2(o["status"]) === "" ? TASK_STATUS_PENDING : str2(o["status"]),
+        retryMode: str2(o["retryMode"]),
+        attempts: num2(o["attempts"], 0),
+        lastMsg: str2(o["lastMsg"]),
+        lastKind: str2(o["lastKind"]),
+        addedAt: num2(o["addedAt"], 0)
       });
     }
-    return { seq: num(rec?.["seq"], items2.length), items: items2 };
+    return { seq: num2(rec?.["seq"], items2.length), items: items2 };
   }
   function readMonitorStore(raw) {
-    const rec = asRecord2(raw);
+    const rec = asRecord4(raw);
     const rawItems = rec === null ? null : rec["items"];
     if (!Array.isArray(rawItems)) return { items: [], hitCount: 0 };
     const items2 = [];
     for (const it of rawItems) {
-      const o = asRecord2(it);
+      const o = asRecord4(it);
       if (o === null) continue;
-      const teachingClassID = str(o["teachingClassID"]);
+      const teachingClassID = str2(o["teachingClassID"]);
       if (teachingClassID === "") continue;
       items2.push({
         teachingClassID,
-        courseName: str(o["courseName"]),
-        teacherName: str(o["teacherName"]),
-        teachingPlace: str(o["teachingPlace"]),
-        category: str(o["category"]),
+        courseName: str2(o["courseName"]),
+        teacherName: str2(o["teacherName"]),
+        teachingPlace: str2(o["teachingPlace"]),
+        category: str2(o["category"]),
         remain: typeof o["remain"] === "number" && Number.isFinite(o["remain"]) ? o["remain"] : null,
         checkedAt: typeof o["checkedAt"] === "number" && Number.isFinite(o["checkedAt"]) ? o["checkedAt"] : null,
-        hits: num(o["hits"], 0),
-        lastMsg: str(o["lastMsg"])
+        hits: num2(o["hits"], 0),
+        lastMsg: str2(o["lastMsg"])
       });
     }
-    return { items: items2, hitCount: num(rec?.["hitCount"], 0) };
+    return { items: items2, hitCount: num2(rec?.["hitCount"], 0) };
   }
   function hasTask(store, tcId) {
     return store.items.some((t) => t.teachingClassID === tcId);
@@ -2825,7 +3235,7 @@ ${options.desc ?? ""}
   }
 
   // src/sites/bkxk/list.ts
-  var log10 = scoped("site/bkxk/list");
+  var log11 = scoped("site/bkxk/list");
   var LIST_PAGE_MARK = "grablessons.do";
   var RESCAN_DELAY_MS = 120;
   var MAX_BLOCKS_PER_SCAN = 400;
@@ -2918,11 +3328,11 @@ ${options.desc ?? ""}
   async function copyId(tcId, panel) {
     const res = await copyText(tcId);
     if (res.ok) {
-      log10.info(`已复制教学班ID ${tcId} 到剪贴板（方式：${res.method}）`);
+      log11.info(`已复制教学班ID ${tcId} 到剪贴板（方式：${res.method}）`);
       panel.toast("已复制教学班ID", "success");
       return;
     }
-    log10.warn(`复制教学班ID 失败：${res.detail}（可手动选中那一行复制）`);
+    log11.warn(`复制教学班ID 失败：${res.detail}（可手动选中那一行复制）`);
     panel.toast("复制失败，请手动选中复制", "warn");
   }
   function onGrab(info, ctx, btn) {
@@ -2940,18 +3350,18 @@ ${options.desc ?? ""}
     write(BKXK_STORE_KEY.TASKS, ctx.tasks);
     btn.textContent = grabButtonLabel(true);
     btn.classList.add("sztb-bkxk-btn-on");
-    log10.info(`已加入抢课队列：${targetText(info)}（本轮只入队，不会发送任何请求）`);
+    log11.info(`已加入抢课队列：${targetText(info)}（本轮只入队，不会发送任何请求）`);
     ctx.panel.toast(`已加入抢课队列：${info.courseName === "" ? info.tcId : info.courseName}`, "success");
   }
   function onMonitorToggle(info, ctx, btn) {
     const wasOn = hasMonitor(ctx.monitor, info.tcId);
     if (wasOn) {
       ctx.monitor = removeMonitor(ctx.monitor, info.tcId).store;
-      log10.info(`已移出监控列表：${targetText(info)}`);
+      log11.info(`已移出监控列表：${targetText(info)}`);
       ctx.panel.toast("已移出监控", "info");
     } else {
       ctx.monitor = addMonitor(ctx.monitor, { ...info, now: Date.now() }).store;
-      log10.info(`已加入监控列表：${targetText(info)}（本轮只入队，不会轮询）`);
+      log11.info(`已加入监控列表：${targetText(info)}（本轮只入队，不会轮询）`);
       ctx.panel.toast("已加入监控", "success");
     }
     write(BKXK_STORE_KEY.MONITOR, ctx.monitor);
@@ -3012,7 +3422,7 @@ ${options.desc ?? ""}
     if (ownsBlock(unit)) return;
     const tcId = tcIdIn(unit);
     if (tcId === null) {
-      log10.debug("卡片 .cv-info 未取到教学班 id，跳过（站点结构可能已变）");
+      log11.debug("卡片 .cv-info 未取到教学班 id，跳过（站点结构可能已变）");
       return;
     }
     const info = infoForUnit(unit, tcId);
@@ -3029,7 +3439,7 @@ ${options.desc ?? ""}
     if (cell === null) return;
     const ids = tcIdsIn(cell);
     if (ids.length === 0) {
-      log10.debug("列表行未取到教学班 id，跳过（站点结构可能已变）");
+      log11.debug("列表行未取到教学班 id，跳过（站点结构可能已变）");
       return;
     }
     const col = el("div", { class: "sztb-bkxk-col" });
@@ -3095,7 +3505,7 @@ ${options.desc ?? ""}
     const nodes = document.querySelectorAll(".sztb-bkxk-block, .sztb-bkxk-col, .sztb-bkxk-head");
     if (nodes.length === 0) return;
     for (const node of nodes) node.remove();
-    log10.info(`列表注入开关已关闭：移除 ${String(nodes.length)} 个注入节点`);
+    log11.info(`列表注入开关已关闭：移除 ${String(nodes.length)} 个注入节点`);
   }
   function scan(ctx) {
     if (!isEnabled(SITE_ID, TOGGLE.LIST_INJECT)) {
@@ -3115,7 +3525,7 @@ ${options.desc ?? ""}
   }
   function startListInjection(panel) {
     if (!location.pathname.includes(LIST_PAGE_MARK)) {
-      log10.debug(`当前不是选课页（${location.pathname}），跳过列表注入`);
+      log11.debug(`当前不是选课页（${location.pathname}），跳过列表注入`);
       return () => void 0;
     }
     const ctx = {
@@ -3137,7 +3547,7 @@ ${options.desc ?? ""}
       scan(ctx);
       observer = new MutationObserver(schedule2);
       observer.observe(document.body, { childList: true, subtree: true });
-      log10.info(
+      log11.info(
         `选课列表注入已就绪：抢课队列 ${String(ctx.tasks.items.length)} 条 / 监控 ${String(ctx.monitor.items.length)} 条（本轮点击只入队，不发请求）`
       );
     });
@@ -3169,7 +3579,7 @@ ${options.desc ?? ""}
   };
 
   // src/sites/bkxk/index.ts
-  var log11 = scoped("site/bkxk");
+  var log12 = scoped("site/bkxk");
   var HOSTS2 = ["bkxk.szu.edu.cn"];
   var PAGES2 = ["*default/grablessons.do*", "*default/curriculum.do*"];
   var bkxkAdapter = {
@@ -3183,16 +3593,26 @@ ${options.desc ?? ""}
     tabs: [BKXK_SETTINGS_TAB],
     toggles: BKXK_TOGGLES,
     /**
-     * 启动期：只做「读 storage / 写 storage」，不碰 DOM。
-     * 迁移必须在这里跑完 —— 后面的 courses / list 模块初始化时就要读迁移结果。
+     * 启动期：只做「读 storage / 写 storage」与「装响应接管」，不碰 DOM。
+     *
+     * 响应接管必须**最先**装：站点的 jQuery 请求随时可能发出去，晚一步就漏掉第一条
+     * （`readystatechange` 监听在 XHR 构造时注册，装了之后的请求才归我们管）。
+     *
+     * 迁移必须在这里跑完 —— 后面的 courses / list / hijack 模块初始化时就要读迁移结果。
      */
     earlyInit(ctx) {
+      installHijack();
       const lines = runMigration();
       registerBkxkSettings();
+      const carried = runCustomCarry();
       if (lines.length > 0) {
-        log11.info(`已从旧版迁移 ${lines.length} 条内容，详情见日志页`);
-      } else {
-        log11.debug(`无旧数据需要迁移（earlyInit @ ${ctx.url.pathname}）`);
+        log12.info(`已从旧版迁移 ${lines.length} 条内容，详情见日志页`);
+      }
+      if (carried.length > 0) {
+        log12.info(`自定义课程已搬到通用键（${carried.length} 条说明见日志页）`);
+      }
+      if (lines.length === 0 && carried.length === 0) {
+        log12.debug(`无旧数据需要迁移（earlyInit @ ${ctx.url.pathname}）`);
       }
     },
     /** 挂载期：DOM 已就绪，可以安全地把配置推给运行时并报登录态。 */
@@ -3200,11 +3620,11 @@ ${options.desc ?? ""}
       applyBkxkSettings();
       const session = readSession();
       if (!session.loggedIn) {
-        log11.warn("未读到有效登录态：学号或 token 缺失，功能接口会失败。请先在站内完成登录。");
+        log12.warn("未读到有效登录态：学号或 token 缺失，功能接口会失败。请先在站内完成登录。");
       } else {
-        log11.info(`站点已就绪：${sessionSummary(session)}`);
+        log12.info(`站点已就绪：${sessionSummary(session)}`);
       }
-      log11.info(`功能页=${String(ctx.isFeaturePage)}（设置标签页已就绪，其余标签页在批 4 接入）`);
+      log12.info(`功能页=${String(ctx.isFeaturePage)}（设置标签页已就绪，其余标签页在批 4 接入）`);
       startListInjection(ctx.panel);
     }
   };
@@ -3222,10 +3642,10 @@ ${options.desc ?? ""}
   }
 
   // src/main.ts
-  var log12 = scoped("main");
+  var log13 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-04T08:23:03.536Z" : null;
-  var BUILD_NO = true ? 33 : null;
+  var BUILD_TIME = true ? "2026-10-04T08:50:08.220Z" : null;
+  var BUILD_NO = true ? 34 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();
@@ -3265,7 +3685,7 @@ ${options.desc ?? ""}
       version: VERSION
     }));
     booted = { panel, adapterId: res.adapter?.id ?? null };
-    log12.info(
+    log13.info(
       `深大人工具箱 ${VERSION_LABEL} 已装载（host=${url.hostname}，分派=${res.reason}，站点=${res.adapter?.id ?? "无"}，功能页=${res.autoExpand ? "是" : "否"}）`
     );
     res.adapter?.init?.({
@@ -3285,10 +3705,10 @@ ${options.desc ?? ""}
         return;
       }
       if (!res.inject) {
-        log12.debug(`站内跳转后不再属于支持范围，保持现有悬浮窗`);
+        log13.debug(`站内跳转后不再属于支持范围，保持现有悬浮窗`);
         return;
       }
-      log12.info(`站内跳转导致重新分派：${bootedFor} → ${location.href}`);
+      log13.info(`站内跳转导致重新分派：${bootedFor} → ${location.href}`);
       bootedFor = location.href;
       boot(url, res);
     };
@@ -3315,9 +3735,9 @@ ${options.desc ?? ""}
     if (res.adapter?.earlyInit !== void 0) {
       try {
         res.adapter.earlyInit({ adapter: res.adapter, url });
-        log12.debug(`已执行启动期钩子：${res.adapter.id}`);
+        log13.debug(`已执行启动期钩子：${res.adapter.id}`);
       } catch (err) {
-        log12.error(`启动期钩子执行失败：${res.adapter.id}`, err);
+        log13.error(`启动期钩子执行失败：${res.adapter.id}`, err);
       }
     }
     whenDomReady(() => {
