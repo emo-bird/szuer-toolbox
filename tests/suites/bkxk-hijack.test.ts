@@ -157,14 +157,16 @@ describe('bkxk/hijack —— 端点识别', () => {
     assertEqual(kindOf('elective/programCourse.do.json'), 'list');
   });
 
-  it('开关默认关（🟠 门禁），显式打开后 kindEnabled 才为 true', () => {
+  it('开关默认值：课表注入默认开、列表冲突追加默认关（🟠 自 v0.24 按 default 走）', () => {
     boot();
-    assertEqual(kindEnabled('timetable'), false, '旧版默认开，新版必须默认关');
-    assertEqual(kindEnabled('list'), false);
-    setEnabled(SITE_ID, TOGGLE.HIJACK_TIMETABLE, true);
-    assertEqual(kindEnabled('timetable'), true);
-    assertEqual(kindEnabled('list'), false, '两个开关互不影响');
-    assertEqual(readEnabledCustomCourses().length, 0, '只读：没有任何写入口');
+    assertEqual(kindEnabled('timetable'), true, '课表注入默认开（用户拍板，与旧版一致）');
+    assertEqual(kindEnabled('list'), false, '列表冲突追加默认关（怕把课全标成冲突不敢选课）');
+    setEnabled(SITE_ID, TOGGLE.HIJACK_TIMETABLE, false);
+    assertEqual(kindEnabled('timetable'), false, '显式关掉之后不许被 default 顶回来');
+    setEnabled(SITE_ID, TOGGLE.HIJACK_LIST_CONFLICT, true);
+    assertEqual(kindEnabled('list'), true);
+    assertEqual(kindEnabled('timetable'), false, '两个开关互不影响');
+    assertEqual(readEnabledCustomCourses().length, 0, '空库里读不到自定义课程');
   });
 });
 
@@ -487,6 +489,8 @@ describe('bkxk/hijack —— rewriteXhr', () => {
 
   it('开关关着时一个字都不改', () => {
     boot();
+    // 课表注入自 v0.24 起默认开 ⇒ 这里要显式关掉，测的是闸门而不是默认值
+    setEnabled(SITE_ID, TOGGLE.HIJACK_TIMETABLE, false);
     write(CUSTOM_COURSES_KEY, [course('c1', '我的课', '5-18周星期一9-10节 A')]);
     const x = new FakeXhr();
     x.fire(TIMETABLE_URL, body());
@@ -625,5 +629,23 @@ describe('bkxk/hijack —— installXhr / installFetch', () => {
     env['Response'] = class {};
     assertEqual(installHijack(env), true);
     assertEqual(installHijack({}), false, '空环境里没有 XHR/fetch');
+  });
+
+  it('不给 target 时装到页面 realm（unsafeWindow），不是沙箱的 globalThis', () => {
+    // v0.24 的真事故：脚本带 @grant ⇒ 跑在沙箱里，把包装写在沙箱的 globalThis 上
+    // 页面一个字节都没动，站点请求照走原生 XHR ⇒ 接管永不出网且完全静默。
+    bootOn();
+    const { env } = makeEnv();
+    const g = globalThis as Record<string, unknown>;
+    const had = Object.prototype.hasOwnProperty.call(g, 'unsafeWindow');
+    const before = g['unsafeWindow'];
+    g['unsafeWindow'] = env;
+    try {
+      assertEqual(installHijack(), true, '应当装到 unsafeWindow 上');
+      assertEqual(env['__szuXhrInstalled'], true, '包装必须落在页面 realm 的对象上');
+    } finally {
+      if (had) g['unsafeWindow'] = before;
+      else delete g['unsafeWindow'];
+    }
   });
 });

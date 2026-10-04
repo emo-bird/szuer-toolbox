@@ -49,7 +49,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-04T09:21:23.184Z（构建号 36） */
+/* 构建信息：2026-10-04T10:05:49.314Z（构建号 37） */
 
 "use strict";
 (() => {
@@ -870,7 +870,7 @@
     if (def === void 0) return false;
     const stored = read(storageKey(siteId, toggleId), null);
     if (stored === null) {
-      return def.risk === "safe" ? def.default : false;
+      return def.risk === "irreversible" ? false : def.default;
     }
     return stored;
   }
@@ -1975,9 +1975,9 @@ ${options.desc ?? ""}
     {
       id: TOGGLE.HIJACK_TIMETABLE,
       label: "课表注入",
-      desc: "把自定义课程合并进 teachingTime.do 的响应，让站点自己把它画进课表。需要拦截页面请求，会改变站点看到的返回内容。",
+      desc: "把自定义课程合并进 teachingTime.do 的响应，让站点自己把它画进课表。需要拦截页面请求，会改变站点看到的返回内容。默认开启。",
       risk: "trace",
-      default: false,
+      default: true,
       group: "课表"
     },
     {
@@ -2842,7 +2842,11 @@ ${options.desc ?? ""}
     Wrapped.prototype = Orig.prototype;
     return Wrapped;
   }
-  function installXhr(target = globalThis) {
+  function pageRealm() {
+    if (typeof unsafeWindow !== "undefined") return unsafeWindow;
+    return globalThis;
+  }
+  function installXhr(target = pageRealm()) {
     const t = target;
     if (t["__szuXhrInstalled"] === true) return false;
     const orig = t["XMLHttpRequest"];
@@ -2851,7 +2855,7 @@ ${options.desc ?? ""}
     t["__szuXhrInstalled"] = true;
     return true;
   }
-  function installFetch(target = globalThis) {
+  function installFetch(target = pageRealm()) {
     const t = target;
     if (t["__szuFetchInstalled"] === true) return false;
     const orig = t["fetch"];
@@ -2879,7 +2883,7 @@ ${options.desc ?? ""}
     t["__szuFetchInstalled"] = true;
     return true;
   }
-  function installHijack(target = globalThis) {
+  function installHijack(target = pageRealm()) {
     const xhr = installXhr(target);
     const fetch2 = installFetch(target);
     if (xhr || fetch2) log10.info(`响应接管已安装（XHR=${String(xhr)} fetch=${String(fetch2)}）`);
@@ -4718,8 +4722,8 @@ ${options.desc ?? ""}
   // src/main.ts
   var log15 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-04T09:21:23.184Z" : null;
-  var BUILD_NO = true ? 36 : null;
+  var BUILD_TIME = true ? "2026-10-04T10:05:49.314Z" : null;
+  var BUILD_NO = true ? 37 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();

@@ -1,11 +1,18 @@
 /**
  * 设置层：功能开关（复选框）+ 普通配置项（输入框）。
  *
- * 门禁规则（需求文档 §8.1 N1）：
+ * 门禁规则（需求文档 §8.1 N1；🟠 一档于 v0.24 按用户拍板放宽）：
  *   - 🟢 safe        默认可用
- *   - 🟠 trace       默认关闭，需用户勾选复选框
- *   - 🔴 irreversible 默认关闭 + 复选框 + **二次确认**（二次确认由 UI 层执行，
- *                    本模块只负责「默认值」与「是否被用户显式开启过」的判定）
+ *   - 🟠 trace       **按声明的 default 走**（用户从未动过这个开关时用什么值，
+ *                    由开关自己声明；用户显式关过一次之后，true 就再也不会顶回来）。
+ *                    这一类只是「会改变站点看到的返回内容」，不是不可逆操作，
+ *                    旧脚本里这两项本来就是默认开着的。
+ *   - 🔴 irreversible **永远默认关闭**，必须用户勾选 + **二次确认**
+ *                    （二次确认由 UI 层执行，本模块只负责「默认值」与「是否被用户
+ *                    显式开启过」的判定）
+ *
+ * ⚠️ 为什么要分这两类：判据是「后果能不能撤销」，不是「看起来危险不危险」。
+ * 一个从没打开过的 🔴 功能绝不允许自己开始工作；🟠 则允许作者按体验决定默认值。
  *
  * 本模块不持有任何凭证；API Key 之类是用户自己填的配置，按普通值存。
  */
@@ -60,15 +67,17 @@ function compareToggle(a: RegisteredToggle, b: RegisteredToggle): number {
 /**
  * 开关是否开启。
  * - 未注册 → 返回 false（宁可不生效，也不要意外打开危险功能）
- * - 已注册但用户从未动过 → 返回 def.default
- * - 🟠 / 🔴 即使 def.default 为 true 也强制 false（红线由代码兜底，不依赖作者自觉）
+ * - 已注册但用户从未动过 → 返回 def.default（🟢 / 🟠 都一样；🔴 例外，见下）
+ * - 🔴 irreversible 即使 def.default 为 true 也强制 false
+ *   （红线由代码兜底，不依赖作者自觉）
+ * - 用户显式写过的值永远压过 default —— 关掉过一次就再也不会被顶回来
  */
 export function isEnabled(siteId: string, toggleId: string): boolean {
   const def = toggleRegistry.get(composite(siteId, toggleId));
   if (def === undefined) return false;
   const stored = read<boolean | null>(storageKey(siteId, toggleId), null);
   if (stored === null) {
-    return def.risk === 'safe' ? def.default : false;
+    return def.risk === 'irreversible' ? false : def.default;
   }
   return stored;
 }

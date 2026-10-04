@@ -310,8 +310,27 @@ export function makeXhrCtor(Orig: XhrCtor): XhrCtor {
   return Wrapped as unknown as XhrCtor;
 }
 
+/**
+ * 该往哪个全局对象上装接管 —— **必须是页面 realm，不是沙箱 realm**。
+ *
+ * ⚠️ 这是 v0.24 修掉的真 bug：本脚本的 header 声明了 `@grant`（GM_setValue 等），
+ * Tampermonkey 因此把脚本放进**沙箱**执行，沙箱里的 `globalThis` 不是页面的 `window`。
+ * 把包装后的 `XMLHttpRequest` 写在沙箱上，页面自己的那份**一个字节都没动** ⇒
+ * 站点发请求用的还是原生 XHR ⇒ 响应永远不会被改写，用户在界面上看到的只是「开关打开了
+ * 但什么也没发生」，而且没有任何报错。
+ *
+ * 旧仓库（`C:\Project\szu_bkxk`）是 `@grant none`，直接跑在页面 realm，
+ * 所以它当年这样写是有效的 —— 迁移时漏掉了「本项目的运行环境已经变了」这一层。
+ */
+function pageRealm(): unknown {
+  // @types/tampermonkey 声明了 unsafeWindow；Node（档 1 测试）与 @grant none 下它是 undefined，
+  // 用 typeof 判断不会抛 ReferenceError。
+  if (typeof unsafeWindow !== 'undefined') return unsafeWindow;
+  return globalThis;
+}
+
 /** 装 XHR 接管；已装或环境里没有 XHR 返回 `false` */
-export function installXhr(target: unknown = globalThis): boolean {
+export function installXhr(target: unknown = pageRealm()): boolean {
   const t = target as Record<string, unknown>;
   if (t['__szuXhrInstalled'] === true) return false;
   const orig = t['XMLHttpRequest'];
@@ -332,7 +351,7 @@ type FetchInit = { __szuSkip?: boolean } & Record<string, unknown>;
 type FetchLike = (input: unknown, init?: FetchInit) => Promise<FetchResLike>;
 
 /** 装 fetch 接管（防御性：站点改用 fetch 时不必再改这里） */
-export function installFetch(target: unknown = globalThis): boolean {
+export function installFetch(target: unknown = pageRealm()): boolean {
   const t = target as Record<string, unknown>;
   if (t['__szuFetchInstalled'] === true) return false;
   const orig = t['fetch'];
@@ -367,8 +386,11 @@ export function installFetch(target: unknown = globalThis): boolean {
 /**
  * 装上两类接管。**无论开关是否打开都装** —— 开关在每次响应时单独判断，
  * 这样用户在面板里拨开关不需要刷新页面。
+ *
+ * 默认目标是**页面 realm**（`pageRealm()`，即 unsafeWindow），
+ * 传 `target` 只给档 1 测试用（塞一个假的全局对象）。
  */
-export function installHijack(target: unknown = globalThis): boolean {
+export function installHijack(target: unknown = pageRealm()): boolean {
   const xhr = installXhr(target);
   const fetch = installFetch(target);
   if (xhr || fetch) log.info(`响应接管已安装（XHR=${String(xhr)} fetch=${String(fetch)}）`);

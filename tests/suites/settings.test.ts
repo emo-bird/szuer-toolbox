@@ -53,9 +53,15 @@ describe('common/core/settings —— 风险门禁', () => {
     assertEqual(isEnabled('demo', 'ro'), true);
   });
 
-  it('🟠 trace / 🔴 irreversible 即使 default=true，从未设置过也是 false', () => {
+  it('🟠 trace 没动过时按声明的 default 走，但显式关过就不许被顶回来（v0.24 放宽）', () => {
     fresh();
-    assertEqual(isEnabled('demo', 'trace'), false, '留痕类默认必须关闭');
+    assertEqual(isEnabled('demo', 'trace'), true, '🟠 的 default=true 从 v0.24 起真的生效');
+    setEnabled('demo', 'trace', false);
+    assertEqual(isEnabled('demo', 'trace'), false, '用户关过一次，default 不许把它顶回来');
+  });
+
+  it('🔴 irreversible 即使 default=true，从未设置过也是 false', () => {
+    fresh();
     assertEqual(isEnabled('demo', 'irr'), false, '不可逆类默认必须关闭');
   });
 
