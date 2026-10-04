@@ -29,5 +29,6 @@ import './suites/bkxk-time.test.ts';
 import './suites/bkxk-courses.test.ts';
 import './suites/custom-courses.test.ts';
 import './suites/bkxk-hijack.test.ts';
+import './suites/bkxk-timetable.test.ts';
 
 await run();

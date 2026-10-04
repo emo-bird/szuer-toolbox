@@ -26,6 +26,7 @@ import { readSession, sessionSummary } from './session.ts';
 import { runCustomCarry, runMigration } from './legacy.ts';
 import { installHijack } from './hijack.ts';
 import { startListInjection } from './list.ts';
+import { startTimetableInjection } from './timetable.ts';
 import { BKXK_SETTINGS_TAB } from './tabs/settings.ts';
 
 const log = scoped('site/bkxk');
@@ -96,5 +97,9 @@ export const bkxkAdapter: SiteAdapter = {
     // 不是我们该动的地方），所以这里不重复判断。
     // 本轮点击**只入队**，不发请求 —— 执行引擎在批 4。
     startListInjection(ctx.panel);
+
+    // 课表页把自定义课程画进站点自己的列里（模块自判页面：只在 curriculum.do 生效）。
+    // 与「响应接管」相互独立：接管是站点响应进来时改数据，这里是页面渲染后补节点。
+    startTimetableInjection();
   },
 };

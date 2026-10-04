@@ -49,7 +49,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-04T08:50:08.220Z（构建号 34） */
+/* 构建信息：2026-10-04T08:54:23.318Z（构建号 35） */
 
 "use strict";
 (() => {
@@ -3561,6 +3561,314 @@ ${options.desc ?? ""}
     };
   }
 
+  // src/sites/bkxk/timetable-style.ts
+  var TT_STYLE_ID = "sztb-bkxk-tt-style";
+  var TT_CSS = `
+/* ---- 我们注入的自定义课程卡片（结构照站点 .cv-course-card-single） ---- */
+
+.sztb-bkxk-tt-card {
+  opacity: .92;
+}
+
+.sztb-bkxk-tt-card .sztb-bkxk-tt-tag {
+  display: inline-block;
+  font-size: 11px;
+  line-height: 1.3;
+  padding: 0 3px;
+  border-radius: 2px;
+  background: #047adc;
+  color: #fff;
+  margin-left: 3px;
+}
+
+/* 与站点已选课程冲突：整门课高亮（旧仓库口径） */
+.sztb-bkxk-tt-card.sztb-bkxk-tt-conflict {
+  outline: 2px solid #c0392b;
+  outline-offset: -2px;
+}
+
+.sztb-bkxk-tt-card .sztb-bkxk-tt-conflict-tip {
+  color: #c0392b;
+  font-size: 11px;
+}
+`;
+
+  // src/sites/bkxk/timetable-model.ts
+  var TT_LESSON_CLASS = "sztb-bkxk-tt-lesson";
+  var TT_CARD_CLASS = "sztb-bkxk-tt-card";
+  var TT_CONFLICT_CLASS = "sztb-bkxk-tt-conflict";
+  var TT_TAG_CLASS = "sztb-bkxk-tt-tag";
+  var TT_TIP_CLASS = "sztb-bkxk-tt-conflict-tip";
+  var TT_HOLDER_CLASS = "sztb-bkxk-tt-holder";
+  var TT_DONE_ATTR = "data-sztb-tt";
+  var SITE_TABLE_ID = "myCourseTable";
+  var SITE_TABLE_SELECTOR = ".cv-my-course";
+  var SITE_LEFT_SELECTOR = ".cv-left";
+  var SITE_LESSON_CLASS = "cv-lesson";
+  var SITE_LESSON_SELECTOR = `.${SITE_LESSON_CLASS}`;
+  var SITE_CARD_CLASS = "cv-course-card-single";
+  var SITE_CARD_SELECTOR = `.${SITE_CARD_CLASS}`;
+  var SITE_DAY_COLUMN_SELECTOR = ".cv-col.cv-right";
+  var SITE_HEAD_SELECTOR = ".cv-head";
+  var SITE_CARD_LINE_SELECTOR = "div div";
+  var SITE_TOP_LINE_CLASS = "cv-top-line";
+  var TT_TAG_TEXT = "自定义";
+  var TT_CONFLICT_TIP = "与已选课程冲突";
+  var DEFAULT_SLOT_H = 54;
+  var DEFAULT_TOP0 = 28;
+  var DAY_COLUMN_NAMES = ["周一", "周二", "周三", "周四", "周五", "周六", "周七"];
+  var WEEK_TEXT_RE = /\d+-\d+周/;
+  function classTokens(className) {
+    if (typeof className !== "string" || className === "") return [];
+    return className.split(/\s+/).filter((t) => t !== "");
+  }
+  function hasClassToken(className, token) {
+    return classTokens(className).includes(token);
+  }
+  function pickSlotH(heights) {
+    for (const raw of heights) {
+      const h = typeof raw === "number" ? raw : Number.parseInt(String(raw ?? ""), 10);
+      if (Number.isFinite(h) && h > 0) return h;
+    }
+    return DEFAULT_SLOT_H;
+  }
+  function slotTop(sectionFrom, slotH = DEFAULT_SLOT_H, top0 = DEFAULT_TOP0) {
+    return top0 + (sectionFrom - 1) * slotH;
+  }
+  function slotHeight(sectionFrom, sectionTo, slotH = DEFAULT_SLOT_H) {
+    return (sectionTo - sectionFrom + 1) * slotH + 1;
+  }
+  function dayColumnName(day) {
+    if (day === null || !Number.isInteger(day)) return "";
+    return DAY_COLUMN_NAMES[day - 1] ?? "";
+  }
+  function findDayColumnIndex(heads, day) {
+    const want = dayColumnName(day);
+    if (want === "") return -1;
+    for (let i = 0; i < heads.length; i += 1) {
+      if ((heads[i] ?? "").includes(want)) return i;
+    }
+    if (day !== null && day >= 1 && day <= heads.length) return day - 1;
+    return -1;
+  }
+  function readExistingCards(cards) {
+    const out = [];
+    for (const card of cards) {
+      if (hasClassToken(card.className, TT_CARD_CLASS)) continue;
+      let name = "";
+      let time = "";
+      for (const part of card.parts) {
+        const text = part.trim();
+        if (name === "" && text !== "") name = text;
+        if (time === "" && WEEK_TEXT_RE.test(text)) time = text;
+      }
+      if (time !== "") out.push({ courseName: name, timeText: time });
+    }
+    return out;
+  }
+  function conflictsWithCards(place, cards) {
+    for (const card of cards) {
+      if (placesConflict(place, card.timeText)) return true;
+    }
+    return false;
+  }
+  function segLabel(seg) {
+    return `${String(seg.weekFrom)}-${String(seg.weekTo)}周${String(seg.sectionFrom)}-${String(seg.sectionTo)}节`;
+  }
+  function planInjection(courses, cards, geo = { slotH: DEFAULT_SLOT_H, top0: DEFAULT_TOP0 }) {
+    const out = [];
+    for (const course of courses) {
+      if (!course.enabled) continue;
+      const conflict = conflictsWithCards(course.place, cards);
+      course.segs.forEach((seg, segIndex) => {
+        if (seg.day === null) return;
+        out.push({
+          courseId: course.id,
+          course,
+          seg,
+          segIndex,
+          conflict,
+          top: slotTop(seg.sectionFrom, geo.slotH, geo.top0),
+          height: slotHeight(seg.sectionFrom, seg.sectionTo, geo.slotH)
+        });
+      });
+    }
+    return out;
+  }
+
+  // src/sites/bkxk/timetable.ts
+  var log12 = scoped("site/bkxk/timetable");
+  var TT_PAGE_MARK = "curriculum.do";
+  var MAX_TRIES = 20;
+  var RETRY_MS = 500;
+  var RESCAN_DELAY_MS2 = 300;
+  function findTable(doc = document) {
+    return doc.getElementById(SITE_TABLE_ID) ?? doc.querySelector(SITE_TABLE_SELECTOR);
+  }
+  function measure(table) {
+    const lesson = table.querySelector(`${SITE_LEFT_SELECTOR} ${SITE_LESSON_SELECTOR}`);
+    if (lesson === null) return DEFAULT_SLOT_H;
+    const first = lesson.firstElementChild;
+    const raw = first instanceof HTMLElement ? first.style.height : "";
+    return pickSlotH([raw]);
+  }
+  function columnHeads(table) {
+    const out = [];
+    for (const col of table.querySelectorAll(SITE_DAY_COLUMN_SELECTOR)) {
+      out.push(col.querySelector(SITE_HEAD_SELECTOR)?.textContent?.trim() ?? "");
+    }
+    return out;
+  }
+  function readRawCards(table) {
+    const out = [];
+    for (const card of table.querySelectorAll(`.${TT_CARD_CLASS}, ${SITE_CARD_SELECTOR}`)) {
+      if (!(card instanceof HTMLElement)) continue;
+      const parts = [];
+      for (const line of card.querySelectorAll(SITE_CARD_LINE_SELECTOR)) {
+        parts.push(line.textContent ?? "");
+      }
+      out.push({ className: card.getAttribute("class"), parts });
+    }
+    return out;
+  }
+  function injectStyle2() {
+    if (document.getElementById(TT_STYLE_ID) !== null) return;
+    const style = el("style", { attrs: { id: TT_STYLE_ID } });
+    style.textContent = TT_CSS;
+    (document.head ?? document.documentElement).appendChild(style);
+  }
+  function buildCard(seg, course, conflict) {
+    const head = el("div", {}, course.name);
+    head.appendChild(el("span", { class: TT_TAG_CLASS, text: TT_TAG_TEXT }));
+    const lines = [head, el("div", { text: segLabel(seg) })];
+    if (seg.place !== "") lines.push(el("div", { text: seg.place }));
+    if (course.teacher !== "") lines.push(el("div", { text: course.teacher }));
+    if (conflict) lines.push(el("div", { class: TT_TIP_CLASS, text: TT_CONFLICT_TIP }));
+    const card = el(
+      "div",
+      {
+        class: `${SITE_CARD_CLASS} ${TT_CARD_CLASS}${conflict ? ` ${TT_CONFLICT_CLASS}` : ""}`,
+        attrs: { [TT_DONE_ATTR]: "1" }
+      },
+      ...lines
+    );
+    if (course.color !== "") card.style.background = course.color;
+    return card;
+  }
+  function injectPlan(table, plan) {
+    const heads = columnHeads(table);
+    const index = findDayColumnIndex(heads, plan.seg.day);
+    if (index < 0) {
+      log12.debug(`第 ${String(plan.seg.day)} 天没有对应列，跳过（列头=${heads.join(",")}）`);
+      return false;
+    }
+    const cols = table.querySelectorAll(SITE_DAY_COLUMN_SELECTOR);
+    const col = cols[index];
+    if (col === void 0) return false;
+    const wrap = el("div", {
+      class: `${SITE_LESSON_SELECTOR.slice(1)} ${SITE_TOP_LINE_CLASS} ${TT_LESSON_CLASS}`,
+      attrs: {
+        start: String(plan.seg.sectionFrom),
+        end: String(plan.seg.sectionTo),
+        [TT_DONE_ATTR]: "1"
+      },
+      style: { height: `${String(plan.height)}px`, top: `${String(plan.top)}px` }
+    });
+    wrap.appendChild(el("div", { class: TT_HOLDER_CLASS }, buildCard(plan.seg, plan.course, plan.conflict)));
+    col.appendChild(wrap);
+    return true;
+  }
+  function clearInjected(table) {
+    const scope = table ?? document;
+    const olds = scope.querySelectorAll(`.${TT_LESSON_CLASS}`);
+    for (const node of olds) node.remove();
+    return olds.length;
+  }
+  function render(table, writing) {
+    writing.busy = true;
+    try {
+      clearInjected(table);
+      const cards = readExistingCards(readRawCards(table));
+      const plans = planInjection(readEnabledCustomCourses(), cards, {
+        slotH: measure(table),
+        top0: DEFAULT_TOP0
+      });
+      let count = 0;
+      for (const plan of plans) {
+        if (injectPlan(table, plan)) count += 1;
+      }
+      log12.info(`课表注入自定义课程段 ${String(count)} 个（已选课程 ${String(cards.length)} 门）`);
+      return count;
+    } finally {
+      writing.busy = false;
+    }
+  }
+  function scan2(writing) {
+    const table = findTable();
+    if (table === null) return;
+    if (!isEnabled(SITE_ID, TOGGLE.TIMETABLE_SELF_DRAW)) {
+      const n = clearInjected(table);
+      if (n > 0) log12.info(`自绘课表开关已关闭：移除 ${String(n)} 个注入节点`);
+      return;
+    }
+    injectStyle2();
+    render(table, writing);
+  }
+  function startTimetableInjection() {
+    if (!location.pathname.includes(TT_PAGE_MARK)) {
+      log12.debug(`当前不是课表页（${location.pathname}），跳过自绘课表`);
+      return () => void 0;
+    }
+    const writing = { busy: false };
+    let observer = null;
+    let timer2 = null;
+    let retry = null;
+    let tries = 0;
+    const schedule2 = () => {
+      if (timer2 !== null) return;
+      timer2 = window.setTimeout(() => {
+        timer2 = null;
+        if (writing.busy) return;
+        if (!isEnabled(SITE_ID, TOGGLE.TIMETABLE_SELF_DRAW)) {
+          scan2(writing);
+          return;
+        }
+        scan2(writing);
+      }, RESCAN_DELAY_MS2);
+    };
+    const attempt = () => {
+      const table = findTable();
+      if (table === null) {
+        tries += 1;
+        if (tries < MAX_TRIES) {
+          retry = window.setTimeout(attempt, RETRY_MS);
+        } else {
+          log12.warn(`未找到课表容器 #${SITE_TABLE_ID}，放弃注入（站点的课表可能还没出数据）`);
+        }
+        return;
+      }
+      scan2(writing);
+      observer = new MutationObserver(schedule2);
+      observer.observe(table, { childList: true, subtree: true });
+      const courses = readEnabledCustomCourses();
+      log12.info(`自绘课表已就绪：自定义课程 ${String(courses.length)} 门（单节 ${String(measure(table))}px）`);
+    };
+    whenDomReady(attempt);
+    return () => {
+      observer?.disconnect();
+      observer = null;
+      if (timer2 !== null) {
+        window.clearTimeout(timer2);
+        timer2 = null;
+      }
+      if (retry !== null) {
+        window.clearTimeout(retry);
+        retry = null;
+      }
+      clearInjected(findTable());
+    };
+  }
+
   // src/sites/bkxk/tabs/settings.ts
   var BKXK_SETTINGS_TAB_ID = settingsTabId("bkxk");
   var BKXK_SETTINGS_TAB = {
@@ -3579,7 +3887,7 @@ ${options.desc ?? ""}
   };
 
   // src/sites/bkxk/index.ts
-  var log12 = scoped("site/bkxk");
+  var log13 = scoped("site/bkxk");
   var HOSTS2 = ["bkxk.szu.edu.cn"];
   var PAGES2 = ["*default/grablessons.do*", "*default/curriculum.do*"];
   var bkxkAdapter = {
@@ -3606,13 +3914,13 @@ ${options.desc ?? ""}
       registerBkxkSettings();
       const carried = runCustomCarry();
       if (lines.length > 0) {
-        log12.info(`已从旧版迁移 ${lines.length} 条内容，详情见日志页`);
+        log13.info(`已从旧版迁移 ${lines.length} 条内容，详情见日志页`);
       }
       if (carried.length > 0) {
-        log12.info(`自定义课程已搬到通用键（${carried.length} 条说明见日志页）`);
+        log13.info(`自定义课程已搬到通用键（${carried.length} 条说明见日志页）`);
       }
       if (lines.length === 0 && carried.length === 0) {
-        log12.debug(`无旧数据需要迁移（earlyInit @ ${ctx.url.pathname}）`);
+        log13.debug(`无旧数据需要迁移（earlyInit @ ${ctx.url.pathname}）`);
       }
     },
     /** 挂载期：DOM 已就绪，可以安全地把配置推给运行时并报登录态。 */
@@ -3620,12 +3928,13 @@ ${options.desc ?? ""}
       applyBkxkSettings();
       const session = readSession();
       if (!session.loggedIn) {
-        log12.warn("未读到有效登录态：学号或 token 缺失，功能接口会失败。请先在站内完成登录。");
+        log13.warn("未读到有效登录态：学号或 token 缺失，功能接口会失败。请先在站内完成登录。");
       } else {
-        log12.info(`站点已就绪：${sessionSummary(session)}`);
+        log13.info(`站点已就绪：${sessionSummary(session)}`);
       }
-      log12.info(`功能页=${String(ctx.isFeaturePage)}（设置标签页已就绪，其余标签页在批 4 接入）`);
+      log13.info(`功能页=${String(ctx.isFeaturePage)}（设置标签页已就绪，其余标签页在批 4 接入）`);
       startListInjection(ctx.panel);
+      startTimetableInjection();
     }
   };
 
@@ -3642,10 +3951,10 @@ ${options.desc ?? ""}
   }
 
   // src/main.ts
-  var log13 = scoped("main");
+  var log14 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-04T08:50:08.220Z" : null;
-  var BUILD_NO = true ? 34 : null;
+  var BUILD_TIME = true ? "2026-10-04T08:54:23.318Z" : null;
+  var BUILD_NO = true ? 35 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();
@@ -3685,7 +3994,7 @@ ${options.desc ?? ""}
       version: VERSION
     }));
     booted = { panel, adapterId: res.adapter?.id ?? null };
-    log13.info(
+    log14.info(
       `深大人工具箱 ${VERSION_LABEL} 已装载（host=${url.hostname}，分派=${res.reason}，站点=${res.adapter?.id ?? "无"}，功能页=${res.autoExpand ? "是" : "否"}）`
     );
     res.adapter?.init?.({
@@ -3705,10 +4014,10 @@ ${options.desc ?? ""}
         return;
       }
       if (!res.inject) {
-        log13.debug(`站内跳转后不再属于支持范围，保持现有悬浮窗`);
+        log14.debug(`站内跳转后不再属于支持范围，保持现有悬浮窗`);
         return;
       }
-      log13.info(`站内跳转导致重新分派：${bootedFor} → ${location.href}`);
+      log14.info(`站内跳转导致重新分派：${bootedFor} → ${location.href}`);
       bootedFor = location.href;
       boot(url, res);
     };
@@ -3735,9 +4044,9 @@ ${options.desc ?? ""}
     if (res.adapter?.earlyInit !== void 0) {
       try {
         res.adapter.earlyInit({ adapter: res.adapter, url });
-        log13.debug(`已执行启动期钩子：${res.adapter.id}`);
+        log14.debug(`已执行启动期钩子：${res.adapter.id}`);
       } catch (err) {
-        log13.error(`启动期钩子执行失败：${res.adapter.id}`, err);
+        log14.error(`启动期钩子执行失败：${res.adapter.id}`, err);
       }
     }
     whenDomReady(() => {
