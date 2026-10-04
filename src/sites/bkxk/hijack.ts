@@ -34,6 +34,7 @@ import {
 import type { TimeSegment } from './time.ts';
 import { readEnabledCustomCourses } from './custom.ts';
 import type { BkxkCustomCourse } from './custom.ts';
+import { pageRealm } from './page-realm.ts';
 
 const log = scoped('bkxk/hijack');
 
@@ -241,10 +242,39 @@ export function transformResponse(
   return JSON.stringify(res.json);
 }
 
-/** 运行期入口：读开关 + 读自定义课程，再改写 */
+/**
+ * 运行期入口：读开关 + 读自定义课程，再改写。
+ *
+ * 顺手记一笔「我们真的改写成功过课表响应」——`timetable.ts` 的晚到补偿靠它区分
+ * 「站点画出来的课表里已有我们的课」与「站点画完了、我们压根没赶上那条响应」。
+ */
 export function transformCurrentResponse(kind: HijackKind, text: string): string | null {
   if (!kindEnabled(kind)) return null;
-  return transformResponse(kind, text, readEnabledCustomCourses());
+  const next = transformResponse(kind, text, readEnabledCustomCourses());
+  if (next !== null && kind === 'timetable') rewroteTimetable = true;
+  return next;
+}
+
+// ------------------------------------------------------------ 改写痕迹
+
+/**
+ * 我们是否**真的**改写过一条课表响应。
+ *
+ * 为什么需要它：用户脚本由 Tampermonkey 异步投进页面，**可能晚于页面自己的首次请求**
+ * （v0.27 前实测：暖缓存下普通刷新时 `teachingTime.do` 在第 75ms 就发出去了，
+ * 而我们的包装装上时它早已在飞）。那种情况下站点画出来的课表里没有自定义课程，
+ * 而我们从界面上看不出区别 —— 只能靠这个标记判断，再重新触发一次站点的请求。
+ */
+let rewroteTimetable = false;
+
+/** 是否改写过课表响应（`timetable.ts` 的补偿判据之一） */
+export function didRewriteTimetable(): boolean {
+  return rewroteTimetable;
+}
+
+/** 复位（档 1 测试用；站点运行期不需要） */
+export function resetRewriteFlags(): void {
+  rewroteTimetable = false;
 }
 
 // ------------------------------------------------------------ 安装层（IO）
@@ -308,25 +338,6 @@ export function makeXhrCtor(Orig: XhrCtor): XhrCtor {
   }
   (Wrapped as unknown as { prototype: unknown }).prototype = (Orig as unknown as { prototype: unknown }).prototype;
   return Wrapped as unknown as XhrCtor;
-}
-
-/**
- * 该往哪个全局对象上装接管 —— **必须是页面 realm，不是沙箱 realm**。
- *
- * ⚠️ 这是 v0.24 修掉的真 bug：本脚本的 header 声明了 `@grant`（GM_setValue 等），
- * Tampermonkey 因此把脚本放进**沙箱**执行，沙箱里的 `globalThis` 不是页面的 `window`。
- * 把包装后的 `XMLHttpRequest` 写在沙箱上，页面自己的那份**一个字节都没动** ⇒
- * 站点发请求用的还是原生 XHR ⇒ 响应永远不会被改写，用户在界面上看到的只是「开关打开了
- * 但什么也没发生」，而且没有任何报错。
- *
- * 旧仓库（`C:\Project\szu_bkxk`）是 `@grant none`，直接跑在页面 realm，
- * 所以它当年这样写是有效的 —— 迁移时漏掉了「本项目的运行环境已经变了」这一层。
- */
-function pageRealm(): unknown {
-  // @types/tampermonkey 声明了 unsafeWindow；Node（档 1 测试）与 @grant none 下它是 undefined，
-  // 用 typeof 判断不会抛 ReferenceError。
-  if (typeof unsafeWindow !== 'undefined') return unsafeWindow;
-  return globalThis;
 }
 
 /** 装 XHR 接管；已装或环境里没有 XHR 返回 `false` */

@@ -16,6 +16,8 @@ import { scoped } from '../../common/core/log.ts';
 import { isEnabled } from '../../common/core/settings.ts';
 import { el, whenDomReady } from '../../common/utils/dom.ts';
 import { readEnabledCustomCourses } from './custom.ts';
+import { didRewriteTimetable, kindEnabled } from './hijack.ts';
+import { pageRecord } from './page-realm.ts';
 import { SITE_ID, TOGGLE } from './settings.ts';
 import { TT_CSS, TT_STYLE_ID } from './timetable-style.ts';
 import {
@@ -46,7 +48,9 @@ import {
   pickSlotH,
   planInjection,
   readExistingCards,
+  renderedCourseNames,
   segLabel,
+  shouldRefetchSite,
 } from './timetable-model.ts';
 import type { InjectionPlan, RawCard } from './timetable-model.ts';
 import type { BkxkCustomCourse } from './custom.ts';
@@ -61,6 +65,28 @@ const MAX_TRIES = 20;
 const RETRY_MS = 500;
 /** 站点重绘的去抖（旧仓库 300ms） */
 const RESCAN_DELAY_MS = 300;
+
+/**
+ * 站点自己那个「请求 `teachingTime.do` 并画课表」的全局模块名。
+ *
+ * 来源是**实测**而不是猜的：课表页加载的 `…/js/curriculum/curriculum.min.js`（6635 字符）
+ * 里，这个 IIFE 的参数就是它，且它的 `init()` 无参、内部自己从 `sessionStorage`
+ * 读 `studentInfo` / `sysParam` 再发请求：
+ *
+ * ```js
+ * var t = e.dataList, i = JSON.parse(sessionStorage.getItem("sysParam")),
+ *     r = { sectionList: {…}, teachingTime: t };
+ * CVMyCourseTable.init($("#myCourseTable"), r);
+ * ```
+ *
+ * （同一份文件里还有 `CVNoArranged` / `CVMyCourseTable` / `CVPublicCourse` 等，
+ * 名字都用 `window.X = window.X || {}` 挂出来。改版就失效 —— 失效时只落一条 warn，
+ * 功能退回自绘，不会打扰用户。）
+ */
+const SITE_TIMETABLE_MODULE = 'CVQueryCurriculum';
+
+/** 晚到补偿是否已经试过（只试一次，见 `shouldRefetchSite`） */
+const refetch = { tried: false };
 
 // ------------------------------------------------------------ 找容器 / 量尺寸
 
@@ -199,8 +225,9 @@ export function render(table: HTMLElement, gate: { busy: boolean }): number {
   gate.busy = true;
   try {
     clearInjected(table);
+    const courses = readEnabledCustomCourses();
     const cards = readExistingCards(readRawCards(table));
-    const plans = planInjection(readEnabledCustomCourses(), cards, {
+    const plans = planInjection(courses, cards, {
       slotH: measure(table),
       top0: DEFAULT_TOP0,
     });
@@ -208,11 +235,57 @@ export function render(table: HTMLElement, gate: { busy: boolean }): number {
     for (const plan of plans) {
       if (injectPlan(table, plan)) count += 1;
     }
-    log.info(`课表注入自定义课程段 ${String(count)} 个（已选课程 ${String(cards.length)} 门）`);
+    // 站点自己画过的那几门，自绘会跳过（否则同一门课出现两份卡片）
+    const rendered = renderedCourseNames(cards);
+    const skipped = courses.filter((c) => c.enabled && rendered.has(c.name.trim())).length;
+    log.info(
+      `课表注入自定义课程段 ${String(count)} 个（已选课程 ${String(cards.length)} 门${
+        skipped > 0 ? `；站点已自己画出 ${String(skipped)} 门，自绘跳过` : ''
+      }）`,
+    );
     return count;
   } finally {
     gate.busy = false;
   }
+}
+
+/**
+ * 晚到补偿：发现「站点把课表画完了、而我们没赶上那条响应」时，请站点**重新请求一次**。
+ *
+ * 为什么会有这种情况（真机实测）：用户脚本由 Tampermonkey 异步投进页面，暖缓存下普通刷新
+ * 时 `teachingTime.do` 在页面加载后第 **75ms** 就发出去了，我们的 XHR 包装那时还没装上
+ * ⇒ 站点拿到的还是原样响应，画出来的课表里没有自定义课程，且**界面上完全看不出异常**。
+ * 硬刷新 / 限速 3G 都因为页面变慢而恰好让我们先到，所以只有普通刷新会中招。
+ *
+ * 这里只做「让它再请求一次」这件小事 —— 请求会再次经过我们的包装（v0.24 已确认包装装在
+ * 页面 realm），这次就能改写成功。补偿只试一次，避免与站点互相重绘。
+ *
+ * 返回是否真的触发了（触发时调用方这一轮就别画了，表马上会被站点重画）。
+ */
+function refetchSiteTable(table: HTMLElement): boolean {
+  const ok = shouldRefetchSite({
+    hijackOn: kindEnabled('timetable'),
+    didRewrite: didRewriteTimetable(),
+    alreadyTried: refetch.tried,
+    enabledCourses: readEnabledCustomCourses().length,
+    siteCards: table.querySelectorAll(`.${SITE_CARD_CLASS}`).length,
+  });
+  if (!ok) return false;
+
+  // 先记上「试过了」：站点模块名若对不上，也不该每次 DOM 变动都再试一遍
+  refetch.tried = true;
+  const mod = pageRecord()[SITE_TIMETABLE_MODULE] as { init?: unknown } | undefined;
+  if (mod === undefined || typeof mod.init !== 'function') {
+    log.warn(
+      `站点没有 ${SITE_TIMETABLE_MODULE}.init（改版了？）—— 放弃晚到补偿，继续用自绘兜底`,
+    );
+    return false;
+  }
+  log.info(
+    `站点已自行画完课表、而我们没赶上那条响应 ⇒ 请站点重新请求一次 ${SITE_TIMETABLE_MODULE}.init()（这次会经过我们的包装）`,
+  );
+  (mod.init as () => void).call(mod);
+  return true;
 }
 
 /**
@@ -223,6 +296,8 @@ export function render(table: HTMLElement, gate: { busy: boolean }): number {
 function scan(gate: { busy: boolean }): number {
   const table = findTable();
   if (table === null) return 0;
+  // 晚到补偿要在自绘开关判断**之前**做：用户要的正是「关掉自绘、让站点自己画」那条路
+  if (refetchSiteTable(table)) return 0;
   if (!isEnabled(SITE_ID, TOGGLE.TIMETABLE_SELF_DRAW)) {
     const n = clearInjected(table);
     if (n > 0) log.info(`自绘课表开关已关闭：移除 ${String(n)} 个注入节点`);

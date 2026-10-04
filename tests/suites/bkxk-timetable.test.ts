@@ -31,7 +31,9 @@ import {
   pickSlotH,
   planInjection,
   readExistingCards,
+  renderedCourseNames,
   segLabel,
+  shouldRefetchSite,
   slotHeight,
   slotTop,
 } from '../../src/sites/bkxk/timetable-model.ts';
@@ -333,5 +335,69 @@ describe('bkxk/timetable —— 站点重绘后要不要重画（v0.26）', () =
   it('课名字层类名带了项目前缀（只作用于我们自己的节点）', () => {
     assert(TT_LINES_CLASS.startsWith('sztb-bkxk-'), '我们的类名带前缀');
     assert(!hasClassToken(SITE_CARD_CLASS, TT_LINES_CLASS), '与站点类名不撞');
+  });
+});
+
+// ------------------------------------------------------------ 晚到补偿与去重（v0.27）
+
+describe('bkxk/timetable —— 晚到补偿：什么时候该请站点重新请求一次（v0.27）', () => {
+  /** 满足全部五条前提的那一次判定 */
+  const ready = {
+    hijackOn: true,
+    didRewrite: false,
+    alreadyTried: false,
+    enabledCourses: 1,
+    siteCards: 14,
+  };
+
+  it('五条前提都满足 → 触发（站点画完了、我们没赶上、开关开着、有课、没试过）', () => {
+    assertEqual(shouldRefetchSite(ready), true, '这正是普通刷新下会中的那种情况');
+  });
+
+  it('接管开关关着 → 不触发（再请它请求一次也不会被改写）', () => {
+    assertEqual(shouldRefetchSite({ ...ready, hijackOn: false }), false);
+  });
+
+  it('我们改写过课表响应 → 不触发（站点画出来的那份已经含我们的课）', () => {
+    assertEqual(shouldRefetchSite({ ...ready, didRewrite: true }), false);
+  });
+
+  it('补偿试过了 → 不触发（否则与站点你来我往地互相重绘）', () => {
+    assertEqual(shouldRefetchSite({ ...ready, alreadyTried: true }), false);
+  });
+
+  it('没有启用的自定义课程 → 不触发（无事可做）', () => {
+    assertEqual(shouldRefetchSite({ ...ready, enabledCourses: 0 }), false);
+  });
+
+  it('表里还没有站点画的卡片 → 先不触发（请求很可能还在飞，我们并不晚）', () => {
+    assertEqual(shouldRefetchSite({ ...ready, siteCards: 0 }), false);
+  });
+});
+
+describe('bkxk/timetable —— 站点已画过就不自绘（v0.27 去重）', () => {
+  const mine = custom('c1', '我的课', '1-18周 星期一 1-2节 致理楼L1-707');
+
+  it('renderedCourseNames：取站点卡片里的课名，去空白、丢掉空名', () => {
+    const names = renderedCourseNames([card('  我的课 ', '1-18周'), card('', '3-4周'), card('  ', 'x')]);
+    assertDeepEqual([...names], ['我的课'], '只留下非空的课名');
+  });
+
+  it('接管成功时站点会自己画出我们的课 → 自绘跳过它，不出现两份卡片', () => {
+    const cards = [card('我的课', '1-18周 星期一 1-2节')];
+    const plans = planInjection([mine], cards);
+    assertEqual(plans.length, 0, '站点画过就不该再自绘一份');
+  });
+
+  it('站点没画过我们的课（接管失败）→ 照常自绘', () => {
+    const plans = planInjection([mine], [card('线性代数', '5-18周 星期二 9-10节')]);
+    assertEqual(plans.length, 1, '这时全靠自绘兜底');
+  });
+
+  it('只跳过站点画过的那门，别的课照画', () => {
+    const other = custom('c2', '另一门', '1-18周 星期三 3-4节 汇文楼H1-202');
+    const plans = planInjection([mine, other], [card('我的课', '1-18周 星期一 1-2节')]);
+    assertEqual(plans.length, 1);
+    assertEqual(plans[0]?.courseId, 'c2', '剩下的是没有被站点画过的那门');
   });
 });

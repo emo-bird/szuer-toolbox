@@ -213,10 +213,28 @@ export interface InjectionPlan {
 }
 
 /**
+ * 站点**已经画出来**的卡片里出现过的课名（`cards` 已被 `readExistingCards` 滤掉我们注入的）。
+ *
+ * 为什么要这个（v0.27）：响应接管成功时，站点自己就会把我们那些 `szuCustom` 行画进课表；
+ * 此时若自绘再画一遍，同一门课会出现**两份**卡片。两条路是互补的而不是叠加的 ——
+ * 「站点画了就不要自绘」。课名是用户自己填的，用它当判据足够；
+ * 万一名子与真实课程撞上，最坏也只是少画一份本来就在表上的同名课。
+ */
+export function renderedCourseNames(cards: readonly ExistingCard[]): ReadonlySet<string> {
+  const names = new Set<string>();
+  for (const card of cards) {
+    const name = card.courseName.trim();
+    if (name !== '') names.add(name);
+  }
+  return names;
+}
+
+/**
  * 算出这一轮要注入哪些节次。
  *
  * 口径：
  *   - 只处理**启用**的课程（调用方通常已滤过，这里再挡一次）；
+ *   - **站点已经画过的课不再自绘**（`renderedCourseNames`，v0.27 新增，防止两份卡片）；
  *   - `day === null` 的节次跳过（不知道星期几，无处可放）——**不猜**；
  *   - 冲突是**整门课**一个布尔（一处冲突则该课所有节次都高亮，旧仓库口径）；
  *   - 几何在纯逻辑里算完，DOM 层只管照着放。
@@ -227,8 +245,10 @@ export function planInjection(
   geo: { readonly slotH: number; readonly top0: number } = { slotH: DEFAULT_SLOT_H, top0: DEFAULT_TOP0 },
 ): readonly InjectionPlan[] {
   const out: InjectionPlan[] = [];
+  const rendered = renderedCourseNames(cards);
   for (const course of courses) {
     if (!course.enabled) continue;
+    if (rendered.has(course.name.trim())) continue;
     const conflict = conflictsWithCards(course.place, cards);
     course.segs.forEach((seg, segIndex) => {
       if (seg.day === null) return;
@@ -261,4 +281,38 @@ export function planInjection(
  */
 export function needsRescan(injected: number, enabledCourses: number): boolean {
   return enabledCourses > 0 && injected === 0;
+}
+
+/**
+ * 要不要请**站点自己**重新请求一次课表（v0.27「晚到补偿」）。
+ *
+ * 背景（真机实测）：用户脚本由 Tampermonkey 异步投进页面，暖缓存下普通刷新时
+ * `teachingTime.do` 在页面加载后第 **75ms** 就发出去了，而我们的 XHR 包装那时还没装上
+ * ⇒ 那条响应的 `dataList` 里没有我们的课，站点照原样画完，界面上看不出任何异常
+ * （硬刷新 / 限速 3G 都因为页面变慢而恰好让我们先到，所以只有普通刷新会中招）。
+ *
+ * 判据要同时满足五条，缺一不可：
+ *   - `hijackOn`：站点注入开关开着 —— 否则再请它请求一次也白搭；
+ *   - `!didRewrite`：我们**从没**改写过课表响应 —— 改写过说明站点画出来的是含我们课的
+ *     版本，此时再触发一次只会白闪一下；
+ *   - `!alreadyTried`：只补偿一次。触发后站点会重绘，观察器还会叫我们几次，
+ *     没有这条就会与站点你来我往地互相重绘；
+ *   - `enabledCourses > 0`：没有启用的自定义课程就无事可做；
+ *   - `siteCards > 0`：表里已经有站点画的卡片 —— 说明「站点已经画完了」这个前提成立。
+ *     表还是空的就再等等（此时很可能我们并不晚，请求还在飞）。
+ */
+export function shouldRefetchSite(input: {
+  readonly hijackOn: boolean;
+  readonly didRewrite: boolean;
+  readonly alreadyTried: boolean;
+  readonly enabledCourses: number;
+  readonly siteCards: number;
+}): boolean {
+  return (
+    input.hijackOn &&
+    !input.didRewrite &&
+    !input.alreadyTried &&
+    input.enabledCourses > 0 &&
+    input.siteCards > 0
+  );
 }

@@ -49,7 +49,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-04T10:47:28.379Z（构建号 40） */
+/* 构建信息：2026-10-04T12:21:26.240Z（构建号 41） */
 
 "use strict";
 (() => {
@@ -2667,6 +2667,17 @@ ${options.desc ?? ""}
     return n;
   }
 
+  // src/sites/bkxk/page-realm.ts
+  function pageRealm() {
+    if (typeof unsafeWindow !== "undefined") return unsafeWindow;
+    return globalThis;
+  }
+  function pageRecord() {
+    const realm = pageRealm();
+    if (realm === null || typeof realm !== "object" && typeof realm !== "function") return {};
+    return realm;
+  }
+
   // src/sites/bkxk/hijack.ts
   var log10 = scoped("bkxk/hijack");
   var CUSTOM_ID_PREFIX = "szu-custom-";
@@ -2804,7 +2815,13 @@ ${options.desc ?? ""}
   }
   function transformCurrentResponse(kind, text) {
     if (!kindEnabled(kind)) return null;
-    return transformResponse(kind, text, readEnabledCustomCourses());
+    const next = transformResponse(kind, text, readEnabledCustomCourses());
+    if (next !== null && kind === "timetable") rewroteTimetable = true;
+    return next;
+  }
+  var rewroteTimetable = false;
+  function didRewriteTimetable() {
+    return rewroteTimetable;
   }
   function rewriteXhr(xhr) {
     const kind = kindOf(typeof xhr.responseURL === "string" ? xhr.responseURL : null);
@@ -2841,10 +2858,6 @@ ${options.desc ?? ""}
     }
     Wrapped.prototype = Orig.prototype;
     return Wrapped;
-  }
-  function pageRealm() {
-    if (typeof unsafeWindow !== "undefined") return unsafeWindow;
-    return globalThis;
   }
   function installXhr(target = pageRealm()) {
     const t = target;
@@ -3767,10 +3780,20 @@ ${options.desc ?? ""}
   function segLabel(seg) {
     return `${String(seg.weekFrom)}-${String(seg.weekTo)}周${String(seg.sectionFrom)}-${String(seg.sectionTo)}节`;
   }
+  function renderedCourseNames(cards) {
+    const names = /* @__PURE__ */ new Set();
+    for (const card of cards) {
+      const name = card.courseName.trim();
+      if (name !== "") names.add(name);
+    }
+    return names;
+  }
   function planInjection(courses, cards, geo = { slotH: DEFAULT_SLOT_H, top0: DEFAULT_TOP0 }) {
     const out = [];
+    const rendered = renderedCourseNames(cards);
     for (const course of courses) {
       if (!course.enabled) continue;
+      if (rendered.has(course.name.trim())) continue;
       const conflict = conflictsWithCards(course.place, cards);
       course.segs.forEach((seg, segIndex) => {
         if (seg.day === null) return;
@@ -3790,6 +3813,9 @@ ${options.desc ?? ""}
   function needsRescan(injected, enabledCourses2) {
     return enabledCourses2 > 0 && injected === 0;
   }
+  function shouldRefetchSite(input) {
+    return input.hijackOn && !input.didRewrite && !input.alreadyTried && input.enabledCourses > 0 && input.siteCards > 0;
+  }
 
   // src/sites/bkxk/timetable.ts
   var log12 = scoped("site/bkxk/timetable");
@@ -3797,6 +3823,8 @@ ${options.desc ?? ""}
   var MAX_TRIES = 20;
   var RETRY_MS = 500;
   var RESCAN_DELAY_MS2 = 300;
+  var SITE_TIMETABLE_MODULE = "CVQueryCurriculum";
+  var refetch = { tried: false };
   function findTable(doc = document) {
     return doc.getElementById(SITE_TABLE_ID) ?? doc.querySelector(SITE_TABLE_SELECTOR);
   }
@@ -3889,8 +3917,9 @@ ${options.desc ?? ""}
     gate.busy = true;
     try {
       clearInjected(table);
+      const courses = readEnabledCustomCourses();
       const cards = readExistingCards(readRawCards(table));
-      const plans = planInjection(readEnabledCustomCourses(), cards, {
+      const plans = planInjection(courses, cards, {
         slotH: measure(table),
         top0: DEFAULT_TOP0
       });
@@ -3898,15 +3927,43 @@ ${options.desc ?? ""}
       for (const plan of plans) {
         if (injectPlan(table, plan)) count += 1;
       }
-      log12.info(`课表注入自定义课程段 ${String(count)} 个（已选课程 ${String(cards.length)} 门）`);
+      const rendered = renderedCourseNames(cards);
+      const skipped = courses.filter((c) => c.enabled && rendered.has(c.name.trim())).length;
+      log12.info(
+        `课表注入自定义课程段 ${String(count)} 个（已选课程 ${String(cards.length)} 门${skipped > 0 ? `；站点已自己画出 ${String(skipped)} 门，自绘跳过` : ""}）`
+      );
       return count;
     } finally {
       gate.busy = false;
     }
   }
+  function refetchSiteTable(table) {
+    const ok = shouldRefetchSite({
+      hijackOn: kindEnabled("timetable"),
+      didRewrite: didRewriteTimetable(),
+      alreadyTried: refetch.tried,
+      enabledCourses: readEnabledCustomCourses().length,
+      siteCards: table.querySelectorAll(`.${SITE_CARD_CLASS}`).length
+    });
+    if (!ok) return false;
+    refetch.tried = true;
+    const mod = pageRecord()[SITE_TIMETABLE_MODULE];
+    if (mod === void 0 || typeof mod.init !== "function") {
+      log12.warn(
+        `站点没有 ${SITE_TIMETABLE_MODULE}.init（改版了？）—— 放弃晚到补偿，继续用自绘兜底`
+      );
+      return false;
+    }
+    log12.info(
+      `站点已自行画完课表、而我们没赶上那条响应 ⇒ 请站点重新请求一次 ${SITE_TIMETABLE_MODULE}.init()（这次会经过我们的包装）`
+    );
+    mod.init.call(mod);
+    return true;
+  }
   function scan2(gate) {
     const table = findTable();
     if (table === null) return 0;
+    if (refetchSiteTable(table)) return 0;
     if (!isEnabled(SITE_ID, TOGGLE.TIMETABLE_SELF_DRAW)) {
       const n = clearInjected(table);
       if (n > 0) log12.info(`自绘课表开关已关闭：移除 ${String(n)} 个注入节点`);
@@ -4749,8 +4806,8 @@ ${options.desc ?? ""}
   // src/main.ts
   var log15 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-04T10:47:28.379Z" : null;
-  var BUILD_NO = true ? 40 : null;
+  var BUILD_TIME = true ? "2026-10-04T12:21:26.240Z" : null;
+  var BUILD_NO = true ? 41 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();

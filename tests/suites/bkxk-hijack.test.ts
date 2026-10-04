@@ -27,12 +27,15 @@ import {
   augmentTimetable,
   conflictDescFor,
   customConflicts,
+  didRewriteTimetable,
   installFetch,
   installHijack,
   installXhr,
   kindEnabled,
   kindOf,
+  resetRewriteFlags,
   rewriteXhr,
+  transformCurrentResponse,
   transformResponse,
 } from '../../src/sites/bkxk/hijack.ts';
 import type { XhrLike } from '../../src/sites/bkxk/hijack.ts';
@@ -437,6 +440,54 @@ describe('bkxk/hijack —— transformResponse 的早退条件', () => {
     const parsed = JSON.parse(out!) as RawBody;
     assertEqual(parsed.dataList.length, TIMETABLE.dataList.length + 1);
     assertEqual((parsed.dataList.at(-1) as Record<string, unknown>)['szuCustom'], true);
+  });
+});
+
+// ------------------------------------------------- 改写痕迹（晚到补偿的判据，v0.27）
+
+describe('bkxk/hijack —— 是否真的改写过课表响应（v0.27 晚到补偿用）', () => {
+  const mine = item('c1', '我的课', '5-18周星期一9-10节 自定义教室');
+  const ok = textOf({ code: '1', totalCount: 14, dataList: TIMETABLE.dataList });
+
+  it('初始是「没改写」——课表补偿据此判断站点画的是不是含我们课的版本', () => {
+    boot();
+    resetRewriteFlags();
+    assertEqual(didRewriteTimetable(), false, '刚启动时当然没改写过');
+  });
+
+  it('跑一次真正改写的课表响应 → 记上；复位后回到 false', () => {
+    boot();
+    setEnabled(SITE_ID, TOGGLE.HIJACK_TIMETABLE, true);
+    write(CUSTOM_COURSES_KEY, [mine]);
+    resetRewriteFlags();
+    const out = transformCurrentResponse('timetable', ok);
+    assert(out !== null, '这次应当改写成功');
+    assertEqual(didRewriteTimetable(), true, '成功改写要记上一笔');
+    resetRewriteFlags();
+    assertEqual(didRewriteTimetable(), false, '复位后回到 false（档 1 之间互不污染）');
+  });
+
+  it('响应原样放行（没有可改的行）→ 不算「接管到了」', () => {
+    boot();
+    setEnabled(SITE_ID, TOGGLE.HIJACK_TIMETABLE, true);
+    // 没有星期几 ⇒ 这条自定义课程无处可放，课表响应一处都改不了
+    write(CUSTOM_COURSES_KEY, [item('c9', '没写星期的课', '1-18周 3-4节 另一个地方')]);
+    resetRewriteFlags();
+    assertEqual(transformCurrentResponse('timetable', ok), null, '一处都改不了就原样放行');
+    assertEqual(didRewriteTimetable(), false, '不算接管到 —— 否则补偿会被白白跳过');
+  });
+
+  it('列表响应改写不会把它记成课表改写（两个 kind 分开记）', () => {
+    boot();
+    setEnabled(SITE_ID, TOGGLE.HIJACK_LIST_CONFLICT, true);
+    write(CUSTOM_COURSES_KEY, [mine]);
+    resetRewriteFlags();
+    assertEqual(
+      transformCurrentResponse('list', textOf({ code: '1', dataList: PROGRAM.dataList })) !== null,
+      true,
+      '列表这次确实改到了',
+    );
+    assertEqual(didRewriteTimetable(), false, '但课表那边仍然算「没赶上」');
   });
 });
 
