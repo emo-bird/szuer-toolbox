@@ -25,5 +25,6 @@ import './suites/bkxk-session.test.ts';
 import './suites/bkxk-migrate.test.ts';
 import './suites/bkxk-settings.test.ts';
 import './suites/bkxk-list.test.ts';
+import './suites/bkxk-time.test.ts';
 
 await run();
