@@ -363,6 +363,22 @@ function mountCustomTab(root: HTMLElement, ctx: TabContext): void {
     }
   }
 
+  /**
+   * 把面板滚到表单标题那一行（课程名输入框紧随其下）。
+   *
+   * ⚠️ 这里**不能**写 `root.scrollTop = 0` —— `root` 是标签页自己的容器，
+   * 真正滚动的是外层的 `.sztb-body`（`overflow: auto`）。对 root 设 scrollTop
+   * 是个静默的空操作：不报错，也不起作用（v0.25 修的就是这个）。
+   * `scrollIntoView` 会自己去找最近的可滚动祖先，所以不必知道面板内部结构，
+   * 将来面板结构改了这里也不用跟着改。
+   *
+   * 用默认的即时滚动（不用 smooth）：面板小、滚动距离短，动画反而像卡了一下，
+   * 也避免用户连点两次时两段动画互相打断。
+   */
+  function scrollToForm(): void {
+    formTitle.scrollIntoView({ block: 'start' });
+  }
+
   // ── 表单：提交 / 重置 / 回填 ──────────────────────────────────────────
   function resetForm(): void {
     editingId = null;
@@ -438,7 +454,7 @@ function mountCustomTab(root: HTMLElement, ctx: TabContext): void {
     formTitle.textContent = `修改：${course.name}`;
     submitBtn.textContent = '保存修改';
     cancelBtn.hidden = false;
-    root.scrollTop = 0;
+    scrollToForm();
   }
 
   // ── 列表 ──────────────────────────────────────────────────────────────
@@ -561,6 +577,8 @@ function mountCustomTab(root: HTMLElement, ctx: TabContext): void {
 
   cancelBtn.addEventListener('click', () => {
     resetForm();
+    // 取消后表单调回「添加」并缩回一段，视图也回到表单开头，免得停在下半屏
+    scrollToForm();
   });
 
   clearBtn.addEventListener('click', () => {

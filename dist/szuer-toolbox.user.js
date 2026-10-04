@@ -49,7 +49,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-04T10:12:05.813Z（构建号 38） */
+/* 构建信息：2026-10-04T10:15:44.329Z（构建号 39） */
 
 "use strict";
 (() => {
@@ -4445,6 +4445,9 @@ ${options.desc ?? ""}
         segBox.appendChild(buildSegRow(i, d));
       }
     }
+    function scrollToForm() {
+      formTitle.scrollIntoView({ block: "start" });
+    }
     function resetForm() {
       editingId = null;
       nameInput.value = "";
@@ -4510,7 +4513,7 @@ ${options.desc ?? ""}
       formTitle.textContent = `修改：${course.name}`;
       submitBtn.textContent = "保存修改";
       cancelBtn.hidden = false;
-      root.scrollTop = 0;
+      scrollToForm();
     }
     function buildItem(course) {
       const item = el("div", { class: "sztb-bkxk-item", data: course.enabled ? {} : { off: "true" } });
@@ -4614,6 +4617,7 @@ ${options.desc ?? ""}
     });
     cancelBtn.addEventListener("click", () => {
       resetForm();
+      scrollToForm();
     });
     clearBtn.addEventListener("click", () => {
       if (!guard()) return;
@@ -4722,8 +4726,8 @@ ${options.desc ?? ""}
   // src/main.ts
   var log15 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-04T10:12:05.813Z" : null;
-  var BUILD_NO = true ? 38 : null;
+  var BUILD_TIME = true ? "2026-10-04T10:15:44.329Z" : null;
+  var BUILD_NO = true ? 39 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();
