@@ -152,13 +152,40 @@ describe('sites 真实注册表 —— 与 userscript header 的 @match 对齐',
     }
   });
 
-  it('UOOC 适配器暂不声明功能页 ⇒ 任意页面都算功能页（阶段 3 需收紧）', () => {
+  it('UOOC 适配器只声明学习页与测验页 ⇒ 其余页面注入但不自动展开', () => {
     bootReal();
     const uooc = allAdapters().find((a) => a.id === 'uooc');
     assert(uooc !== undefined, 'uooc 适配器应已注册');
-    assertEqual(uooc!.pages.length, 0, '阶段 3 接入功能后应改为精确路径通配');
-    const r = resolve(new URL('https://www.uooc.net.cn/league/union'));
-    assertEqual(r.autoExpand, true);
+    // 阶段 3 起 UOOC 有真功能了，`pages` 必须收紧，否则全站自动弹面板
+    assertEqual(uooc!.pages.length, 3, 'UOOC 的功能页清单应已收紧为 3 条路径通配');
+
+    // 功能页：注入 + 自动展开
+    for (const href of [
+      'https://www.uooc.net.cn/home/learn/index',
+      // 旧版学习页把「第几章/第几节」放在 hash 里，必须照样命中
+      'https://www.uooc.net.cn/home/learn/index#/2042342697/1/1/1629578551',
+      'https://www.uooc.net.cn/home/learn/new/2042342697',
+      'https://www.uooc.net.cn/exam/983779533',
+      'https://www.uooc.net.cn/exam/paper?cid=2042342697&tid=736720049',
+      'https://www.uooc.net.cn/exam/faceRecognition/type/record?t=1',
+    ]) {
+      const r = resolve(new URL(href));
+      assertEqual(r.inject, true, `${href} 应注入`);
+      assertEqual(r.autoExpand, true, `${href} 应自动展开`);
+      assertEqual(r.reason, 'adapter', `${href} 的 reason 应为 adapter`);
+    }
+
+    // 非功能页：仍然注入（悬浮球），但不自动展开
+    for (const href of [
+      'https://www.uooc.net.cn/league/union',
+      'https://www.uooc.net.cn/home/course/list',
+      'https://www.uooc.net.cn/home/member/user',
+    ]) {
+      const r = resolve(new URL(href));
+      assertEqual(r.inject, true, `${href} 仍应注入（悬浮球）`);
+      assertEqual(r.autoExpand, false, `${href} 不应自动展开`);
+      assertEqual(r.reason, 'adapter', `${href} 的 reason 应为 adapter`);
+    }
   });
 });
 

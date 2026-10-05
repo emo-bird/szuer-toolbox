@@ -1,24 +1,20 @@
 /**
  * UOOC 优课联盟适配器。
  *
- * ⚠️ 当前是**空壳**（阶段 2 提前建立，见 docs/开发文档.md §7）：
- *   - 只声明站点域与页面变体，**还没有任何功能标签页**；
- *   - 悬浮窗里此时只显示 4 个公共标签页（设置 / 日志 / 登录态 / 状态）。
+ * 阶段 3 进行中。**当前批次只做视频助手（U1 二倍速 / U2 静音）**；
+ * 测验答案与 LLM 答题那几项见 docs/需求文档.md §2.1 的 U6–U9 与
+ * docs/UOOC-AI方案-逆向笔记.md。
  *
- * 为什么先建空壳而不是把它塞进 `SUPPORTED_ROOT_DOMAINS`：
- *   UOOC 是**明确已知的单一站点**（域固定、功能明确、有规划），
- *   用适配器表达才语义正确；根域白名单是给「深大域下站点多到列不全」用的兜底。
- *   走适配器还让日志与状态页显示「站点=uooc」而不是「站点=无」。
+ * 历史：本目录在阶段 2 曾长期是空壳，只声明站点域以便日志/状态页能显示「站点=uooc」。
  *
- * 阶段 3 要在此目录下补：
- *   - `legacy/` —— 旧版学习页（`/home/learn/index`，有参考脚本，先做）
- *   - `modern/` —— 新版学习页（`/home/learn/new/{数字}`，零参考，需逆向）
- *   - 标签页：倍速 / 禁音 / 连播 / 失焦续播、测验答案导出与加载、LLM 答题……
- *   详见 docs/需求文档.md §11 与 docs/开发文档.md 的 UOOC 待验证清单 V1–V12。
+ * 分支说明：AI 答题方案在 `feat/uooc-ai`；旧方案（测验答案采集与回填）在
+ * `feat/uooc-phase3`，其逆向结论留在那边的 `docs/UOOC-制作方案.md`，不在本分支。
  */
 
 import { scoped } from '../../common/core/log.ts';
 import type { SiteAdapter } from '../types.ts';
+import { SITE_ID, UOOC_TOGGLES, applyUoocSettings, registerUoocSettings } from './settings.ts';
+import { startVideoAssist } from './video.ts';
 
 const log = scoped('site/uooc');
 
@@ -33,21 +29,52 @@ const HOSTS: readonly string[] = ['uooc.net.cn', '*.uooc.net.cn'];
 /**
  * 功能页。
  *
- * 留空 `[]` 表示「该站点任意页面都算功能页」——这**正好符合用户 Q-AB 的定稿**：
- *   「uooc 网站及其子域名也算在悬浮球显示范围内，然后能够触发实际功能的页面再自动展开」。
+ * 语义：命中 → 悬浮窗自动展开。这里是**精确路径**，不要图省事留空
+ * （留空 = 任意页面都自动展开，连门户首页都会弹面板）。
  *
- * ⚠️ 阶段 3 接入具体功能后，这里要改成精确的路径通配（旧版 `/home/learn/index*`、
- * 新版 `/home/learn/new/*`、测验页等），否则任意页面都会 `autoExpand=true`。
+ * 三处对应实测到的真实 URL：
+ *   - `/home/learn/index#/2042342697/57920722/...` —— 旧版学习页（hash 路由）
+ *   - `/home/learn/new/2042342697#/...`           —— 新版学习页
+ *   - `/exam/983779533`                           —— 新版答题页（tid 直接写在路径里）
+ * 旧版的答题界面是**嵌在旧版学习页里的 iframe**（`/exam/paper?cid=&tid=`），
+ * 所以它由第一条规则覆盖，不需要单独列。
  */
-const PAGES: readonly string[] = [];
+const PAGES: readonly string[] = ['/home/learn/index*', '/home/learn/new/*', '/exam/*'];
+
+/** 视频助手只在学习页有意义（测验页没有播放器，挂着只是白跑观察器） */
+const LEARN_PATH_PREFIX = '/home/learn/';
 
 export const uoocAdapter: SiteAdapter = {
-  id: 'uooc',
+  id: SITE_ID,
   name: 'UOOC 优课联盟',
   hosts: HOSTS,
   pages: PAGES,
   tabs: [],
+  toggles: UOOC_TOGGLES,
+
+  /**
+   * 启动期：此刻 `document.body` 还不存在，**只注册设置、不碰 DOM**。
+   *
+   * 必须在设置面板渲染之前注册完，否则用户打开设置页会看不到本站的开关。
+   */
+  earlyInit() {
+    registerUoocSettings();
+  },
+
+  /** 挂载期：DOM 已就绪，可以开始接管播放器。 */
   init(ctx) {
-    log.info(`UOOC 适配器已启用：isFeaturePage=${String(ctx.isFeaturePage)}（功能待阶段 3 接入）`);
+    applyUoocSettings();
+
+    const onLearnPage = location.pathname.startsWith(LEARN_PATH_PREFIX);
+    if (onLearnPage) {
+      startVideoAssist();
+    } else {
+      log.debug(`非学习页（${location.pathname}），本次不启动视频助手`);
+    }
+
+    log.info(
+      `UOOC 适配器已启用：isFeaturePage=${String(ctx.isFeaturePage)}，` +
+        `路径=${location.pathname}，视频助手=${onLearnPage ? '已挂载' : '未挂载'}`,
+    );
   },
 };
