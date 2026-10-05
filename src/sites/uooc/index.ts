@@ -13,6 +13,7 @@
 
 import { scoped } from '../../common/core/log.ts';
 import type { SiteAdapter } from '../types.ts';
+import { startQuizWatcher } from './quiz.ts';
 import { SITE_ID, UOOC_TOGGLES, applyUoocSettings, registerUoocSettings } from './settings.ts';
 import { UOOC_SETTINGS_TAB } from './tabs/settings.ts';
 import { startVideoAssist } from './video.ts';
@@ -45,6 +46,9 @@ const PAGES: readonly string[] = ['/home/learn/index*', '/home/learn/new/*', '/e
 /** 视频助手只在学习页有意义（测验页没有播放器，挂着只是白跑观察器） */
 const LEARN_PATH_PREFIX = '/home/learn/';
 
+/** 测验页：读它只为了「交卷成功后通知学习页 + 关掉这个标签页」 */
+const EXAM_PATH_PREFIX = '/exam';
+
 export const uoocAdapter: SiteAdapter = {
   id: SITE_ID,
   name: 'UOOC 优课联盟',
@@ -62,20 +66,26 @@ export const uoocAdapter: SiteAdapter = {
     registerUoocSettings();
   },
 
-  /** 挂载期：DOM 已就绪，可以开始接管播放器。 */
+  /** 挂载期：DOM 已就绪，可以开始接管播放器 / 盯着交卷。 */
   init(ctx) {
     applyUoocSettings();
 
     const onLearnPage = location.pathname.startsWith(LEARN_PATH_PREFIX);
+    const onExamPage = location.pathname.startsWith(EXAM_PATH_PREFIX);
     if (onLearnPage) {
       startVideoAssist();
+    } else if (onExamPage) {
+      // 测验页通常是连播点测验时**新开的标签页**。这里只做一件事：
+      // 认准交卷成功 → 写跨标签页标记 → 把自己关掉。
+      startQuizWatcher();
     } else {
       log.debug(`非学习页（${location.pathname}），本次不启动视频助手`);
     }
 
     log.info(
       `UOOC 适配器已启用：isFeaturePage=${String(ctx.isFeaturePage)}，` +
-        `路径=${location.pathname}，视频助手=${onLearnPage ? '已挂载' : '未挂载'}`,
+        `路径=${location.pathname}，视频助手=${onLearnPage ? '已挂载' : '未挂载'}，` +
+        `测验观察=${onExamPage ? '已挂载' : '未挂载'}`,
     );
   },
 };

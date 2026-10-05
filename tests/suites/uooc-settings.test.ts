@@ -15,6 +15,7 @@ import type { ValueDef } from '../../src/common/core/settings.ts';
 import {
   PROGRESS_DEFAULT,
   SITE_ID,
+  SWITCH_WAIT_DEFAULT,
   TOGGLE,
   UOOC_TOGGLES,
   VALUE,
@@ -104,6 +105,17 @@ describe('uooc 配置项声明', () => {
       assertEqual(d.kind, 'number', `${id} 应当是数字输入框`);
       assert(typeof d.validate === 'function', `${id} 必须带校验`);
     }
+  });
+
+  it('切前等待是 number，且允许 0（立刻切）', () => {
+    boot();
+    const d = def(VALUE.SWITCH_WAIT);
+    assertEqual(d.kind, 'number');
+    assertEqual(d.default, SWITCH_WAIT_DEFAULT);
+    assertEqual(d.validate?.('0') ?? null, null, '0 应当放行 —— 用户明确要「立刻切」时的合法值');
+    assertEqual(d.validate?.(SWITCH_WAIT_DEFAULT) ?? null, null, '默认值本身必须合法');
+    assert(d.validate?.('-1') !== null, '负数应当被拒');
+    assert(d.validate?.('121') !== null, '超过上限应当被拒');
   });
 
   it('默认值本身能通过校验', () => {

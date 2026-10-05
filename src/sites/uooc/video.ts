@@ -51,6 +51,8 @@ import {
   stepForward,
 } from './catalog.ts';
 import { noteVideo, stopProgress } from './progress.ts';
+import { clearQuizDone, onQuizDone, readQuizDone, writeQuizOpening } from './quiz-signal.ts';
+import type { QuizSignal } from './quiz-signal.ts';
 import { SITE_ID, TOGGLE, VALUE } from './settings.ts';
 
 const log = scoped('uooc/video');
@@ -224,6 +226,16 @@ let landedAt = 0;
  */
 let lastClickedId = '';
 
+/**
+ * 「本节是空的」连续重试次数。
+ *
+ * 刚点进一个节时资源列表可能还在路上，所以先重试几次再判定为空 ——
+ * 但重试完就一定要往后跳，不能原地打转（`catalog.blankSeenFor` 配合）。
+ */
+let blankRetries = 0;
+const BLANK_RETRY_MS = 1500;
+const BLANK_MAX_RETRIES = 3;
+
 const ADVANCE_HOP_DELAY_MS = 700;
 const ADVANCE_MAX_HOPS = 40;
 const ADVANCE_SESSION_MS = 45000;
@@ -273,6 +285,7 @@ function runAdvanceHop(): void {
       // ⚠️ 先 stopAdvance() 再写这三个时间戳 —— `stopAdvance()` 会把 `landedAt`
       // 清零，反过来的话 `breakStall()` 永远看不到落点，兜底就失效了。
       lastClickedId = step.id;
+      blankRetries = 0;
       stopAdvance();
       advancingUntil = Date.now() + ADVANCE_LOCK_MS;
       pendingAutoplayAt = Date.now();
@@ -285,20 +298,34 @@ function runAdvanceHop(): void {
       }
       return;
 
-    case 'quiz':
+    case 'quiz': {
+      const cid = parseHash()?.cid ?? '';
       log.info(
-        `连播停在测验 ${step.taskId}${step.title === '' ? '' : `（${step.title}）`}：` +
-          '没做过的测验不会自动跳过，做完会自动继续',
+        `连播：已替你打开测验 ${step.taskId}${step.title === '' ? '' : `（${step.title}）`}，` +
+          '交卷后会自动继续',
       );
       if (isEnabled(SITE_ID, TOGGLE.AUTO_SOLVE)) {
-        log.warn('「自动作答」只做了开关，功能还没实现，先停在这一题');
+        log.warn('「自动作答」只做了开关，功能还没实现，这一题还得你自己做');
       }
-      setWaitingQuiz({
-        cid: parseHash()?.cid ?? '',
-        resourceId: step.resourceId,
-        taskId: step.taskId,
-      });
+      const opening = { cid, taskId: step.taskId, resourceId: step.resourceId };
+      setWaitingQuiz(opening);
+      // 给测验页留一张「这个标签页是连播开的」通行证 ——
+      // 它据此才敢在交卷后把自己关掉（用户自己开的卷子页不该被我们关）。
+      writeQuizOpening(opening);
+      siteToast('连播：已为你打开测验，交卷后自动继续', 'info', 6000);
       stopAdvance();
+      return;
+    }
+
+    case 'blank':
+      blankRetries += 1;
+      if (blankRetries <= BLANK_MAX_RETRIES) {
+        log.info(`本节还没看到任何资源（第 ${blankRetries} 次），稍后再看`);
+        scheduleAdvanceHop(BLANK_RETRY_MS);
+        return;
+      }
+      blankRetries = 0;
+      scheduleSwitch('本节没有可看的内容');
       return;
 
     case 'rendered':
@@ -464,6 +491,31 @@ function restoreWaitingQuiz(): void {
  * 右上角提醒 + 等 N 秒再切下一项。**只在开关开着时才动它** ——
  * 用户把自动连播关了，这个标记就该原地留着，下次开开关才继续。
  */
+/**
+ * 确认「等的那道测验做完了」，然后走统一出口（提醒 + 等 N 秒 + 切下一项）。
+ *
+ * @param signal 跨标签页标记；`null` = 是「看目录」这条兜底路进来的
+ */
+function handleQuizDone(signal: QuizSignal | null): void {
+  if (waitingQuiz === null) return;
+  if (signal !== null) {
+    if (signal.taskId !== '' && waitingQuiz.taskId !== '' && signal.taskId !== waitingQuiz.taskId) return;
+    if (signal.cid !== '' && waitingQuiz.cid !== '' && signal.cid !== waitingQuiz.cid) return;
+  }
+  log.info(`测验 ${waitingQuiz.taskId || '(未知)'} 已完成`);
+  setWaitingQuiz(null);
+  clearQuizDone();
+  scheduleSwitch('测验已完成');
+}
+
+/**
+ * 兜底：每次扫描时看一眼**学习页目录**上那一项标没标完成。
+ *
+ * 主路是测验页写下的跨标签页标记（`onQuizDone`），但有些场景标记到不了：
+ * 比如测验是**同一个标签页**内跳过去的，`storage` 事件不跨同一个标签页自身。
+ * 那时只能靠目录。**只在开关开着时才动它** —— 用户把自动连播关了，
+ * 这个标记就该原地留着，下次开开关才继续。
+ */
 function checkWaitingQuiz(): void {
   if (waitingQuiz === null) return;
   if (!isEnabled(SITE_ID, TOGGLE.AUTO_NEXT)) return;
@@ -472,9 +524,7 @@ function checkWaitingQuiz(): void {
   if (el === null) return;
   if (!isResourceFinished(el)) return;
 
-  log.info(`测验 ${waitingQuiz.taskId || '(未知)'} 已完成`);
-  setWaitingQuiz(null);
-  scheduleSwitch('测验已完成');
+  handleQuizDone(null);
 }
 
 /**
@@ -706,6 +756,23 @@ export function startVideoAssist(): () => void {
   window.addEventListener('hashchange', onRoute);
   window.addEventListener('popstate', onRoute);
 
+  // 测验页交卷了 → 学习页接着播。三条来路都接上：
+  //   1. `storage` 事件（测验页写了标记，浏览器原生广播给同源其它标签页）；
+  //   2. 切回本标签页时主动读一次（事件可能已经错过，或测验是同标签页跳走的）；
+  //   3. `scan()` 里 `checkWaitingQuiz()` 看学习页目录（最后兜底）。
+  const offQuizDone = onQuizDone((signal) => {
+    if (!isEnabled(SITE_ID, TOGGLE.AUTO_NEXT)) return;
+    handleQuizDone(signal);
+  });
+  const onVisible = (): void => {
+    if (document.visibilityState !== 'visible') return;
+    if (!isEnabled(SITE_ID, TOGGLE.AUTO_NEXT)) return;
+    const mark = readQuizDone();
+    if (mark !== null) handleQuizDone(mark);
+  };
+  document.addEventListener('visibilitychange', onVisible);
+  window.addEventListener('focus', onVisible);
+
   log.debug('视频助手已挂载（二倍速 / 静音 / 防失焦）');
 
   // 手测用的诊断口。连播是「点一下 → 等页面反应 → 再看一眼」的状态机，出问题时
@@ -738,5 +805,8 @@ export function startVideoAssist(): () => void {
     for (const type of MEDIA_EVENTS) document.removeEventListener(type, onMediaEvent, true);
     window.removeEventListener('hashchange', onRoute);
     window.removeEventListener('popstate', onRoute);
+    offQuizDone();
+    document.removeEventListener('visibilitychange', onVisible);
+    window.removeEventListener('focus', onVisible);
   };
 }

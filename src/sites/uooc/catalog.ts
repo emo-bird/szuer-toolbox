@@ -300,8 +300,10 @@ function findSectionIndex(sections: readonly HTMLElement[], sectionId: string): 
 export type AdvanceStep =
   /** 已经点开了下一个资源（视频 / 文档 / 附件）；调用方按 `type` 决定怎么收尾 */
   | { kind: 'clicked'; id: string; title: string; type: number }
-  /** 撞上一道**没做过**的测验，停下来（要不要作答由调用方决定） */
+  /** 撞上一道**没做过**的测验；已经替用户点开了，等交卷信号 */
   | { kind: 'quiz'; resourceId: string; taskId: string; title: string }
+  /** 本节一个资源项都没有（空节，或还没渲染）——调用方决定等多久再往后跳 */
+  | { kind: 'blank' }
   /** 点了节 / 章标题，页面正在按需渲染；调用方稍后再走一步 */
   | { kind: 'rendered' }
   /** 本章资源已经走到头（要不要跨章由调用方按「连播范围」决定） */
@@ -326,6 +328,14 @@ export function labelOf(type: number): string {
  * `rendered` → 再走一步 → 还是找不到 → 再点，会空转到跳步上限。
  */
 let expandTriedFor = '';
+
+/**
+ * 已经报过「本节是空白」的那一节。
+ *
+ * 报过一次之后就不再报，直接往下跳 —— 否则「空 → 提醒 → 等 N 秒 → 再走一步 →
+ * 还是空」会原地打转，永远出不去。和 `expandTriedFor` 同一套路。
+ */
+let blankSeenFor = '';
 
 /**
  * 相对**当前 hash 所处的位置**往后走一步。
@@ -394,6 +404,8 @@ export function stepForward(afterId = ''): AdvanceStep {
   let pool = all;
   const owned = all.filter((el) => el.closest(SECTION_ITEM_SELECTOR) === secLi);
   if (owned.length > 0) pool = owned;
+  // 这一节有资源 → 忘掉「它是空白」的旧记录
+  if (pool.length > 0) blankSeenFor = '';
 
   let cursor = -1;
   // 起点的选择：**优先用「上一次真的点开的那个资源」**。
@@ -425,9 +437,11 @@ export function stepForward(afterId = ''): AdvanceStep {
       continue;
     }
 
-    // 没做过的测验不点进去（自动作答还没实现，点进去等于把人推进卷子），
-    // 交给调用方停下来等 —— 做完由 [`checkWaitingQuiz`] 接着往下走
+    // 测验：**替用户点开**（新版会开一个新标签页，见 `quiz.ts`）。
+    // 点完之后这里就收工，等「交卷了」的跨标签页信号回来再由调用方接着走。
     if (src.type === RESOURCE_TYPE_QUIZ) {
+      log.info(`连播：打开测验 ${src.id}${src.title === '' ? '' : `（${src.title}）`}`);
+      clickElement(el);
       return { kind: 'quiz', resourceId: src.id, taskId: src.taskId, title: src.title };
     }
 
@@ -437,6 +451,17 @@ export function stepForward(afterId = ''): AdvanceStep {
     );
     clickElement(el);
     return { kind: 'clicked', id: src.id, title: src.title, type: src.type };
+  }
+
+  // 本节一个资源项都没渲染出来 —— 可能真是空节，也可能只是还没渲染完。
+  // 第一次先报 blank 让调用方等一下再来；同一节第二次还是空，就往下跳
+  // （调用方那时已经提醒过并等过 N 秒，`blankSeenFor` 也记上了，会直接落到这里）。
+  if (pool.length === 0) {
+    const sectionKey = `${parts.chapterId}/${parts.sectionId}`;
+    if (blankSeenFor !== sectionKey) {
+      blankSeenFor = sectionKey;
+      return { kind: 'blank' };
+    }
   }
 
   // 本节走到头 → 点下一个节（它的资源要等站点渲染出来，所以只走一步）
