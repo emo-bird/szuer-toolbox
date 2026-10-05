@@ -14,6 +14,7 @@
 import { scoped } from '../../common/core/log.ts';
 import type { SiteAdapter } from '../types.ts';
 import { SITE_ID, UOOC_TOGGLES, applyUoocSettings, registerUoocSettings } from './settings.ts';
+import { UOOC_SETTINGS_TAB } from './tabs/settings.ts';
 import { startVideoAssist } from './video.ts';
 
 const log = scoped('site/uooc');
@@ -49,7 +50,7 @@ export const uoocAdapter: SiteAdapter = {
   name: 'UOOC 优课联盟',
   hosts: HOSTS,
   pages: PAGES,
-  tabs: [],
+  tabs: [UOOC_SETTINGS_TAB],
   toggles: UOOC_TOGGLES,
 
   /**

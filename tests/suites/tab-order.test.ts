@@ -105,7 +105,7 @@ describe('common/ui/tab-order —— 分组与排序', () => {
   });
 
   it('只有公共标签页时**不插**分隔线 —— 否则非支持站点开头会多一条孤零零的竖线', () => {
-    // 这正是 UOOC 现状：只有空壳适配器、零个站点标签页
+    // 对应「未命中适配器的 szu.edu.cn 页面」这类场景：只有公共标签页，没有站点标签页
     assertDeepEqual(dividerIndexes([common('settings', 10), common('log', 90)]), []);
     assertDeepEqual(ids([common('settings', 10), common('log', 90)]), [
       'common:settings',
@@ -151,7 +151,7 @@ function bkxkPage(): TabOrderInput[] {
   return [common('settings', 10), site('bkxk', 'bkxk:settings', 200), common('log', 90)];
 }
 
-/** 一个纯公共页面（UOOC 现状：适配器是空壳、零个站点标签页） */
+/** 一个纯公共页面（命中 szu.edu.cn 根域白名单但没命中适配器 → 零个站点标签页） */
 function commonOnlyPage(): TabOrderInput[] {
   return [common('settings', 10), common('log', 90)];
 }
@@ -230,7 +230,7 @@ describe('common/ui/tab-order —— 记忆键与恢复', () => {
     );
   });
 
-  it('纯公共页面（UOOC 现状：零个站点标签页）⇒ 只读公共键', () => {
+  it('纯公共页面（零个站点标签页）⇒ 只读公共键', () => {
     assertEqual(
       resolveActiveTab(commonOnlyPage(), store({ 'ui:active-tab:common': 'common:log' })),
       'common:log',

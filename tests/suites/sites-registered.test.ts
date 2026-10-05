@@ -212,9 +212,14 @@ describe('sites 真实注册表 —— 站点设置标签页归属', () => {
     assertEqual(hasOwnSettingsTab('bkxk'), true, '公共设置页据此跳过 bkxk');
   });
 
-  it('UOOC 目前没有自己的设置标签页 ⇒ 设置仍由公共页渲染', () => {
+  it('UOOC 已注册自己的设置标签页 ⇒ 公共页跳过它，只留一行指引', () => {
     bootReal();
-    assertEqual(hasOwnSettingsTab('uooc'), false);
+    const uooc = allAdapters().find((a) => a.id === 'uooc');
+    assert(uooc !== undefined, 'uooc 适配器应已注册');
+    const tab = uooc!.tabs.find((t) => t.id === settingsTabId('uooc'));
+    assert(tab !== undefined, 'uooc 应注册 id 为 uooc:settings 的标签页');
+    assertEqual(tab!.title, '设置');
+    assertEqual(hasOwnSettingsTab('uooc'), true, '公共设置页据此跳过 uooc');
   });
 
   it('未注册的站点一律报 false（不能因为查不到适配器就抛错）', () => {

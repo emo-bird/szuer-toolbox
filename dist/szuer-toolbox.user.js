@@ -49,7 +49,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-05T12:54:29.859Z（构建号 48） */
+/* 构建信息：2026-10-05T13:39:57.795Z（构建号 49） */
 
 "use strict";
 (() => {
@@ -1921,6 +1921,8 @@ ${options.desc ?? ""}
     RATE_2X: "rate-2x",
     /** 🟢 静音播放（U2） */
     MUTE: "mute",
+    /** 🟢 防失焦暂停（U4） */
+    KEEP_PLAYING: "keep-playing",
     /** 🟠 自动连播（U3） */
     AUTO_NEXT: "auto-next"
   };
@@ -1932,7 +1934,7 @@ ${options.desc ?? ""}
     {
       id: TOGGLE.RATE_2X,
       label: "二倍速播放",
-      desc: "把播放器速率设为 2 倍。视频换集或播放器重建后会自动重新应用。倍速只改变本地播放速度，**不改变站点上报的观看进度**（进度仍按真实播放位置上报）。",
+      desc: "把播放器速率锁在 2 倍：视频换集、播放器重建、以及你在站点播放器菜单里改成别的速度，都会被立刻扳回 2 倍（即站点自己的倍速菜单在开启期间失效）。倍速只改变本地播放速度，**不改变站点上报的观看进度**（进度仍按真实播放位置上报）。",
       risk: "safe",
       default: true,
       group: "视频"
@@ -1940,7 +1942,15 @@ ${options.desc ?? ""}
     {
       id: TOGGLE.MUTE,
       label: "静音播放",
-      desc: "把播放器设为静音。视频换集或播放器重建后会自动重新应用。",
+      desc: "把播放器锁在静音：视频换集、播放器重建、以及你在站点播放器上取消静音，都会被立刻扳回静音（即站点自己的音量控制在开启期间失效）。",
+      risk: "safe",
+      default: true,
+      group: "视频"
+    },
+    {
+      id: TOGGLE.KEEP_PLAYING,
+      label: "防止失焦暂停",
+      desc: "**本开关开启期间你无法手动暂停视频** —— 一旦暂停就会被立刻恢复播放（含切到别的窗口、切标签页导致的暂停）。这是刻意的：想暂停请先关掉这个开关。只在本站点，不会影响其它站点。",
       risk: "safe",
       default: true,
       group: "视频"
@@ -1975,17 +1985,58 @@ ${options.desc ?? ""}
     }
   }
 
+  // src/sites/uooc/tabs/settings.ts
+  var UOOC_SETTINGS_TAB_ID = settingsTabId("uooc");
+  var UOOC_SETTINGS_TAB = {
+    id: UOOC_SETTINGS_TAB_ID,
+    title: "设置",
+    order: 200,
+    mount(root, ctx) {
+      root.appendChild(
+        el("div", {
+          class: "sztb-note",
+          text: "🟢 随时可开关；🟠 / 🔴 需要你显式勾选才生效，开启前请先读一遍说明。本页参数改动即刻生效，不用刷新页面。"
+        })
+      );
+      root.appendChild(renderSiteSettings("uooc", null, ctx));
+    }
+  };
+
   // src/sites/uooc/video.ts
   var log6 = scoped("uooc/video");
   var VIDEO_ID = "player_html5_api";
   var TARGET_RATE = 2;
   var RESCAN_DEBOUNCE_MS = 200;
   var FRAME_FALLBACK_MIN_GAP_MS = 2e3;
+  var FIGHT_WINDOW_MS = 5e3;
+  var FIGHT_MAX = 8;
+  var FIGHT_COOLDOWN_MS = 5e3;
   var applied = /* @__PURE__ */ new WeakMap();
   var announced = /* @__PURE__ */ new WeakSet();
+  var hasStarted = /* @__PURE__ */ new WeakSet();
   function asVideo(el2) {
     return el2 !== null && el2.tagName === "VIDEO" ? el2 : null;
   }
+  function makeGuard(label) {
+    const stamps = [];
+    let mutedUntil = 0;
+    return () => {
+      const now = Date.now();
+      if (now < mutedUntil) return false;
+      while (stamps.length > 0 && now - stamps[0] > FIGHT_WINDOW_MS) stamps.shift();
+      if (stamps.length >= FIGHT_MAX) {
+        mutedUntil = now + FIGHT_COOLDOWN_MS;
+        stamps.length = 0;
+        log6.warn(`${label}在 ${FIGHT_WINDOW_MS / 1e3} 秒内被反复改回，暂停纠正 ${FIGHT_COOLDOWN_MS / 1e3} 秒`);
+        return false;
+      }
+      stamps.push(now);
+      return true;
+    };
+  }
+  var rateGuard = makeGuard("二倍速");
+  var muteGuard = makeGuard("静音");
+  var playGuard = makeGuard("防失焦");
   var lastFrameScanAt = 0;
   var cachedFrameVideo = null;
   function findVideo() {
@@ -2017,6 +2068,7 @@ ${options.desc ?? ""}
   }
   function apply(v) {
     const state = applied.get(v) ?? { rate: false, mute: false };
+    if (!v.paused && !v.ended) hasStarted.add(v);
     const wantRate = isEnabled(SITE_ID, TOGGLE.RATE_2X);
     if (wantRate) {
       if (v.playbackRate !== TARGET_RATE) {
@@ -2044,10 +2096,53 @@ ${options.desc ?? ""}
     if (!announced.has(v)) {
       announced.add(v);
       log6.info(
-        `播放器助手已就绪：二倍速=${wantRate ? "开" : "关"}，静音=${wantMute ? "开" : "关"}（当前速率 ${v.playbackRate}x）`
+        `播放器助手已就绪：二倍速=${wantRate ? "开" : "关"}，静音=${wantMute ? "开" : "关"}，防失焦=${isEnabled(SITE_ID, TOGGLE.KEEP_PLAYING) ? "开" : "关"}（当前速率 ${v.playbackRate}x）`
       );
     }
   }
+  function restorePlayback(v) {
+    if (!isEnabled(SITE_ID, TOGGLE.KEEP_PLAYING)) return;
+    if (!hasStarted.has(v)) return;
+    if (v.ended) return;
+    if (v.readyState < 2) return;
+    if (!playGuard()) return;
+    const p = v.play();
+    if (p !== void 0 && typeof p.catch === "function") {
+      p.catch((err) => {
+        log6.debug(`抢播被拒绝：${err instanceof Error ? err.message : String(err)}`);
+      });
+    }
+  }
+  function onMediaEvent(ev) {
+    const v = asVideo(ev.target);
+    if (v === null) return;
+    switch (ev.type) {
+      case "play":
+      case "playing":
+        hasStarted.add(v);
+        apply(v);
+        return;
+      case "pause":
+        restorePlayback(v);
+        return;
+      case "ratechange":
+        if (isEnabled(SITE_ID, TOGGLE.RATE_2X) && v.playbackRate !== TARGET_RATE && rateGuard()) {
+          try {
+            v.playbackRate = TARGET_RATE;
+          } catch {
+          }
+        }
+        return;
+      case "volumechange":
+        if (isEnabled(SITE_ID, TOGGLE.MUTE) && !v.muted && muteGuard()) {
+          v.muted = true;
+        }
+        return;
+      default:
+        return;
+    }
+  }
+  var MEDIA_EVENTS = ["play", "playing", "pause", "ratechange", "volumechange"];
   function startVideoAssist() {
     let timer3 = null;
     let stopped = false;
@@ -2066,13 +2161,17 @@ ${options.desc ?? ""}
     scan2();
     const observer = new MutationObserver(schedule2);
     observer.observe(document.documentElement, { childList: true, subtree: true });
-    const onMediaEvent = () => scan2();
+    const onLoad = () => scan2();
+    document.addEventListener("loadstart", onLoad, true);
+    document.addEventListener("loadedmetadata", onLoad, true);
     document.addEventListener("play", onMediaEvent, true);
-    document.addEventListener("loadstart", onMediaEvent, true);
-    document.addEventListener("loadedmetadata", onMediaEvent, true);
+    document.addEventListener("playing", onMediaEvent, true);
+    document.addEventListener("pause", onMediaEvent, true);
+    document.addEventListener("ratechange", onMediaEvent, true);
+    document.addEventListener("volumechange", onMediaEvent, true);
     window.addEventListener("hashchange", schedule2);
     window.addEventListener("popstate", schedule2);
-    log6.debug("视频助手已挂载（二倍速 / 静音）");
+    log6.debug("视频助手已挂载（二倍速 / 静音 / 防失焦）");
     return () => {
       stopped = true;
       if (timer3 !== null) {
@@ -2080,9 +2179,9 @@ ${options.desc ?? ""}
         timer3 = null;
       }
       observer.disconnect();
-      document.removeEventListener("play", onMediaEvent, true);
-      document.removeEventListener("loadstart", onMediaEvent, true);
-      document.removeEventListener("loadedmetadata", onMediaEvent, true);
+      document.removeEventListener("loadstart", onLoad, true);
+      document.removeEventListener("loadedmetadata", onLoad, true);
+      for (const type of MEDIA_EVENTS) document.removeEventListener(type, onMediaEvent, true);
       window.removeEventListener("hashchange", schedule2);
       window.removeEventListener("popstate", schedule2);
     };
@@ -2098,7 +2197,7 @@ ${options.desc ?? ""}
     name: "UOOC 优课联盟",
     hosts: HOSTS,
     pages: PAGES,
-    tabs: [],
+    tabs: [UOOC_SETTINGS_TAB],
     toggles: UOOC_TOGGLES,
     /**
      * 启动期：此刻 `document.body` 还不存在，**只注册设置、不碰 DOM**。
@@ -6819,8 +6918,8 @@ ${text}
   // src/main.ts
   var log22 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-05T12:54:29.859Z" : null;
-  var BUILD_NO = true ? 48 : null;
+  var BUILD_TIME = true ? "2026-10-05T13:39:57.795Z" : null;
+  var BUILD_NO = true ? 49 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();

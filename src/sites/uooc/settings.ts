@@ -27,6 +27,8 @@ export const TOGGLE = {
   RATE_2X: 'rate-2x',
   /** 🟢 静音播放（U2） */
   MUTE: 'mute',
+  /** 🟢 防失焦暂停（U4） */
+  KEEP_PLAYING: 'keep-playing',
   /** 🟠 自动连播（U3） */
   AUTO_NEXT: 'auto-next',
 } as const;
@@ -42,7 +44,8 @@ export const UOOC_TOGGLES: readonly SiteToggleDef[] = [
     id: TOGGLE.RATE_2X,
     label: '二倍速播放',
     desc:
-      '把播放器速率设为 2 倍。视频换集或播放器重建后会自动重新应用。' +
+      '把播放器速率锁在 2 倍：视频换集、播放器重建、以及你在站点播放器菜单里改成别的速度，' +
+      '都会被立刻扳回 2 倍（即站点自己的倍速菜单在开启期间失效）。' +
       '倍速只改变本地播放速度，**不改变站点上报的观看进度**（进度仍按真实播放位置上报）。',
     risk: 'safe',
     default: true,
@@ -51,7 +54,20 @@ export const UOOC_TOGGLES: readonly SiteToggleDef[] = [
   {
     id: TOGGLE.MUTE,
     label: '静音播放',
-    desc: '把播放器设为静音。视频换集或播放器重建后会自动重新应用。',
+    desc:
+      '把播放器锁在静音：视频换集、播放器重建、以及你在站点播放器上取消静音，' +
+      '都会被立刻扳回静音（即站点自己的音量控制在开启期间失效）。',
+    risk: 'safe',
+    default: true,
+    group: '视频',
+  },
+  {
+    id: TOGGLE.KEEP_PLAYING,
+    label: '防止失焦暂停',
+    desc:
+      '**本开关开启期间你无法手动暂停视频** —— 一旦暂停就会被立刻恢复播放（含切到别的窗口、' +
+      '切标签页导致的暂停）。这是刻意的：想暂停请先关掉这个开关。' +
+      '只在本站点，不会影响其它站点。',
     risk: 'safe',
     default: true,
     group: '视频',
