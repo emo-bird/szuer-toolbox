@@ -36,8 +36,9 @@
  */
 
 import { scoped } from '../../common/core/log.ts';
-import { isEnabled } from '../../common/core/settings.ts';
-import { SITE_ID, TOGGLE } from './settings.ts';
+import { getValue, isEnabled } from '../../common/core/settings.ts';
+import { RESOURCE_TYPE_VIDEO, navigateToResource, parseHash, readCatalog } from './catalog.ts';
+import { SITE_ID, TOGGLE, VALUE } from './settings.ts';
 
 const log = scoped('uooc/video');
 
@@ -58,6 +59,12 @@ const FIGHT_WINDOW_MS = 5000;
 const FIGHT_MAX = 8;
 /** 超出次数后停手多久（毫秒） */
 const FIGHT_COOLDOWN_MS = 5000;
+
+/** 连播一次只做一次：这个时间内不再响应第二次「播完了」 */
+const ADVANCE_LOCK_MS = 8000;
+
+/** 连播跳过去之后，等待新片源 ready 的最长时间；超时就放弃这次自动播放 */
+const PENDING_AUTOPLAY_TIMEOUT_MS = 15000;
 
 /** 我们对每个 video 元素做过什么 —— 关开关时只回退**我们改过**的那部分 */
 interface Applied {
@@ -158,6 +165,126 @@ function findVideo(): HTMLVideoElement | null {
   return null;
 }
 
+// ---------------------------------------------------------------- U3 自动连播
+
+/** 正在跳转中（防止 `ended` 抖动或站点重复触发导致连点） */
+let advancingUntil = 0;
+
+/** 跳转后等待新片源 ready 的时间戳；0 = 没有待播放 */
+let pendingAutoplayAt = 0;
+
+/**
+ * 当前 hash 指向的资源 id（两个版本都是 `#/{cid}/{chapterId}/{sectionId}/{resourceId}/section`）
+ */
+function currentResourceId(): string | null {
+  return parseHash()?.resourceId ?? null;
+}
+
+/**
+ * 找下一个该播的资源。
+ *
+ * 顺序 = 目录的拍平顺序（章 → 节 → 资源），只挑**视频**（`type === 10`）。
+ * 「连播范围」取的是站点设置里的 `nextScope`：
+ *   - `chapter`（默认，止于本章）：只在当前章内向后找，到章尾就停；
+ *   - `all`（跨章继续）：继续往后找，章与章之间自动跨过去。
+ */
+function pickNextResource(): { id: string; title: string; chapterId: string; sectionId: string } | null {
+  const catalog = readCatalog();
+  if (catalog === null) return null;
+
+  const currentId = currentResourceId();
+  if (currentId === null) {
+    log.warn('hash 里读不到当前资源 id（不是学习页的资源路由？），不连播');
+    return null;
+  }
+
+  const index = catalog.findIndex((r) => r.id === currentId);
+  if (index < 0) {
+    log.warn(`当前资源 ${currentId} 不在目录里（可能是目录尚未加载完），不连播`);
+    return null;
+  }
+
+  const current = catalog[index];
+  const sameChapterOnly = getValue<string>(SITE_ID, VALUE.NEXT_SCOPE) !== 'all';
+
+  for (let i = index + 1; i < catalog.length; i++) {
+    const item = catalog[i];
+    if (item === undefined) continue;
+    if (item.type !== RESOURCE_TYPE_VIDEO) continue;
+    if (sameChapterOnly && current !== undefined && item.chapterId !== current.chapterId) {
+      log.info('已到本章最后一个视频（连播范围＝止于本章），停在这里');
+      return null;
+    }
+    return item;
+  }
+
+  log.info('目录里后面没有视频了，连播结束');
+  return null;
+}
+
+/**
+ * U3：一个视频播完 → 跳到下一个视频。
+ *
+ * 跳转前后的两个动作：
+ *   - 跳之前把 `pendingAutoplayAt` 置上，让**新片源**能被自动播放（否则会被
+ *     `hasStarted` 门槛挡住，用户得自己点一下）；
+ *   - 跳之后由 `apply()` 在每次扫描时尝试兑现它，超时即作废。
+ */
+function advanceToNext(): void {
+  if (!isEnabled(SITE_ID, TOGGLE.AUTO_NEXT)) return;
+  if (Date.now() < advancingUntil) return;
+
+  const next = pickNextResource();
+  if (next === null) return;
+
+  advancingUntil = Date.now() + ADVANCE_LOCK_MS;
+  pendingAutoplayAt = Date.now();
+
+  const parts = parseHash();
+  const how = navigateToResource(
+    {
+      id: next.id,
+      type: RESOURCE_TYPE_VIDEO,
+      title: next.title,
+      chapterId: next.chapterId,
+      sectionId: next.sectionId,
+    },
+    parts?.cid ?? '',
+  );
+
+  if (how === 'none') {
+    pendingAutoplayAt = 0;
+    log.warn(`找不到下一个视频 ${next.id} 的入口，连播中断`);
+    return;
+  }
+
+  log.info(`连播：下一个视频 ${next.id}${next.title === '' ? '' : `（${next.title}）`}，跳转方式＝${how}`);
+}
+
+/** 跳转后兑现「自动播放下一集」；超时或还没 ready 时什么都不做 */
+function tryPendingAutoplay(v: HTMLVideoElement): void {
+  if (pendingAutoplayAt === 0) return;
+  if (Date.now() - pendingAutoplayAt > PENDING_AUTOPLAY_TIMEOUT_MS) {
+    pendingAutoplayAt = 0;
+    return;
+  }
+  if (v.ended || (!v.paused && !v.ended)) {
+    // 站点自己已经开始播了，不需要我们插手
+    pendingAutoplayAt = 0;
+    return;
+  }
+  if (v.readyState < 2) return;
+
+  pendingAutoplayAt = 0;
+  hasStarted.add(v);
+  const p = v.play();
+  if (p !== undefined && typeof p.catch === 'function') {
+    p.catch((err: unknown) => {
+      log.warn(`连播后自动播放被拒绝：${err instanceof Error ? err.message : String(err)}`);
+    });
+  }
+}
+
 /** 按当前设置应用一次；开关关掉时只回退我们改过的部分 */
 function apply(v: HTMLVideoElement): void {
   const state: Applied = applied.get(v) ?? { rate: false, mute: false };
@@ -193,11 +320,15 @@ function apply(v: HTMLVideoElement): void {
 
   applied.set(v, state);
 
+  // 连播跳过来之后，第一件事是把新片源播起来
+  tryPendingAutoplay(v);
+
   if (!announced.has(v)) {
     announced.add(v);
     log.info(
       `播放器助手已就绪：二倍速=${wantRate ? '开' : '关'}，静音=${wantMute ? '开' : '关'}，` +
-        `防失焦=${isEnabled(SITE_ID, TOGGLE.KEEP_PLAYING) ? '开' : '关'}（当前速率 ${v.playbackRate}x）`,
+        `防失焦=${isEnabled(SITE_ID, TOGGLE.KEEP_PLAYING) ? '开' : '关'}，` +
+        `自动连播=${isEnabled(SITE_ID, TOGGLE.AUTO_NEXT) ? '开' : '关'}（当前速率 ${v.playbackRate}x）`,
     );
   }
 }
@@ -240,6 +371,10 @@ function onMediaEvent(ev: Event): void {
       restorePlayback(v);
       return;
 
+    case 'ended':
+      advanceToNext();
+      return;
+
     case 'ratechange':
       // 站点（或用户）把速率改了 → 立刻锁回去
       if (isEnabled(SITE_ID, TOGGLE.RATE_2X) && v.playbackRate !== TARGET_RATE && rateGuard()) {
@@ -262,7 +397,14 @@ function onMediaEvent(ev: Event): void {
   }
 }
 
-const MEDIA_EVENTS: readonly string[] = ['play', 'playing', 'pause', 'ratechange', 'volumechange'];
+const MEDIA_EVENTS: readonly string[] = [
+  'play',
+  'playing',
+  'pause',
+  'ended',
+  'ratechange',
+  'volumechange',
+];
 
 /**
  * 启动视频助手。
