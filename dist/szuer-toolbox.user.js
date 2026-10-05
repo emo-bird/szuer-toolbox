@@ -49,7 +49,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-05T19:57:43.667Z（构建号 62） */
+/* 构建信息：2026-10-05T20:06:01.658Z（构建号 63） */
 
 "use strict";
 (() => {
@@ -2557,19 +2557,19 @@ ${options.desc ?? ""}
       blankSeenFor = "";
       sectionExpandTriedFor = "";
     }
+    const candidates = [];
+    if (parts.resourceId !== "") candidates.push(parts.resourceId);
+    if (afterId !== "" && afterId !== parts.resourceId) candidates.push(afterId);
     let cursor = -1;
-    const anchor = afterId !== "" ? afterId : parts.resourceId;
-    if (anchor !== "") {
-      for (let i = 0; i < pool.length; i++) {
-        const s = readSourceOf(pool[i]);
-        if (s !== null && s.id === anchor) {
-          cursor = i;
-          break;
-        }
+    for (const candidate of candidates) {
+      const found = pool.findIndex((el2) => readSourceOf(el2)?.id === candidate);
+      if (found >= 0) {
+        cursor = found;
+        break;
       }
-      if (cursor < 0) {
-        log7.warn(`起点资源 ${anchor} 不在已渲染的目录里，从本节开头重新找`);
-      }
+    }
+    if (cursor < 0 && candidates.length > 0) {
+      log7.warn(`起点资源 ${candidates.join(" / ")} 都不在已渲染的目录里，从本节开头重新找`);
     }
     for (let i = cursor + 1; i < pool.length; i++) {
       const el2 = pool[i];
@@ -2617,17 +2617,31 @@ ${options.desc ?? ""}
         return { kind: "blank" };
       }
     }
-    if (secIndex + 1 < sections.length) {
-      const next = sections[secIndex + 1];
-      const title = queryOne(SECTION_TITLE_SELECTOR, next);
-      if (title === null) {
-        return { kind: "stop", reason: "下一个节上没有可点的标题节点" };
-      }
-      log7.info(`连播：本节没有可播的资源，进入下一个节 ${next.getAttribute("id") ?? ""}`);
-      title.click();
+    const from = cursor >= 0 ? pool[cursor] : secLi;
+    const next = from === void 0 ? null : nextCatalogNodeAfter(from, chapterLi);
+    if (next !== null) {
+      log7.info("连播：这一层没有下一项了，点目录里的下一个节点");
+      clickElement(next);
       return { kind: "rendered" };
     }
     return { kind: "chapter-end" };
+  }
+  function chapterCatalogNodes(chapterLi) {
+    const out = [];
+    for (const el2 of chapterLi.querySelectorAll("[ng-click], [ui-sref]")) {
+      if (!(el2 instanceof HTMLElement)) continue;
+      if (el2.closest(RESOURCE_ITEM_SELECTOR) !== null) continue;
+      out.push(el2);
+    }
+    return out;
+  }
+  function nextCatalogNodeAfter(from, chapterLi) {
+    for (const node of chapterCatalogNodes(chapterLi)) {
+      if ((from.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0) {
+        return node;
+      }
+    }
+    return null;
   }
   function goNextChapter() {
     const parts = parseHash();
@@ -2994,12 +3008,10 @@ ${options.desc ?? ""}
   var lastClicked = null;
   function anchorFor() {
     const parts = parseHash();
-    if (parts === null) return "";
-    if (parts.resourceId !== "") return parts.resourceId;
-    if (lastClicked !== null && lastClicked.chapterId === parts.chapterId && lastClicked.sectionId === parts.sectionId) {
-      return lastClicked.id;
-    }
-    return "";
+    if (parts === null || lastClicked === null) return "";
+    if (lastClicked.chapterId !== parts.chapterId) return "";
+    if (lastClicked.sectionId !== parts.sectionId) return "";
+    return lastClicked.id;
   }
   var blankRetries = 0;
   var BLANK_RETRY_MS = 1500;
@@ -8105,8 +8117,8 @@ ${text}
   // src/main.ts
   var log25 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-05T19:57:43.667Z" : null;
-  var BUILD_NO = true ? 62 : null;
+  var BUILD_TIME = true ? "2026-10-05T20:06:01.658Z" : null;
+  var BUILD_NO = true ? 63 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();

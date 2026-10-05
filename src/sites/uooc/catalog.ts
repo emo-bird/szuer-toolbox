@@ -488,23 +488,24 @@ export function stepForward(afterId = ''): AdvanceStep {
     sectionExpandTriedFor = '';
   }
 
+  // 起点：**先试 hash 里的 resourceId，再试「上一轮真的点开的那个资源」**。
+  // ⚠️ 两个都得试（用户 m01213 的日志踩过）：多层目录里点开一个子项之后，hash 里
+  // 可能还留着**更早那个资源**的 id，而它已经不在本节渲染出来的列表里了 ——
+  // 只看 hash 的话每轮都「从本节开头重新找」，于是反复点同一个视频、出不去。
+  const candidates: string[] = [];
+  if (parts.resourceId !== '') candidates.push(parts.resourceId);
+  if (afterId !== '' && afterId !== parts.resourceId) candidates.push(afterId);
+
   let cursor = -1;
-  // 起点的选择：**优先用「上一次真的点开的那个资源」**。
-  // 因为这里要防一种死循环 —— 如果站点点了资源项却没换 hash（或者换得慢），
-  // 只按 hash 定位的话每一轮都会重新扫到同一个资源、再点一次，
-  // 一路空转到跳步上限。`afterId` 由调用方在每次成功点击后带上。
-  const anchor = afterId !== '' ? afterId : parts.resourceId;
-  if (anchor !== '') {
-    for (let i = 0; i < pool.length; i++) {
-      const s = readSourceOf(pool[i]!);
-      if (s !== null && s.id === anchor) {
-        cursor = i;
-        break;
-      }
+  for (const candidate of candidates) {
+    const found = pool.findIndex((el) => readSourceOf(el)?.id === candidate);
+    if (found >= 0) {
+      cursor = found;
+      break;
     }
-    if (cursor < 0) {
-      log.warn(`起点资源 ${anchor} 不在已渲染的目录里，从本节开头重新找`);
-    }
+  }
+  if (cursor < 0 && candidates.length > 0) {
+    log.warn(`起点资源 ${candidates.join(' / ')} 都不在已渲染的目录里，从本节开头重新找`);
   }
 
   for (let i = cursor + 1; i < pool.length; i++) {
@@ -575,19 +576,53 @@ export function stepForward(afterId = ''): AdvanceStep {
     }
   }
 
-  // 本节走到头 → 点下一个节（它的资源要等站点渲染出来，所以只走一步）
-  if (secIndex + 1 < sections.length) {
-    const next = sections[secIndex + 1]!;
-    const title = queryOne(SECTION_TITLE_SELECTOR, next);
-    if (title === null) {
-      return { kind: 'stop', reason: '下一个节上没有可点的标题节点' };
-    }
-    log.info(`连播：本节没有可播的资源，进入下一个节 ${next.getAttribute('id') ?? ''}`);
-    title.click();
+  // 这一层没有下一项了 —— 按**文档顺序**找目录里的下一个可点节点。
+  // 这就是用户 m01213 要的语义：「子目录或同级目录都没有下一项时，要主动点击上层的下一项」
+  // （1.4.1 → 1.4.2 → 1.5 → …）。按文档顺序取「当前项之后最近的目录节点」天然就是这个意思。
+  // 仍然**限制在当前章内**，所以「止于本章」不会被破坏 —— 找不到就交给调用方按
+  // `连播范围` 决定要不要跨章。
+  const from: HTMLElement | undefined = cursor >= 0 ? pool[cursor] : secLi;
+  const next = from === undefined ? null : nextCatalogNodeAfter(from, chapterLi);
+  if (next !== null) {
+    log.info('连播：这一层没有下一项了，点目录里的下一个节点');
+    clickElement(next);
     return { kind: 'rendered' };
   }
 
   return { kind: 'chapter-end' };
+}
+
+/**
+ * 目录里「可点的目录节点」——章 / 节 / 子节标题，按**文档顺序**。
+ *
+ * 判据是「在章节点子树里、带 `ng-click` 或 `ui-sref`、且不在资源项内部」。
+ * 不写死类名，是因为多层目录（1.4 → 1.4.1）那一层长什么样我还没采样到，
+ * 而「可点的目录节点」这个特征两版都成立。
+ */
+function chapterCatalogNodes(chapterLi: HTMLElement): HTMLElement[] {
+  const out: HTMLElement[] = [];
+  for (const el of chapterLi.querySelectorAll('[ng-click], [ui-sref]')) {
+    if (!(el instanceof HTMLElement)) continue;
+    if (el.closest(RESOURCE_ITEM_SELECTOR) !== null) continue;
+    out.push(el);
+  }
+  return out;
+}
+
+/**
+ * `from` **之后**最近的目录节点。
+ *
+ * 递归语义天然成立：同一层还有下一个就取同层的；同层没有了，下一个就是**上层**的下一个
+ * （文档顺序里 1.4.2 之后紧跟着的就是 1.5 的标题）。所以不需要专门写「回上一层」的逻辑。
+ */
+function nextCatalogNodeAfter(from: HTMLElement, chapterLi: HTMLElement): HTMLElement | null {
+  for (const node of chapterCatalogNodes(chapterLi)) {
+    // DOCUMENT_POSITION_FOLLOWING = 4：node 在 from 之后
+    if ((from.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0) {
+      return node;
+    }
+  }
+  return null;
 }
 
 /**

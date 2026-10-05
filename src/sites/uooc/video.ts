@@ -230,19 +230,19 @@ let landedAt = 0;
  */
 let lastClicked: { id: string; chapterId: string; sectionId: string } | null = null;
 
-/** 这一轮从哪个资源之后开始扫 */
+/**
+ * 「上一轮真的点开的那个资源」——只在**章 / 节都没变**时才认。
+ *
+ * ⚠️ 这里**不再优先返回 hash 里的 resourceId**：`stepForward()` 内部会先试 hash、
+ * 再试这个。用户 m01213 的日志里，hash 里那个 id 已经不在本节渲染出来的列表里，
+ * 只看 hash 就会每轮「从本节开头重新找」，反复点同一个视频出不去。
+ */
 function anchorFor(): string {
   const parts = parseHash();
-  if (parts === null) return '';
-  if (parts.resourceId !== '') return parts.resourceId;
-  if (
-    lastClicked !== null &&
-    lastClicked.chapterId === parts.chapterId &&
-    lastClicked.sectionId === parts.sectionId
-  ) {
-    return lastClicked.id;
-  }
-  return '';
+  if (parts === null || lastClicked === null) return '';
+  if (lastClicked.chapterId !== parts.chapterId) return '';
+  if (lastClicked.sectionId !== parts.sectionId) return '';
+  return lastClicked.id;
 }
 
 /**
