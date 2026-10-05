@@ -151,4 +151,11 @@ export interface SiteToggleDef {
   readonly default: boolean;
   /** 站点内部分组名，用于设置页分节 */
   readonly group?: string;
+  /**
+   * 排序权重，**越小越靠前**；不写按 100 处理。
+   *
+   * 存在的理由：设置页原来只按 `group` + `label` 排，想把某个开关钉在最上面
+   * 就只能取个讨巧的分组名（跟着 `localeCompare` 走，不稳）。显式给权重更清楚。
+   */
+  readonly order?: number;
 }

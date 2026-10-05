@@ -57,7 +57,14 @@ export function allToggles(): RegisteredToggle[] {
   return [...toggleRegistry.values()];
 }
 
+/**
+ * 设置页里的排序：**显式权重优先**（`order`，越小越靠前，不写按 100），
+ * 权重相同再按分组名、最后按标签名（都用 `localeCompare('zh-Hans-CN')`）。
+ */
 function compareToggle(a: RegisteredToggle, b: RegisteredToggle): number {
+  const oa = a.order ?? 100;
+  const ob = b.order ?? 100;
+  if (oa !== ob) return oa - ob;
   const ga = a.group ?? '';
   const gb = b.group ?? '';
   if (ga !== gb) return ga.localeCompare(gb, 'zh-Hans-CN');

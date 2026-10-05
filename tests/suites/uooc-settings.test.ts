@@ -80,6 +80,19 @@ describe('uooc 开关声明', () => {
     assertEqual(t!.risk, 'irreversible');
     assertEqual(t!.default, false);
   });
+
+  it('自动连播钉在设置页最上面（order 最小）', () => {
+    const t = UOOC_TOGGLES.find((x) => x.id === TOGGLE.AUTO_NEXT);
+    assert(t !== undefined, '缺少「自动连播」开关');
+    assertEqual(t!.order, 0, '自动连播的 order 必须是 0');
+    const orders = UOOC_TOGGLES.map((x) => x.order ?? 100);
+    assertEqual(Math.min(...orders), 0, '自动连播必须是权重最小的那个（否则排不到第一条）');
+    const others = UOOC_TOGGLES.filter((x) => x.id !== TOGGLE.AUTO_NEXT);
+    assert(
+      others.every((x) => (x.order ?? 100) > 0),
+      '其它开关不该也拿到 0，否则「最上面」会被抢',
+    );
+  });
 });
 
 describe('uooc 配置项声明', () => {

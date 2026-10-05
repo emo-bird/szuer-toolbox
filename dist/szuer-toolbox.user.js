@@ -49,7 +49,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-05T20:11:16.588Z（构建号 64） */
+/* 构建信息：2026-10-05T20:26:07.920Z（构建号 65） */
 
 "use strict";
 (() => {
@@ -900,6 +900,9 @@
     return out.sort(compareToggle);
   }
   function compareToggle(a, b) {
+    const oa = a.order ?? 100;
+    const ob = b.order ?? 100;
+    if (oa !== ob) return oa - ob;
     const ga = a.group ?? "";
     const gb = b.group ?? "";
     if (ga !== gb) return ga.localeCompare(gb, "zh-Hans-CN");
@@ -2224,7 +2227,10 @@ ${options.desc ?? ""}
       desc: "播完自动打开目录里的下一个视频",
       risk: "trace",
       default: false,
-      group: "视频"
+      group: "视频",
+      // 这是本站的头等开关（用户要求「放到设置页最上方一条」）。
+      // `order` 越小越靠前，不写的按 100 —— 所以 0 一定排在最前面。
+      order: 0
     },
     {
       id: TOGGLE.AUTO_PROGRESS,
@@ -8129,8 +8135,8 @@ ${text}
   // src/main.ts
   var log25 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-05T20:11:16.588Z" : null;
-  var BUILD_NO = true ? 64 : null;
+  var BUILD_TIME = true ? "2026-10-05T20:26:07.920Z" : null;
+  var BUILD_NO = true ? 65 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();

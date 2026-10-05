@@ -101,6 +101,9 @@ export const UOOC_TOGGLES: readonly SiteToggleDef[] = [
     risk: 'trace',
     default: false,
     group: '视频',
+    // 这是本站的头等开关（用户要求「放到设置页最上方一条」）。
+    // `order` 越小越靠前，不写的按 100 —— 所以 0 一定排在最前面。
+    order: 0,
   },
   {
     id: TOGGLE.AUTO_PROGRESS,
