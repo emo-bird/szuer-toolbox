@@ -218,13 +218,33 @@ let advanceTimer: ReturnType<typeof setTimeout> | null = null;
 let landedAt = 0;
 
 /**
- * 最近一次真的点开的资源 id。
+ * 最近一次真的点开的资源 —— 连同它属于哪个章 / 节一起记。
  *
- * 传给 `stepForward()` 当起点，防的是「点了资源项但 hash 没换」时每轮都重新
- * 扫到同一个资源、再点一次的死循环。页面自己换了 hash 就把它清掉（那时以
- * hash 为准更准 —— 用户可能手动点了别处）。
+ * 传给 `stepForward()` 当扫描起点，防的是「点了资源项但 hash 里没带上 resourceId」
+ * 时每轮都从头扫、反复点同一项的死循环。
+ *
+ * ⚠️ 这个坑实测踩过（m00961 第 1 条）：新版点开**文档 / 附件**之后地址栏停在
+ * `#/{cid}/{chapterId}/{sectionId}`，**没有第 4 段**。原来一见到 `hashchange`
+ * 就把它清掉，于是每轮 `cursor = -1`、从本节头开始扫，那两项又不是
+ * `finished`，就被反复打开 —— 用户看到的就是「不断循环打开附件和文档」。
+ * 现在改成：**只在章 / 节没变时才认它**，且 hash 里有 resourceId 时以 hash 为准。
  */
-let lastClickedId = '';
+let lastClicked: { id: string; chapterId: string; sectionId: string } | null = null;
+
+/** 这一轮从哪个资源之后开始扫 */
+function anchorFor(): string {
+  const parts = parseHash();
+  if (parts === null) return '';
+  if (parts.resourceId !== '') return parts.resourceId;
+  if (
+    lastClicked !== null &&
+    lastClicked.chapterId === parts.chapterId &&
+    lastClicked.sectionId === parts.sectionId
+  ) {
+    return lastClicked.id;
+  }
+  return '';
+}
 
 /**
  * 「本节是空的」连续重试次数。
@@ -279,12 +299,19 @@ function runAdvanceHop(): void {
   }
   advanceHops += 1;
 
-  const step = stepForward(lastClickedId);
+  const step = stepForward(anchorFor());
   switch (step.kind) {
     case 'clicked':
       // ⚠️ 先 stopAdvance() 再写这三个时间戳 —— `stopAdvance()` 会把 `landedAt`
       // 清零，反过来的话 `breakStall()` 永远看不到落点，兜底就失效了。
-      lastClickedId = step.id;
+      {
+        const parts = parseHash();
+        lastClicked = {
+          id: step.id,
+          chapterId: parts?.chapterId ?? '',
+          sectionId: parts?.sectionId ?? '',
+        };
+      }
       blankRetries = 0;
       stopAdvance();
       advancingUntil = Date.now() + ADVANCE_LOCK_MS;
@@ -747,10 +774,11 @@ export function startVideoAssist(): () => void {
   document.addEventListener('ratechange', onMediaEvent, true);
   document.addEventListener('volumechange', onMediaEvent, true);
 
-  // 站内 hash 路由换集不会重载页面
-  // 页面自己换了 hash ⇒ 起点改以 hash 为准，把「上一次点开的资源」清掉
+  // 站内 hash 路由换集不会重载页面。
+  // ⚠️ 这里**不**清 `lastClicked` —— 点开新版文档 / 附件之后地址栏没有 resourceId，
+  // 一见 hashchange 就清会让扫描起点丢回本节开头，反复点同一项（踩过）。
+  // `anchorFor()` 已经用「章 / 节是否相同」把它限制住了。
   const onRoute = (): void => {
-    lastClickedId = '';
     schedule();
   };
   window.addEventListener('hashchange', onRoute);

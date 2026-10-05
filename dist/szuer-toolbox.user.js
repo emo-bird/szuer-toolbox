@@ -49,7 +49,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-05T19:05:02.144Z（构建号 59） */
+/* 构建信息：2026-10-05T19:22:28.469Z（构建号 60） */
 
 "use strict";
 (() => {
@@ -2073,7 +2073,13 @@ ${options.desc ?? ""}
     'button.btn.btn-danger[ng-click="vm.commitTask()"]',
     "button.btn.btn-danger"
   ];
+  var SAVE_SELECTORS = [
+    'button.btn.btn-success[ng-click="vm.saveTask()"]',
+    "button.btn.btn-success"
+  ];
+  var PAPER_SELECTOR = ".queContainer";
   var TICK_MS = 1e3;
+  var SETTLE_MS = 2e3;
   var CLOSE_DELAY_MS = 1200;
   function parseExamParams(search = location.search, pathname = location.pathname) {
     let cid = "";
@@ -2091,14 +2097,21 @@ ${options.desc ?? ""}
     }
     return { cid, taskId };
   }
-  function hasSubmitButton() {
-    for (const sel of SUBMIT_SELECTORS) {
+  function anyPresent(selectors) {
+    for (const sel of selectors) {
       try {
         if (document.querySelector(sel) !== null) return true;
       } catch {
       }
     }
     return false;
+  }
+  function paperQuestionCount() {
+    try {
+      return document.querySelectorAll(PAPER_SELECTOR).length;
+    } catch {
+      return 0;
+    }
   }
   function startQuizWatcher() {
     const { cid, taskId } = parseExamParams();
@@ -2109,7 +2122,8 @@ ${options.desc ?? ""}
     let finished = false;
     let timer4 = null;
     const seenAt = { value: 0 };
-    const onFinished = () => {
+    const spareAt = { value: 0 };
+    const onFinished = (reason) => {
       finished = true;
       if (timer4 !== null) {
         clearInterval(timer4);
@@ -2121,7 +2135,7 @@ ${options.desc ?? ""}
         resourceId: opening?.resourceId ?? ""
       };
       writeQuizDone(signal);
-      log5.info("检测到交卷成功，已通知学习页继续连播");
+      log5.info(`判定 ${reason}，已通知学习页继续连播`);
       if (!managed) {
         siteToast("测验已完成，学习页会自动接着播", "success", 4e3);
         return;
@@ -2136,16 +2150,30 @@ ${options.desc ?? ""}
     };
     const tick2 = () => {
       if (finished) return;
-      if (hasSubmitButton()) {
+      const hasSubmit = anyPresent(SUBMIT_SELECTORS);
+      const hasSave = anyPresent(SAVE_SELECTORS);
+      const paper = paperQuestionCount();
+      if (hasSubmit) {
         if (!sawSubmit) {
           sawSubmit = true;
           seenAt.value = Date.now();
         }
         return;
       }
-      if (!sawSubmit) return;
-      if (Date.now() - seenAt.value < 2e3) return;
-      onFinished();
+      if (sawSubmit) {
+        if (Date.now() - seenAt.value >= SETTLE_MS) onFinished("提交按钮已消失");
+        return;
+      }
+      if (paper > 0 && !hasSave) {
+        if (spareAt.value === 0) {
+          spareAt.value = Date.now();
+          log5.debug(`这张卷子没有提交/保存按钮（题目 ${paper} 道），可能是已交过的只读视图`);
+          return;
+        }
+        if (Date.now() - spareAt.value >= SETTLE_MS) onFinished("这张卷子已经交过（只读视图）");
+        return;
+      }
+      spareAt.value = 0;
     };
     timer4 = setInterval(tick2, TICK_MS);
     tick2();
@@ -2473,6 +2501,7 @@ ${options.desc ?? ""}
   }
   var expandTriedFor = "";
   var blankSeenFor = "";
+  var sectionExpandTriedFor = "";
   function stepForward(afterId = "") {
     if (angular() === null) {
       return { kind: "stop", reason: "页面上没有 angular，读不到目录" };
@@ -2523,7 +2552,10 @@ ${options.desc ?? ""}
     let pool = all;
     const owned = all.filter((el2) => el2.closest(SECTION_ITEM_SELECTOR) === secLi);
     if (owned.length > 0) pool = owned;
-    if (pool.length > 0) blankSeenFor = "";
+    if (pool.length > 0) {
+      blankSeenFor = "";
+      sectionExpandTriedFor = "";
+    }
     let cursor = -1;
     const anchor = afterId !== "" ? afterId : parts.resourceId;
     if (anchor !== "") {
@@ -2551,6 +2583,10 @@ ${options.desc ?? ""}
         clickElement(el2);
         return { kind: "quiz", resourceId: src.id, taskId: src.taskId, title: src.title };
       }
+      if (src.type !== RESOURCE_TYPE_VIDEO && !src.isTask) {
+        log7.info(`跳过非任务点的${labelOf(src.type)} ${src.id}`);
+        continue;
+      }
       log7.info(
         `连播：打开${labelOf(src.type)} ${src.id}${src.title === "" ? "" : `（${src.title}）`}`
       );
@@ -2559,6 +2595,15 @@ ${options.desc ?? ""}
     }
     if (pool.length === 0) {
       const sectionKey = `${parts.chapterId}/${parts.sectionId}`;
+      if (isSectionCollapsed(secLi) && sectionExpandTriedFor !== sectionKey) {
+        const title = queryOne(SECTION_TITLE_SELECTOR, secLi);
+        if (title !== null) {
+          sectionExpandTriedFor = sectionKey;
+          log7.info(`连播：节 ${parts.sectionId} 是折叠的（hide=true），点开它`);
+          clickElement(title);
+          return { kind: "rendered" };
+        }
+      }
       if (blankSeenFor !== sectionKey) {
         blankSeenFor = sectionKey;
         return { kind: "blank" };
@@ -2601,6 +2646,10 @@ ${options.desc ?? ""}
     const src = readSourceOf(el2);
     if (src !== null && src.finished) return true;
     return el2.classList.contains("complete");
+  }
+  function isSectionCollapsed(secLi) {
+    const item = scopeOf(secLi)?.["sectionItem"];
+    return isObject(item) && item["hide"] === true;
   }
   function collectDiag() {
     const parts = parseHash();
@@ -2881,7 +2930,16 @@ ${options.desc ?? ""}
   var advanceHops = 0;
   var advanceTimer = null;
   var landedAt = 0;
-  var lastClickedId = "";
+  var lastClicked = null;
+  function anchorFor() {
+    const parts = parseHash();
+    if (parts === null) return "";
+    if (parts.resourceId !== "") return parts.resourceId;
+    if (lastClicked !== null && lastClicked.chapterId === parts.chapterId && lastClicked.sectionId === parts.sectionId) {
+      return lastClicked.id;
+    }
+    return "";
+  }
   var blankRetries = 0;
   var BLANK_RETRY_MS = 1500;
   var BLANK_MAX_RETRIES = 3;
@@ -2915,10 +2973,17 @@ ${options.desc ?? ""}
       return;
     }
     advanceHops += 1;
-    const step = stepForward(lastClickedId);
+    const step = stepForward(anchorFor());
     switch (step.kind) {
       case "clicked":
-        lastClickedId = step.id;
+        {
+          const parts = parseHash();
+          lastClicked = {
+            id: step.id,
+            chapterId: parts?.chapterId ?? "",
+            sectionId: parts?.sectionId ?? ""
+          };
+        }
         blankRetries = 0;
         stopAdvance();
         advancingUntil = Date.now() + ADVANCE_LOCK_MS;
@@ -3218,7 +3283,6 @@ ${options.desc ?? ""}
     document.addEventListener("ratechange", onMediaEvent, true);
     document.addEventListener("volumechange", onMediaEvent, true);
     const onRoute = () => {
-      lastClickedId = "";
       schedule3();
     };
     window.addEventListener("hashchange", onRoute);
@@ -7980,8 +8044,8 @@ ${text}
   // src/main.ts
   var log25 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-05T19:05:02.144Z" : null;
-  var BUILD_NO = true ? 59 : null;
+  var BUILD_TIME = true ? "2026-10-05T19:22:28.469Z" : null;
+  var BUILD_NO = true ? 60 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();

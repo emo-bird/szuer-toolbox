@@ -338,6 +338,19 @@ let expandTriedFor = '';
 let blankSeenFor = '';
 
 /**
+ * 已经点过一次「展开这个折叠的节」的那一节。
+ *
+ * ⚠️ 这是**旧版空白页的真因**（实测 `local/capture/dom-uooc-blank-section-旧.txt`）：
+ * 节标题上那个 `ng-click="toggleChapter(sectionItem)"` 是**开合开关**，
+ * 而资源列表容器写着 `ng-if="!sectionItem.hide && stateParams.sectionId == sectionItem.id"`。
+ * 那一份采样里 `sectionItem.hide = true`、节 `li` 只剩标题一个子元素、
+ * `resource` 命中 **0** —— 也就是说「空白的节」根本不是没内容，
+ * 而是**被折叠了**（该节 scope 里的 `unitSource` 长度明明是 4）。
+ * 所以遇到这种要先点一次标题把它展开，而不是往下跳。
+ */
+let sectionExpandTriedFor = '';
+
+/**
  * 相对**当前 hash 所处的位置**往后走一步。
  *
  * 只走一步就返回，调用方按返回的 `kind` 决定「等一下再来」还是「收工」。
@@ -404,8 +417,11 @@ export function stepForward(afterId = ''): AdvanceStep {
   let pool = all;
   const owned = all.filter((el) => el.closest(SECTION_ITEM_SELECTOR) === secLi);
   if (owned.length > 0) pool = owned;
-  // 这一节有资源 → 忘掉「它是空白」的旧记录
-  if (pool.length > 0) blankSeenFor = '';
+  // 这一节有资源 → 忘掉「它是空白 / 要点开」的旧记录
+  if (pool.length > 0) {
+    blankSeenFor = '';
+    sectionExpandTriedFor = '';
+  }
 
   let cursor = -1;
   // 起点的选择：**优先用「上一次真的点开的那个资源」**。
@@ -445,7 +461,18 @@ export function stepForward(afterId = ''): AdvanceStep {
       return { kind: 'quiz', resourceId: src.id, taskId: src.taskId, title: src.title };
     }
 
-    // 其余（视频 / 文档 / 附件）一律点开，点开之后由调用方按 type 决定怎么收尾
+    // 视频一律点开播完（用户明确「一律看完后等待 5 秒再跳」）。
+    // 文档 / 附件则**只在是任务点时才值得点开** ——
+    // 站点不要求完成的项连「完成」图标都没有（新版），它的 `finished` 永远是 0，
+    // 点开也永远不会「完成」，只会被反复打开（m00961 第 1 条就是这么转圈的）。
+    // `source.is_task` 新旧两版都有；旧版正是用 `ng-class="{taskpoint: source.is_task == 1}"`
+    // 把它画成那个【任务点】小标的。
+    if (src.type !== RESOURCE_TYPE_VIDEO && !src.isTask) {
+      log.info(`跳过非任务点的${labelOf(src.type)} ${src.id}`);
+      continue;
+    }
+
+    // 其余（视频 / 是任务点的文档·附件）点开，点开之后由调用方按 type 决定怎么收尾
     log.info(
       `连播：打开${labelOf(src.type)} ${src.id}${src.title === '' ? '' : `（${src.title}）`}`,
     );
@@ -453,11 +480,23 @@ export function stepForward(afterId = ''): AdvanceStep {
     return { kind: 'clicked', id: src.id, title: src.title, type: src.type };
   }
 
-  // 本节一个资源项都没渲染出来 —— 可能真是空节，也可能只是还没渲染完。
-  // 第一次先报 blank 让调用方等一下再来；同一节第二次还是空，就往下跳
-  // （调用方那时已经提醒过并等过 N 秒，`blankSeenFor` 也记上了，会直接落到这里）。
+  // 本节一个资源项都没渲染出来，两种可能，按顺序试：
+  //   ① 节被折叠了（`sectionItem.hide === true`，站点用它把资源列表整个 ng-if 掉）
+  //      —— 点一次标题展开，再回来看；
+  //   ② 真的是空节 —— 报一次 blank，让调用方提醒 + 等 N 秒再往下跳。
   if (pool.length === 0) {
     const sectionKey = `${parts.chapterId}/${parts.sectionId}`;
+
+    if (isSectionCollapsed(secLi) && sectionExpandTriedFor !== sectionKey) {
+      const title = queryOne(SECTION_TITLE_SELECTOR, secLi);
+      if (title !== null) {
+        sectionExpandTriedFor = sectionKey;
+        log.info(`连播：节 ${parts.sectionId} 是折叠的（hide=true），点开它`);
+        clickElement(title);
+        return { kind: 'rendered' };
+      }
+    }
+
     if (blankSeenFor !== sectionKey) {
       blankSeenFor = sectionKey;
       return { kind: 'blank' };
@@ -521,6 +560,20 @@ export function isResourceFinished(el: Element): boolean {
   const src = readSourceOf(el);
   if (src !== null && src.finished) return true;
   return el.classList.contains('complete');
+}
+
+/**
+ * 这一节是不是**被折叠**了。
+ *
+ * 站点自己的资源列表容器写着
+ * `ng-if="!sectionItem.hide && stateParams.sectionId == sectionItem.id"`，
+ * 所以 `sectionItem.hide === true` 时整份资源列表根本不在 DOM 里 ——
+ * 看起来就是「空白节」，其实只是折叠了（`unitSource` 里数据好好的）。
+ * 旧版节标题那个 `ng-click="toggleChapter(sectionItem)"` 就是开合开关。
+ */
+export function isSectionCollapsed(secLi: Element): boolean {
+  const item = scopeOf(secLi)?.['sectionItem'];
+  return isObject(item) && item['hide'] === true;
 }
 
 /**

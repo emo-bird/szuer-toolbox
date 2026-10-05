@@ -34,8 +34,20 @@ const SUBMIT_SELECTORS: readonly string[] = [
   'button.btn.btn-danger',
 ];
 
+/** 保存按钮：和提交按钮**同生共死**（两个都写 `ng-if="vm.paper.can_do…"`），用来交叉验证 */
+const SAVE_SELECTORS: readonly string[] = [
+  'button.btn.btn-success[ng-click="vm.saveTask()"]',
+  'button.btn.btn-success',
+];
+
+/** 题目容器：有它才说明这一页真的把卷子渲染出来了 */
+const PAPER_SELECTOR = '.queContainer';
+
 /** 轮询周期：交卷后要尽快关标签页，1 秒够快也不吵 */
 const TICK_MS = 1000;
+
+/** 条件成立后要连续维持多久才认 —— 防页面重绘抖动误判 */
+const SETTLE_MS = 2000;
 
 /** 关标签页前留一点时间让 toast 被看见 */
 const CLOSE_DELAY_MS = 1200;
@@ -73,8 +85,8 @@ export function parseExamParams(
   return { cid, taskId };
 }
 
-function hasSubmitButton(): boolean {
-  for (const sel of SUBMIT_SELECTORS) {
+function anyPresent(selectors: readonly string[]): boolean {
+  for (const sel of selectors) {
     try {
       if (document.querySelector(sel) !== null) return true;
     } catch {
@@ -82,6 +94,14 @@ function hasSubmitButton(): boolean {
     }
   }
   return false;
+}
+
+function paperQuestionCount(): number {
+  try {
+    return document.querySelectorAll(PAPER_SELECTOR).length;
+  } catch {
+    return 0;
+  }
 }
 
 /**
@@ -100,9 +120,12 @@ export function startQuizWatcher(): () => void {
   let finished = false;
   let timer: ReturnType<typeof setInterval> | null = null;
 
+  /** 见到提交按钮的时刻 */
   const seenAt = { value: 0 };
+  /** 见到「卷子已渲染但没有提交/保存按钮」的时刻 */
+  const spareAt = { value: 0 };
 
-  const onFinished = (): void => {
+  const onFinished = (reason: string): void => {
     finished = true;
     if (timer !== null) {
       clearInterval(timer);
@@ -114,7 +137,7 @@ export function startQuizWatcher(): () => void {
       resourceId: opening?.resourceId ?? '',
     };
     writeQuizDone(signal);
-    log.info('检测到交卷成功，已通知学习页继续连播');
+    log.info(`判定 ${reason}，已通知学习页继续连播`);
 
     if (!managed) {
       siteToast('测验已完成，学习页会自动接着播', 'success', 4000);
@@ -134,18 +157,42 @@ export function startQuizWatcher(): () => void {
 
   const tick = (): void => {
     if (finished) return;
-    if (hasSubmitButton()) {
+
+    const hasSubmit = anyPresent(SUBMIT_SELECTORS);
+    const hasSave = anyPresent(SAVE_SELECTORS);
+    const paper = paperQuestionCount();
+
+    if (hasSubmit) {
       if (!sawSubmit) {
         sawSubmit = true;
         seenAt.value = Date.now();
       }
       return;
     }
-    if (!sawSubmit) return;
-    // 见过按钮又没了 —— 但刚进来的那一瞬间也可能读到「按钮还没渲染」，
-    // 所以要求「见过之后至少过了 2 秒」才认，避免页面重绘抖动误判。
-    if (Date.now() - seenAt.value < 2000) return;
-    onFinished();
+
+    if (sawSubmit) {
+      // 情形一：见过提交按钮，现在它没了。实测：交卷成功后「提交试卷」与
+      // 「保存试卷」会**一起**从 DOM 消失（两者都写 `ng-if="vm.paper.can_do…"`）。
+      // 刚进来那一瞬间也可能读到「按钮还没渲染」，所以要求见过之后至少 2 秒。
+      if (Date.now() - seenAt.value >= SETTLE_MS) onFinished('提交按钮已消失');
+      return;
+    }
+
+    // 情形二：压根没有提交按钮，但卷子已经渲染出来、保存按钮也没有
+    // —— 这是一张**已经交过的卷子**（点到了目录里状态过期的测验项时就会这样，
+    // 实测采样 `dom-uooc-quiz-新-已作答.txt`：queContainer 2、提交/保存按钮皆 0）。
+    // 不认这条的话，这种页面会永远卡在「等交卷」上。
+    if (paper > 0 && !hasSave) {
+      if (spareAt.value === 0) {
+        spareAt.value = Date.now();
+        log.debug(`这张卷子没有提交/保存按钮（题目 ${paper} 道），可能是已交过的只读视图`);
+        return;
+      }
+      if (Date.now() - spareAt.value >= SETTLE_MS) onFinished('这张卷子已经交过（只读视图）');
+      return;
+    }
+
+    spareAt.value = 0;
   };
 
   timer = setInterval(tick, TICK_MS);
