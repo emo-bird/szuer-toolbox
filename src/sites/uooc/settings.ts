@@ -42,32 +42,24 @@ export const VALUE = {
 export const UOOC_TOGGLES: readonly SiteToggleDef[] = [
   {
     id: TOGGLE.RATE_2X,
-    label: '二倍速播放',
-    desc:
-      '把播放器速率锁在 2 倍：视频换集、播放器重建、以及你在站点播放器菜单里改成别的速度，' +
-      '都会被立刻扳回 2 倍（即站点自己的倍速菜单在开启期间失效）。' +
-      '倍速只改变本地播放速度，**不改变站点上报的观看进度**（进度仍按真实播放位置上报）。',
+    label: '二倍速',
+    desc: '锁在 2 倍速，在播放器里改回去会被扳回',
     risk: 'safe',
     default: true,
     group: '视频',
   },
   {
     id: TOGGLE.MUTE,
-    label: '静音播放',
-    desc:
-      '把播放器锁在静音：视频换集、播放器重建、以及你在站点播放器上取消静音，' +
-      '都会被立刻扳回静音（即站点自己的音量控制在开启期间失效）。',
+    label: '静音',
+    desc: '锁在静音，取消会被扳回',
     risk: 'safe',
     default: true,
     group: '视频',
   },
   {
     id: TOGGLE.KEEP_PLAYING,
-    label: '防止失焦暂停',
-    desc:
-      '**本开关开启期间你无法手动暂停视频** —— 一旦暂停就会被立刻恢复播放（含切到别的窗口、' +
-      '切标签页导致的暂停）。这是刻意的：想暂停请先关掉这个开关。' +
-      '只在本站点，不会影响其它站点。',
+    label: '防暂停',
+    desc: '暂停会被立刻恢复（含你自己按的暂停）',
     risk: 'safe',
     default: true,
     group: '视频',
@@ -75,9 +67,7 @@ export const UOOC_TOGGLES: readonly SiteToggleDef[] = [
   {
     id: TOGGLE.AUTO_NEXT,
     label: '自动连播',
-    desc:
-      '一个视频播完后，自动点开目录里的下一个视频。' +
-      '这会代替你触发站点的换集请求（含观看进度上报），属于会留痕的操作。默认关闭。',
+    desc: '播完自动打开目录里的下一个视频',
     risk: 'trace',
     default: false,
     group: '视频',
@@ -93,12 +83,12 @@ export function registerUoocSettings(): void {
     siteId: SITE_ID,
     id: VALUE.NEXT_SCOPE,
     label: '连播范围',
-    desc: '自动连播到本小节最后一个视频之后怎么办。',
+    desc: '连播到本章结束后',
     default: 'chapter',
     kind: 'select',
     options: [
-      { value: 'chapter', label: '止于本章 —— 本章看完就停' },
-      { value: 'all', label: '跨章继续 —— 直到整门课看完' },
+      { value: 'chapter', label: '止于本章' },
+      { value: 'all', label: '跨章继续' },
     ],
   });
 }

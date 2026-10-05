@@ -14,7 +14,6 @@
  * `tests/suites/sites-registered.test.ts` 把这个等式钉住了。
  */
 
-import { el } from '../../../common/utils/dom.ts';
 import { renderSiteSettings } from '../../../common/ui/widgets/settings-form.ts';
 import { settingsTabId } from '../../registry.ts';
 import type { TabRegistration, TabContext } from '../../types.ts';
@@ -28,14 +27,6 @@ export const UOOC_SETTINGS_TAB: TabRegistration = {
   title: '设置',
   order: 200,
   mount(root: HTMLElement, ctx: TabContext): void {
-    root.appendChild(
-      el('div', {
-        class: 'sztb-note',
-        text:
-          '🟢 随时可开关；🟠 / 🔴 需要你显式勾选才生效，开启前请先读一遍说明。' +
-          '本页参数改动即刻生效，不用刷新页面。',
-      }),
-    );
     root.appendChild(renderSiteSettings('uooc', null, ctx));
   },
 };
