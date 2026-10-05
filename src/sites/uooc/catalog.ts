@@ -136,7 +136,27 @@ function queryOne(selector: string, root: ParentNode): HTMLElement | null {
  * 与手点的差别只剩 `isTrusted`（AngularJS 1.x 不看这个）。
  * 万一 `MouseEvent` 构造不可用（极老的宿主）再退回 `el.click()`。
  */
-function clickElement(el: HTMLElement): void {
+/**
+ * 模拟一次点击，并顺手记住「这一轮点的是目录里的什么」。
+ *
+ * 用 `dispatchEvent` 而不是裸 `el.click()`：显式带上 `bubbles: true`，
+ * 这样既走站点挂在节点自己的 `ng-click`，也走可能存在的父级委托监听。
+ * 与手点的差别只剩 `isTrusted`（AngularJS 1.x 不看这个）。
+ * 万一 `MouseEvent` 构造不可用（极老的宿主）再退回 `el.click()`。
+ *
+ * @param isResource 点的是**资源项**吗？是 → 记下来当下一轮的扫描起点；
+ *                   否（章 / 节 / 点的标题）→ 清掉，因为我们已经离开那一项了。
+ */
+function clickElement(el: HTMLElement, isResource = false): void {
+  if (isResource) {
+    const parts = parseHash();
+    lastClickedEl = el;
+    lastClickedKey = `${parts?.chapterId ?? ''}/${parts?.sectionId ?? ''}`;
+  } else {
+    lastClickedEl = null;
+    lastClickedKey = '';
+  }
+
   try {
     el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
   } catch {
@@ -403,6 +423,31 @@ let expandTriedFor = '';
 let blankSeenFor = '';
 
 /**
+ * 「上一轮真的点开的那个资源」——记的是**元素本身**，不是 id。
+ *
+ * ⚠️ 为什么不能记 id（用户 m01255 的采样暴露的）：第三层「点」
+ * （`ng-repeat="pointItem in sectionItem.children"`）里的附件，站点给的
+ * `source.id` **是 0**（同一份采样里 `resources: [{id:'0', type:50}]`，
+ * 而地址栏里那个 id 是 860214972）。一节里有好几个这种附件时，pool 里就会出现
+ * 多个 id 都是 `'0'` 的项，按 id 定位永远落在第一个上 —— 又是一个
+ * 「反复点同一项、出不去」。记元素就没这问题：`pool.indexOf(el)` 天然唯一；
+ * 元素被站点重新渲染掉了就自动退回按 hash 定位。
+ */
+let lastClickedEl: HTMLElement | null = null;
+
+/** 记 `lastClickedEl` 时所在的章 / 节；换了章或节就不认它 */
+let lastClickedKey = '';
+
+/**
+ * 已经点过一次「展开本节里的子目录节点」的那一节。
+ *
+ * 对应实测到的第三层「点」：`ng-repeat="pointItem in sectionItem.children"`。
+ * 本节没有直接资源时，先点开里面的第一个子节点；**同一节只点一次**，
+ * 免得点不开时来回点（与 `sectionExpandTriedFor` 同一套路）。
+ */
+let pointExpandTriedFor = '';
+
+/**
  * 已经点过一次「展开这个折叠的节」的那一节。
  *
  * ⚠️ 这是**旧版空白页的真因**（实测 `local/capture/dom-uooc-blank-section-旧.txt`）：
@@ -486,26 +531,39 @@ export function stepForward(afterId = ''): AdvanceStep {
   if (pool.length > 0) {
     blankSeenFor = '';
     sectionExpandTriedFor = '';
+    pointExpandTriedFor = '';
   }
 
-  // 起点：**先试 hash 里的 resourceId，再试「上一轮真的点开的那个资源」**。
-  // ⚠️ 两个都得试（用户 m01213 的日志踩过）：多层目录里点开一个子项之后，hash 里
-  // 可能还留着**更早那个资源**的 id，而它已经不在本节渲染出来的列表里了 ——
-  // 只看 hash 的话每轮都「从本节开头重新找」，于是反复点同一个视频、出不去。
-  const candidates: string[] = [];
-  if (parts.resourceId !== '') candidates.push(parts.resourceId);
-  if (afterId !== '' && afterId !== parts.resourceId) candidates.push(afterId);
+  // 起点按优先级三选一：
+  //   1. **上一轮真的点开的那个元素** —— 最准。`pool.indexOf(el)` 天然唯一，
+  //      不受「好几个附件的 id 都是 0」影响（见 `lastClickedEl` 的注释）；
+  //   2. hash 里的 resourceId —— 用户自己切了集、或整页重新加载时只有它可用；
+  //   3. 都没有 → 从本节开头扫。
+  //
+  // ⚠️ 必须**多个都试**（用户 m01213 的日志踩过）：多层目录里点开一个子项之后，
+  // hash 里可能还留着**更早那个资源**的 id，而它已经不在本节渲染出来的列表里了 ——
+  // 只看 hash 的话每轮都「从本节开头重新找」，于是反复点同一项、出不去。
+  const scopeKey = `${parts.chapterId}/${parts.sectionId}`;
 
   let cursor = -1;
-  for (const candidate of candidates) {
-    const found = pool.findIndex((el) => readSourceOf(el)?.id === candidate);
-    if (found >= 0) {
-      cursor = found;
-      break;
-    }
+  if (lastClickedEl !== null && lastClickedKey === scopeKey) {
+    cursor = pool.indexOf(lastClickedEl);
   }
-  if (cursor < 0 && candidates.length > 0) {
-    log.warn(`起点资源 ${candidates.join(' / ')} 都不在已渲染的目录里，从本节开头重新找`);
+  if (cursor < 0 && parts.resourceId !== '') {
+    cursor = pool.findIndex((el) => readSourceOf(el)?.id === parts.resourceId);
+  }
+  if (cursor < 0 && afterId !== '' && afterId !== parts.resourceId) {
+    cursor = pool.findIndex((el) => readSourceOf(el)?.id === afterId);
+  }
+
+  if (cursor < 0) {
+    const tried: string[] = [];
+    if (lastClickedEl !== null && lastClickedKey === scopeKey) tried.push('上一轮点开的那一项');
+    if (parts.resourceId !== '') tried.push(`hash 里的 ${parts.resourceId}`);
+    if (afterId !== '' && afterId !== parts.resourceId) tried.push(`上游给的 ${afterId}`);
+    if (tried.length > 0) {
+      log.warn(`${tried.join(' 与 ')} 都不在已渲染的目录里，从本节开头重新找`);
+    }
   }
 
   for (let i = cursor + 1; i < pool.length; i++) {
@@ -531,7 +589,7 @@ export function stepForward(afterId = ''): AdvanceStep {
       }
 
       log.info(`连播：打开测验 ${src.id}（旧版内嵌方式）`);
-      clickElement(el);
+      clickElement(el, true);
       return { kind: 'quiz', resourceId: src.id, taskId: src.taskId, title: src.title, url: '' };
     }
 
@@ -543,7 +601,7 @@ export function stepForward(afterId = ''): AdvanceStep {
       `连播：打开${src.finished ? '已完成的' : ''}${labelOf(src.type)} ${src.id}` +
         `${src.title === '' ? '' : `（${src.title}）`}`,
     );
-    clickElement(el);
+    clickElement(el, true);
     return {
       kind: 'clicked',
       id: src.id,
@@ -553,10 +611,16 @@ export function stepForward(afterId = ''): AdvanceStep {
     };
   }
 
-  // 本节一个资源项都没渲染出来，两种可能，按顺序试：
+  // 本节一个资源项都没渲染出来，三种可能，按顺序试：
   //   ① 节被折叠了（`sectionItem.hide === true`，站点用它把资源列表整个 ng-if 掉）
   //      —— 点一次标题展开，再回来看；
-  //   ② 真的是空节 —— 报一次 blank，让调用方提醒 + 等 N 秒再往下跳。
+  //   ② 本节自己没有直接资源，但里面还有**可点的子目录节点** ——
+  //      这是实测到的**第三层「点」**（用户 m01255 的采样）：
+  //      `ng-repeat="pointItem in sectionItem.children"`，标题是
+  //      `[ng-click="toggleChapter(pointItem)"]` + `ui-sref="main.chapter.section.point({pointId})"`
+  //      （新版 `div.level_3_title` 在 `ul.level_3` 里，旧版 `div.basic` 在 `ul.rank-3` 里），
+  //      资源挂在 `source in pointItem.unitSource`。点开第一个子节点，它的资源才会渲染；
+  //   ③ 真的是空节 —— 报一次 blank，让调用方提醒 + 等 N 秒再往下跳。
   if (pool.length === 0) {
     const sectionKey = `${parts.chapterId}/${parts.sectionId}`;
 
@@ -566,6 +630,17 @@ export function stepForward(afterId = ''): AdvanceStep {
         sectionExpandTriedFor = sectionKey;
         log.info(`连播：节 ${parts.sectionId} 是折叠的（hide=true），点开它`);
         clickElement(title);
+        return { kind: 'rendered' };
+      }
+    }
+
+    if (pointExpandTriedFor !== sectionKey) {
+      const inner = chapterCatalogNodes(secLi);
+      const first = inner[0];
+      if (first !== undefined) {
+        pointExpandTriedFor = sectionKey;
+        log.info(`连播：本节没有直接资源，点开里面的子目录节点（共 ${inner.length} 个）`);
+        clickElement(first);
         return { kind: 'rendered' };
       }
     }

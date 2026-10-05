@@ -49,7 +49,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-05T20:06:01.658Z（构建号 63） */
+/* 构建信息：2026-10-05T20:11:16.588Z（构建号 64） */
 
 "use strict";
 (() => {
@@ -2381,7 +2381,15 @@ ${options.desc ?? ""}
   function queryOne(selector, root) {
     return asElement(root.querySelector(selector));
   }
-  function clickElement(el2) {
+  function clickElement(el2, isResource = false) {
+    if (isResource) {
+      const parts = parseHash();
+      lastClickedEl = el2;
+      lastClickedKey = `${parts?.chapterId ?? ""}/${parts?.sectionId ?? ""}`;
+    } else {
+      lastClickedEl = null;
+      lastClickedKey = "";
+    }
     try {
       el2.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
     } catch {
@@ -2502,6 +2510,9 @@ ${options.desc ?? ""}
   }
   var expandTriedFor = "";
   var blankSeenFor = "";
+  var lastClickedEl = null;
+  var lastClickedKey = "";
+  var pointExpandTriedFor = "";
   var sectionExpandTriedFor = "";
   function stepForward(afterId = "") {
     if (angular() === null) {
@@ -2556,20 +2567,27 @@ ${options.desc ?? ""}
     if (pool.length > 0) {
       blankSeenFor = "";
       sectionExpandTriedFor = "";
+      pointExpandTriedFor = "";
     }
-    const candidates = [];
-    if (parts.resourceId !== "") candidates.push(parts.resourceId);
-    if (afterId !== "" && afterId !== parts.resourceId) candidates.push(afterId);
+    const scopeKey = `${parts.chapterId}/${parts.sectionId}`;
     let cursor = -1;
-    for (const candidate of candidates) {
-      const found = pool.findIndex((el2) => readSourceOf(el2)?.id === candidate);
-      if (found >= 0) {
-        cursor = found;
-        break;
-      }
+    if (lastClickedEl !== null && lastClickedKey === scopeKey) {
+      cursor = pool.indexOf(lastClickedEl);
     }
-    if (cursor < 0 && candidates.length > 0) {
-      log7.warn(`起点资源 ${candidates.join(" / ")} 都不在已渲染的目录里，从本节开头重新找`);
+    if (cursor < 0 && parts.resourceId !== "") {
+      cursor = pool.findIndex((el2) => readSourceOf(el2)?.id === parts.resourceId);
+    }
+    if (cursor < 0 && afterId !== "" && afterId !== parts.resourceId) {
+      cursor = pool.findIndex((el2) => readSourceOf(el2)?.id === afterId);
+    }
+    if (cursor < 0) {
+      const tried = [];
+      if (lastClickedEl !== null && lastClickedKey === scopeKey) tried.push("上一轮点开的那一项");
+      if (parts.resourceId !== "") tried.push(`hash 里的 ${parts.resourceId}`);
+      if (afterId !== "" && afterId !== parts.resourceId) tried.push(`上游给的 ${afterId}`);
+      if (tried.length > 0) {
+        log7.warn(`${tried.join(" 与 ")} 都不在已渲染的目录里，从本节开头重新找`);
+      }
     }
     for (let i = cursor + 1; i < pool.length; i++) {
       const el2 = pool[i];
@@ -2586,13 +2604,13 @@ ${options.desc ?? ""}
           return { kind: "quiz", resourceId: src.id, taskId: src.taskId, title: src.title, url };
         }
         log7.info(`连播：打开测验 ${src.id}（旧版内嵌方式）`);
-        clickElement(el2);
+        clickElement(el2, true);
         return { kind: "quiz", resourceId: src.id, taskId: src.taskId, title: src.title, url: "" };
       }
       log7.info(
         `连播：打开${src.finished ? "已完成的" : ""}${labelOf(src.type)} ${src.id}${src.title === "" ? "" : `（${src.title}）`}`
       );
-      clickElement(el2);
+      clickElement(el2, true);
       return {
         kind: "clicked",
         id: src.id,
@@ -2609,6 +2627,16 @@ ${options.desc ?? ""}
           sectionExpandTriedFor = sectionKey;
           log7.info(`连播：节 ${parts.sectionId} 是折叠的（hide=true），点开它`);
           clickElement(title);
+          return { kind: "rendered" };
+        }
+      }
+      if (pointExpandTriedFor !== sectionKey) {
+        const inner = chapterCatalogNodes(secLi);
+        const first = inner[0];
+        if (first !== void 0) {
+          pointExpandTriedFor = sectionKey;
+          log7.info(`连播：本节没有直接资源，点开里面的子目录节点（共 ${inner.length} 个）`);
+          clickElement(first);
           return { kind: "rendered" };
         }
       }
@@ -3005,14 +3033,6 @@ ${options.desc ?? ""}
   var advanceHops = 0;
   var advanceTimer = null;
   var landedAt = 0;
-  var lastClicked = null;
-  function anchorFor() {
-    const parts = parseHash();
-    if (parts === null || lastClicked === null) return "";
-    if (lastClicked.chapterId !== parts.chapterId) return "";
-    if (lastClicked.sectionId !== parts.sectionId) return "";
-    return lastClicked.id;
-  }
   var blankRetries = 0;
   var BLANK_RETRY_MS = 1500;
   var BLANK_MAX_RETRIES = 3;
@@ -3046,17 +3066,9 @@ ${options.desc ?? ""}
       return;
     }
     advanceHops += 1;
-    const step = stepForward(anchorFor());
+    const step = stepForward();
     switch (step.kind) {
       case "clicked":
-        {
-          const parts = parseHash();
-          lastClicked = {
-            id: step.id,
-            chapterId: parts?.chapterId ?? "",
-            sectionId: parts?.sectionId ?? ""
-          };
-        }
         blankRetries = 0;
         stopAdvance();
         advancingUntil = Date.now() + ADVANCE_LOCK_MS;
@@ -8117,8 +8129,8 @@ ${text}
   // src/main.ts
   var log25 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-05T20:06:01.658Z" : null;
-  var BUILD_NO = true ? 63 : null;
+  var BUILD_TIME = true ? "2026-10-05T20:11:16.588Z" : null;
+  var BUILD_NO = true ? 64 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();

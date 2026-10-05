@@ -5,6 +5,26 @@
 > `src/sites/uooc/quiz.ts` + `quiz-return.ts`（测验来回）。
 > 有任何一条你不认，直接说编号，我改。
 >
+> **构建号 64 的三处修订**（依据用户 m01255 给的 1.4.1 页面采样）：
+> 1. **扫描起点改成记「元素」而不是 id** —— 第三层「点」里的附件，站点给的 `source.id`
+>    是 **0**（同一份采样里 `resources: [{id:'0', type:50}]`），一节里有多个这种附件时
+>    按 id 定位永远落在第一个上，又是一个死循环。现在记 `lastClickedEl`，
+>    `pool.indexOf(el)` 天然唯一。起点优先级：**上一轮点开的元素 > hash 的 resourceId > 上游给的 id**。
+> 2. **本节没有直接资源时，先点开里面的子目录节点**（第三层「点」）。
+> 3. 「资源项」的选择器早前已放宽为 `[ng-click^="goSource("]` —— 这份采样验证了它是对的
+>    （`resourceItem: 1` / `resourceItemStrict: 0`）。
+>
+> **实测到的三层目录结构**（两版都有，类名不同）：
+> | 层 | ng-repeat | 标题元素 | 资源 |
+> | --- | --- | --- | --- |
+> | 章 | `chapterItem in chapterList` | 新 `div.level_1_title` / 旧 `div.basic.chapter` | — |
+> | 节 | `sectionItem in chapterItem.children` | 新 `div.level_2_title` / 旧 `div.basic` | `source in sectionItem.unitSource` |
+> | **点** | `pointItem in sectionItem.children` | 新 `div.level_3_title`（在 `ul.level_3` 里）/ 旧 `div.basic`（在 `ul.rank-3` 里） | `source in pointItem.unitSource` |
+>
+> 标题指令一律是 `ng-click="toggleChapter(xxxItem)"` +
+> `ui-sref="main.chapter(.section)(.point)({...Id})"`；**新版章 / 节 / 点的 `li` 都没有 `id` 属性**，
+> id 只在 Angular scope 里。
+>
 > **构建号 63 的两处修订**：
 > 1. **扫描起点改为「两个都试」**：先试 hash 里的 `resourceId`，再试「上一轮真的点开的那个」。
 >    只认 hash 会死循环 —— 多层目录里 hash 可能还留着**更早那个资源**的 id，而它已经不在
