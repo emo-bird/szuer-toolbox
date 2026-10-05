@@ -49,7 +49,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-05T14:31:00.674Z（构建号 51） */
+/* 构建信息：2026-10-05T15:18:11.242Z（构建号 53） */
 
 "use strict";
 (() => {
@@ -500,12 +500,12 @@
       const node = el("div", { class: "sztb-toast", data: { kind }, text: message });
       this.root.appendChild(node);
       this.reposition();
-      const timer3 = window.setTimeout(() => {
-        this.timers.delete(timer3);
+      const timer4 = window.setTimeout(() => {
+        this.timers.delete(timer4);
         node.remove();
         this.reposition();
       }, durationMs);
-      this.timers.add(timer3);
+      this.timers.add(timer4);
     }
     /** 跟随悬浮球/面板位置显示（简化：固定右上角，避让面板宽度） */
     reposition() {
@@ -1564,6 +1564,14 @@ ${options.desc ?? ""}
       return url.split("?")[0] ?? url;
     }
   }
+  function qs(params) {
+    const sp = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) {
+      if (v === void 0 || v === null) continue;
+      sp.set(k, String(v));
+    }
+    return sp.toString();
+  }
 
   // src/common/ui/tabs/status.ts
   var provider = null;
@@ -1623,8 +1631,8 @@ ${options.desc ?? ""}
       root.appendChild(refresh);
     }
     repaint();
-    const timer3 = window.setInterval(repaint, 2e3);
-    return () => window.clearInterval(timer3);
+    const timer4 = window.setInterval(repaint, 2e3);
+    return () => window.clearInterval(timer4);
   }
   var statusTab = {
     id: "common:status",
@@ -1924,12 +1932,21 @@ ${options.desc ?? ""}
     /** 🟢 防失焦暂停（U4） */
     KEEP_PLAYING: "keep-playing",
     /** 🟠 自动连播（U3） */
-    AUTO_NEXT: "auto-next"
+    AUTO_NEXT: "auto-next",
+    /** 🔴 随机进度上报（心跳）—— 会往站点写进度 */
+    AUTO_PROGRESS: "auto-progress",
+    /** 🔴 自动作答（U8）—— 目前只是占位，还没有实现 */
+    AUTO_SOLVE: "auto-solve"
   };
   var VALUE = {
     /** 连播范围：章内 / 跨章 */
-    NEXT_SCOPE: "nextScope"
+    NEXT_SCOPE: "nextScope",
+    /** 进度上报间隔下限（秒） */
+    PROGRESS_MIN: "progressMin",
+    /** 进度上报间隔上限（秒） */
+    PROGRESS_MAX: "progressMax"
   };
+  var PROGRESS_DEFAULT = { min: "30", max: "90" };
   var UOOC_TOGGLES = [
     {
       id: TOGGLE.RATE_2X,
@@ -1962,6 +1979,22 @@ ${options.desc ?? ""}
       risk: "trace",
       default: false,
       group: "视频"
+    },
+    {
+      id: TOGGLE.AUTO_PROGRESS,
+      label: "进度上报",
+      desc: "按下面的随机间隔，替你把视频进度报给站点",
+      risk: "irreversible",
+      default: false,
+      group: "视频"
+    },
+    {
+      id: TOGGLE.AUTO_SOLVE,
+      label: "自动作答",
+      desc: "连播遇到没做过的测验时自动作答（还没实现，先占位）",
+      risk: "irreversible",
+      default: false,
+      group: "测验"
     }
   ];
   function registerUoocSettings() {
@@ -1977,11 +2010,43 @@ ${options.desc ?? ""}
         { value: "all", label: "跨章继续" }
       ]
     });
+    registerValue({
+      siteId: SITE_ID,
+      id: VALUE.PROGRESS_MIN,
+      label: "上报间隔下限",
+      desc: "秒。和下面的上限一起决定随机区间",
+      default: PROGRESS_DEFAULT.min,
+      kind: "number",
+      validate: (value) => positiveIntHint(value, 5, 3600)
+    });
+    registerValue({
+      siteId: SITE_ID,
+      id: VALUE.PROGRESS_MAX,
+      label: "上报间隔上限",
+      desc: "秒。改完立刻按新区间重新计时",
+      default: PROGRESS_DEFAULT.max,
+      kind: "number",
+      validate: (value) => positiveIntHint(value, 5, 3600)
+    });
+  }
+  function positiveIntHint(value, lo, hi) {
+    const n = Number(value);
+    if (!Number.isFinite(n) || !Number.isInteger(n)) return `要填整数秒（${lo} ~ ${hi}）`;
+    if (n < lo || n > hi) return `要填 ${lo} ~ ${hi} 之间的秒数`;
+    return null;
   }
   function applyUoocSettings() {
     const scope = getValue(SITE_ID, VALUE.NEXT_SCOPE);
     if (scope !== "chapter" && scope !== "all") {
       log5.warn(`连播范围取值异常（${scope}），按「止于本章」处理`);
+    }
+    const min = getValue(SITE_ID, VALUE.PROGRESS_MIN);
+    const max = getValue(SITE_ID, VALUE.PROGRESS_MAX);
+    if (positiveIntHint(min, 5, 3600) !== null) {
+      log5.warn(`上报间隔下限取值异常（${min}），按 ${PROGRESS_DEFAULT.min} 秒处理`);
+    }
+    if (positiveIntHint(max, 5, 3600) !== null) {
+      log5.warn(`上报间隔上限取值异常（${max}），按 ${PROGRESS_DEFAULT.max} 秒处理`);
     }
   }
 
@@ -2021,173 +2086,382 @@ ${options.desc ?? ""}
   // src/sites/uooc/catalog.ts
   var log6 = scoped("uooc/catalog");
   var RESOURCE_TYPE_VIDEO = 10;
+  var RESOURCE_TYPE_DOC = 60;
+  var RESOURCE_TYPE_QUIZ = 80;
+  var RESOURCE_ITEM_SELECTOR = `[ng-click="goSource(source, 'section')"]`;
+  var CHAPTER_TITLE_SELECTOR = '[ng-click="toggleChapter(chapterItem)"]';
+  var SECTION_TITLE_SELECTOR = '[ng-click="toggleChapter(sectionItem)"]';
+  var CHAPTER_ITEM_SELECTOR = 'li[ng-repeat="chapterItem in chapterList"]';
+  var SECTION_ITEM_SELECTOR = 'li[ng-repeat="sectionItem in chapterItem.children"]';
+  var NUMERIC = /^\d+$/;
+  function isObject(v) {
+    return typeof v === "object" && v !== null;
+  }
+  function asString(v) {
+    return v === null || v === void 0 ? "" : String(v);
+  }
+  function asNumber(v) {
+    const n = typeof v === "number" ? v : Number(v);
+    return Number.isFinite(n) ? n : -1;
+  }
+  function asBool(v) {
+    return v === true || v === 1 || v === "1" || v === "true";
+  }
+  function asElement(el2) {
+    return el2 instanceof HTMLElement ? el2 : null;
+  }
+  function queryAll(selector, root = document) {
+    const out = [];
+    for (const el2 of root.querySelectorAll(selector)) {
+      if (el2 instanceof HTMLElement) out.push(el2);
+    }
+    return out;
+  }
+  function queryOne(selector, root) {
+    return asElement(root.querySelector(selector));
+  }
   function angular() {
     const w = pageOrSelf();
     const ng = w["angular"];
-    if (ng === null || typeof ng !== "object") return null;
-    const like = ng;
-    return typeof like.element === "function" ? like : null;
+    if (!isObject(ng)) return null;
+    if (typeof ng["element"] !== "function") return null;
+    return ng;
   }
   function scopeOf(el2) {
     const ng = angular();
-    if (ng === null || ng.element === void 0) return null;
+    if (ng === null) return null;
     try {
-      return ng.element(el2).scope?.() ?? null;
+      const jq = ng.element(el2);
+      if (jq === null || jq === void 0) return null;
+      const s = jq.scope();
+      return isObject(s) ? s : null;
     } catch {
       return null;
     }
   }
-  function isObject(v) {
-    return typeof v === "object" && v !== null;
-  }
-  function looksLikeResource(v) {
-    return isObject(v) && "id" in v && "type" in v;
-  }
-  function looksLikeChapter(v) {
-    return isObject(v) && "id" in v && Array.isArray(v["children"]);
-  }
-  function looksLikeSection(v) {
-    return isObject(v) && "id" in v;
-  }
-  function findCatalog(start) {
-    let scope = start;
-    for (let depth = 0; scope !== null && scope !== void 0 && depth < 15; depth++) {
-      for (const key of Object.keys(scope)) {
-        if (key.startsWith("$")) continue;
-        let value;
-        try {
-          value = scope[key];
-        } catch {
-          continue;
-        }
-        if (!Array.isArray(value) || value.length === 0) continue;
-        let hits = 0;
-        for (const item of value) {
-          if (looksLikeChapter(item)) hits += 1;
-        }
-        if (hits > 0 && hits * 2 >= value.length) {
-          log6.debug(`目录数组定位成功：scope.${key}（${value.length} 章，距起点 ${depth} 层）`);
-          return value;
-        }
-      }
-      scope = scope.$parent ?? null;
-    }
-    return null;
-  }
-  function findUnits(section) {
-    for (const key of Object.keys(section)) {
-      if (key.startsWith("$")) continue;
-      const value = section[key];
-      if (!Array.isArray(value) || value.length === 0) continue;
-      let hits = 0;
-      for (const item of value) {
-        if (looksLikeResource(item)) hits += 1;
-      }
-      if (hits > 0 && hits * 2 >= value.length) return value;
-    }
-    return null;
-  }
-  function findStartScope() {
-    const candidates = document.querySelectorAll(".basic.active, [ng-repeat]");
-    for (const el2 of Array.from(candidates)) {
-      const scope = scopeOf(el2);
-      if (scope === null) continue;
-      for (const key of ["source", "item", "unit", "resource"]) {
-        if (looksLikeResource(scope[key])) return scope;
-      }
-    }
-    return null;
-  }
-  function readCatalog() {
-    if (angular() === null) {
-      log6.warn("页面上没有 angular，读不到目录（连播不可用）");
-      return null;
-    }
-    const start = findStartScope();
-    if (start === null) {
-      log6.warn("找不到目录里的资源节点，读不到目录（连播不可用）");
-      return null;
-    }
-    const chapters = findCatalog(start);
-    if (chapters === null) {
-      log6.warn("从资源节点往上爬不到目录数组，读不到目录（连播不可用）");
-      return null;
-    }
-    const out = [];
-    for (const chapter of chapters) {
-      if (!looksLikeChapter(chapter)) continue;
-      const chapterId = String(chapter["id"]);
-      const children = chapter["children"];
-      for (const section of children) {
-        if (!looksLikeSection(section)) continue;
-        const sectionId = String(section["id"]);
-        const units = findUnits(section);
-        if (units === null) continue;
-        for (const unit of units) {
-          if (!looksLikeResource(unit)) continue;
-          const rec = unit;
-          const id = rec["id"];
-          const type = rec["type"];
-          if (id === void 0 || id === null) continue;
-          out.push({
-            id: String(id),
-            type: typeof type === "number" ? type : Number(type),
-            title: String(rec["title"] ?? rec["name"] ?? ""),
-            chapterId,
-            sectionId
-          });
-        }
-      }
-    }
-    log6.debug(`目录读出 ${out.length} 条资源（${chapters.length} 章）`);
-    return out.length > 0 ? out : null;
-  }
   function parseHash(hash = location.hash) {
-    const m = /^#\/([^/]+)\/([^/]+)\/([^/]+)\/([^/]+)/.exec(hash);
-    if (m === null) return null;
-    const [, cid, chapterId, sectionId, resourceId] = m;
-    if (cid === void 0 || chapterId === void 0 || sectionId === void 0 || resourceId === void 0) {
-      return null;
-    }
-    return { cid, chapterId, sectionId, resourceId };
+    const raw = hash.startsWith("#") ? hash.slice(1) : hash;
+    const parts = raw.split("/").filter((p) => p !== "");
+    const pick2 = (i) => {
+      const v = parts[i];
+      return v !== void 0 && NUMERIC.test(v) ? v : "";
+    };
+    const cid = pick2(0);
+    if (cid === "") return null;
+    return { cid, chapterId: pick2(1), sectionId: pick2(2), resourceId: pick2(3) };
   }
-  function findResourceElement(resource) {
-    const roots = [];
-    const sectionEl = document.getElementById(resource.sectionId);
-    if (sectionEl !== null) roots.push(sectionEl);
-    roots.push(document);
-    for (const root of roots) {
-      const nodes = root.querySelectorAll("[ng-repeat], .basic, .resourcelist > *");
-      for (const node of Array.from(nodes)) {
-        const scope = scopeOf(node);
-        if (scope === null) continue;
-        for (const key of ["source", "item", "unit", "resource"]) {
-          const value = scope[key];
-          if (looksLikeResource(value) && String(value["id"]) === resource.id) {
-            return node;
-          }
-        }
-      }
+  function readSourceOf(el2) {
+    const scope = scopeOf(el2);
+    const raw = scope?.["source"];
+    if (!isObject(raw)) return null;
+    const id = asString(raw["id"]);
+    const type = asNumber(raw["type"]);
+    if (id === "" || type < 0) return null;
+    const pos = asNumber(raw["video_pos"]);
+    return {
+      id,
+      type,
+      isTask: asBool(raw["is_task"]),
+      taskId: asString(raw["task_id"]),
+      title: asString(raw["title"]),
+      finished: asBool(raw["finished"]),
+      videoPos: pos > 0 ? pos : 0
+    };
+  }
+  function resourceItems() {
+    return queryAll(RESOURCE_ITEM_SELECTOR);
+  }
+  function chapterItems() {
+    return queryAll(CHAPTER_ITEM_SELECTOR);
+  }
+  function sectionItems(chapterLi) {
+    return queryAll(SECTION_ITEM_SELECTOR, chapterLi);
+  }
+  function findChapterItem(chapterId) {
+    const all = chapterItems();
+    for (const li of all) {
+      if (li.getAttribute("id") === chapterId) return li;
+    }
+    for (const li of all) {
+      const item = scopeOf(li)?.["chapterItem"];
+      if (isObject(item) && asString(item["id"]) === chapterId) return li;
     }
     return null;
   }
-  function navigateToResource(resource, cid) {
-    const el2 = findResourceElement(resource);
-    if (el2 !== null) {
-      el2.click();
-      return "click";
+  function findSectionIndex(sections, sectionId) {
+    for (let i = 0; i < sections.length; i++) {
+      if (sections[i]?.getAttribute("id") === sectionId) return i;
+    }
+    return -1;
+  }
+  function stepForward() {
+    if (angular() === null) {
+      return { kind: "stop", reason: "页面上没有 angular，读不到目录" };
     }
     const parts = parseHash();
-    const courseId = parts?.cid ?? cid;
-    if (courseId === "") return "none";
-    const next = `#/${courseId}/${resource.chapterId}/${resource.sectionId}/${resource.id}/section`;
-    if (location.hash === next) return "none";
-    location.hash = next;
-    return "hash";
+    if (parts === null || parts.chapterId === "") {
+      return { kind: "stop", reason: "当前不在学习页的资源路由上" };
+    }
+    const chapterLi = findChapterItem(parts.chapterId);
+    if (chapterLi === null) {
+      return { kind: "stop", reason: `目录里找不到章 ${parts.chapterId}（目录可能还没加载完）` };
+    }
+    const sections = sectionItems(chapterLi);
+    if (parts.sectionId === "") {
+      const first = sections[0];
+      if (first !== void 0) {
+        const title = queryOne(SECTION_TITLE_SELECTOR, first);
+        if (title !== null) {
+          log6.info("连播：进入下一章的第一节");
+          title.click();
+          return { kind: "rendered" };
+        }
+      }
+      const chapterTitle = queryOne(CHAPTER_TITLE_SELECTOR, chapterLi);
+      if (chapterTitle === null) {
+        return { kind: "stop", reason: `章 ${parts.chapterId} 上没有可点的标题节点` };
+      }
+      chapterTitle.click();
+      return { kind: "rendered" };
+    }
+    const secIndex = findSectionIndex(sections, parts.sectionId);
+    const secLi = secIndex >= 0 ? sections[secIndex] : void 0;
+    const all = resourceItems();
+    let pool = all;
+    if (secLi !== void 0) {
+      const owned = all.filter((el2) => el2.closest(SECTION_ITEM_SELECTOR) === secLi);
+      if (owned.length > 0) pool = owned;
+    }
+    let cursor = -1;
+    if (parts.resourceId !== "") {
+      for (let i = 0; i < pool.length; i++) {
+        const s = readSourceOf(pool[i]);
+        if (s !== null && s.id === parts.resourceId) {
+          cursor = i;
+          break;
+        }
+      }
+      if (cursor < 0) {
+        log6.warn(`hash 里的资源 ${parts.resourceId} 不在已渲染的目录里，从本节开头重新找`);
+      }
+    }
+    for (let i = cursor + 1; i < pool.length; i++) {
+      const el2 = pool[i];
+      const src = readSourceOf(el2);
+      if (src === null) continue;
+      if (src.type === RESOURCE_TYPE_VIDEO) {
+        if (src.finished || src.videoPos > 0) {
+          log6.info(`跳过已看过的视频 ${src.id}${src.title === "" ? "" : `（${src.title}）`}`);
+          continue;
+        }
+        log6.info(`连播：打开下一个视频 ${src.id}${src.title === "" ? "" : `（${src.title}）`}`);
+        el2.click();
+        return { kind: "clicked", id: src.id, title: src.title };
+      }
+      if (src.type === RESOURCE_TYPE_QUIZ) {
+        if (src.finished) {
+          log6.info(`跳过已做过的测验 ${src.taskId}`);
+          continue;
+        }
+        return { kind: "quiz", taskId: src.taskId, title: src.title };
+      }
+      const label = src.type === RESOURCE_TYPE_DOC ? "文档" : "附件";
+      log6.info(`跳过${label} ${src.id}${src.title === "" ? "" : `（${src.title}）`}`);
+    }
+    if (secLi === void 0) {
+      return { kind: "stop", reason: `章 ${parts.chapterId} 里找不到节 ${parts.sectionId}` };
+    }
+    if (secIndex + 1 < sections.length) {
+      const next = sections[secIndex + 1];
+      const title = queryOne(SECTION_TITLE_SELECTOR, next);
+      if (title === null) {
+        return { kind: "stop", reason: "下一个节上没有可点的标题节点" };
+      }
+      log6.info(`连播：本节没有可播的资源，进入下一个节 ${next.getAttribute("id") ?? ""}`);
+      title.click();
+      return { kind: "rendered" };
+    }
+    return { kind: "chapter-end" };
+  }
+  function goNextChapter() {
+    const parts = parseHash();
+    if (parts === null) return false;
+    const all = chapterItems();
+    const idx = all.findIndex((li) => li.getAttribute("id") === parts.chapterId);
+    if (idx < 0 || idx + 1 >= all.length) return false;
+    const next = all[idx + 1];
+    const title = queryOne(CHAPTER_TITLE_SELECTOR, next);
+    if (title === null) return false;
+    log6.info(`连播：跨到下一章 ${next.getAttribute("id") ?? ""}`);
+    title.click();
+    return true;
+  }
+  var SCOPE_MAX_DEPTH = 15;
+  function activeResourceItem() {
+    return queryOne(`${RESOURCE_ITEM_SELECTOR}.active`, document);
+  }
+  function readLearnContext(el2) {
+    const hash = parseHash();
+    if (hash === null) return null;
+    const chapterLi = asElement(el2.closest(CHAPTER_ITEM_SELECTOR));
+    const sectionLi = asElement(el2.closest(SECTION_ITEM_SELECTOR));
+    const chapterId = chapterLi?.getAttribute("id") ?? hash.chapterId;
+    const sectionId = sectionLi?.getAttribute("id") ?? hash.sectionId;
+    const resourceId = readSourceOf(el2)?.id ?? hash.resourceId;
+    if (chapterId === "" || sectionId === "" || resourceId === "") return null;
+    return { cid: hash.cid, chapterId, sectionId, resourceId };
+  }
+  function findScopeFunction(el2, names) {
+    let scope = scopeOf(el2);
+    for (let depth = 0; scope !== null && depth < SCOPE_MAX_DEPTH; depth += 1) {
+      for (const name of names) {
+        const fn = scope[name];
+        if (typeof fn === "function") return fn;
+      }
+      const parent = scope["$parent"];
+      scope = isObject(parent) ? parent : null;
+    }
+    return null;
+  }
+
+  // src/sites/uooc/progress.ts
+  var log7 = scoped("uooc/progress");
+  var MARK_PATH = "/home/learn/markVideoLearn";
+  var SITE_FN_NAMES = ["LearnMark", "learnMark", "markVideoLearn"];
+  var FIXED_PARAMS = [
+    ["hidemsg_", "true"],
+    ["network", "2"],
+    ["source", "1"],
+    ["subsection_id", "0"]
+  ];
+  var MIN_INTERVAL_S = 5;
+  var MAX_INTERVAL_S = 3600;
+  var current = null;
+  var lastKey = "";
+  var timer2 = null;
+  var sent = 0;
+  function describe(err) {
+    return err instanceof Error ? err.message : String(err);
+  }
+  function clampInt(raw, fallback, lo, hi) {
+    const n = typeof raw === "number" ? raw : Number.parseInt(String(raw ?? ""), 10);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.min(hi, Math.max(lo, Math.trunc(n)));
+  }
+  function intervalRange() {
+    const min = clampInt(
+      getValue(SITE_ID, VALUE.PROGRESS_MIN),
+      clampInt(PROGRESS_DEFAULT.min, 30, MIN_INTERVAL_S, MAX_INTERVAL_S),
+      MIN_INTERVAL_S,
+      MAX_INTERVAL_S
+    );
+    const max = clampInt(
+      getValue(SITE_ID, VALUE.PROGRESS_MAX),
+      clampInt(PROGRESS_DEFAULT.max, 90, min, MAX_INTERVAL_S),
+      min,
+      MAX_INTERVAL_S
+    );
+    return { min, max };
+  }
+  function nextDelayMs() {
+    const { min, max } = intervalRange();
+    const span = max - min;
+    return (min + Math.random() * span) * 1e3;
+  }
+  function sceneKey() {
+    const h = parseHash();
+    const where = h === null ? "" : `${h.cid}/${h.chapterId}/${h.sectionId}/${h.resourceId}`;
+    const on = isEnabled(SITE_ID, TOGGLE.AUTO_PROGRESS) ? "1" : "0";
+    const { min, max } = intervalRange();
+    return `${where}|${on}|${min}-${max}`;
+  }
+  function clearTimer() {
+    if (timer2 !== null) {
+      clearTimeout(timer2);
+      timer2 = null;
+    }
+  }
+  function schedule2() {
+    clearTimer();
+    if (!isEnabled(SITE_ID, TOGGLE.AUTO_PROGRESS)) return;
+    const delay = nextDelayMs();
+    timer2 = setTimeout(tick, delay);
+    log7.debug(`进度上报：${Math.round(delay / 1e3)} 秒后再报一次`);
+  }
+  async function report(v) {
+    const el2 = activeResourceItem();
+    if (el2 === null) {
+      log7.warn("进度上报：目录里找不到当前资源（`.active`），这次跳过");
+      return;
+    }
+    const ctx = readLearnContext(el2);
+    if (ctx === null) {
+      log7.warn("进度上报：拿不到 课程/章/节/资源 id，这次跳过");
+      return;
+    }
+    const payload = {
+      chapter_id: ctx.chapterId,
+      cid: ctx.cid,
+      resource_id: ctx.resourceId,
+      section_id: ctx.sectionId,
+      video_length: v.duration.toFixed(2),
+      video_pos: v.currentTime.toFixed(2)
+    };
+    for (const [k, val] of FIXED_PARAMS) payload[k] = val;
+    const fn = findScopeFunction(v, SITE_FN_NAMES);
+    if (fn !== null) {
+      try {
+        fn(payload);
+        sent += 1;
+        log7.info(`进度上报（站点函数，第 ${sent} 次）：${payload["video_pos"]}s / ${payload["video_length"]}s`);
+        return;
+      } catch (err) {
+        log7.warn(`站点函数上报抛错（${describe(err)}），这次改走直连`);
+      }
+    }
+    try {
+      const res = await request({
+        url: MARK_PATH,
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        data: qs(payload),
+        priority: PRIORITY.NORMAL
+      });
+      sent += 1;
+      if (res.status < 200 || res.status >= 300) {
+        log7.warn(`进度上报（直连）返回 ${res.status}（第 ${sent} 次）：${res.text.slice(0, 120)}`);
+        return;
+      }
+      log7.info(`进度上报（直连，第 ${sent} 次）：${payload["video_pos"]}s / ${payload["video_length"]}s`);
+    } catch (err) {
+      log7.warn(`进度上报（直连）请求失败：${describe(err)}`);
+    }
+  }
+  function tick() {
+    timer2 = null;
+    if (!isEnabled(SITE_ID, TOGGLE.AUTO_PROGRESS)) return;
+    const v = current;
+    if (v !== null && !v.paused && !v.ended && v.currentTime > 0 && v.readyState >= 2) {
+      void report(v);
+    }
+    schedule2();
+  }
+  function noteVideo(v) {
+    const key = sceneKey();
+    if (v === current && key === lastKey) return;
+    if (v !== current) log7.debug("进度上报：扫到新的播放器，重新计时");
+    current = v;
+    lastKey = key;
+    schedule2();
+  }
+  function stopProgress() {
+    clearTimer();
+    current = null;
+    lastKey = "";
   }
 
   // src/sites/uooc/video.ts
-  var log7 = scoped("uooc/video");
+  var log8 = scoped("uooc/video");
   var VIDEO_ID = "player_html5_api";
   var TARGET_RATE = 2;
   var RESCAN_DEBOUNCE_MS = 200;
@@ -2213,7 +2487,7 @@ ${options.desc ?? ""}
       if (stamps.length >= FIGHT_MAX) {
         mutedUntil = now + FIGHT_COOLDOWN_MS;
         stamps.length = 0;
-        log7.warn(`${label}在 ${FIGHT_WINDOW_MS / 1e3} 秒内被反复改回，暂停纠正 ${FIGHT_COOLDOWN_MS / 1e3} 秒`);
+        log8.warn(`${label}在 ${FIGHT_WINDOW_MS / 1e3} 秒内被反复改回，暂停纠正 ${FIGHT_COOLDOWN_MS / 1e3} 秒`);
         return false;
       }
       stamps.push(now);
@@ -2246,7 +2520,7 @@ ${options.desc ?? ""}
       const found = asVideo(doc.getElementById(VIDEO_ID)) ?? asVideo(doc.querySelector("video"));
       if (found !== null) {
         cachedFrameVideo = found;
-        log7.debug("播放器在同源 iframe 内，已切换查找目标");
+        log8.debug("播放器在同源 iframe 内，已切换查找目标");
         return found;
       }
     }
@@ -2254,61 +2528,94 @@ ${options.desc ?? ""}
   }
   var advancingUntil = 0;
   var pendingAutoplayAt = 0;
-  function currentResourceId() {
-    return parseHash()?.resourceId ?? null;
+  var advanceDeadline = 0;
+  var advanceHops = 0;
+  var advanceTimer = null;
+  var landedAt = 0;
+  var ADVANCE_HOP_DELAY_MS = 700;
+  var ADVANCE_MAX_HOPS = 40;
+  var ADVANCE_SESSION_MS = 45e3;
+  function stopAdvance() {
+    if (advanceTimer !== null) {
+      clearTimeout(advanceTimer);
+      advanceTimer = null;
+    }
+    advanceDeadline = 0;
+    advanceHops = 0;
+    landedAt = 0;
   }
-  function pickNextResource() {
-    const catalog = readCatalog();
-    if (catalog === null) return null;
-    const currentId = currentResourceId();
-    if (currentId === null) {
-      log7.warn("hash 里读不到当前资源 id（不是学习页的资源路由？），不连播");
-      return null;
-    }
-    const index = catalog.findIndex((r) => r.id === currentId);
-    if (index < 0) {
-      log7.warn(`当前资源 ${currentId} 不在目录里（可能是目录尚未加载完），不连播`);
-      return null;
-    }
-    const current = catalog[index];
-    const sameChapterOnly = getValue(SITE_ID, VALUE.NEXT_SCOPE) !== "all";
-    for (let i = index + 1; i < catalog.length; i++) {
-      const item = catalog[i];
-      if (item === void 0) continue;
-      if (item.type !== RESOURCE_TYPE_VIDEO) continue;
-      if (sameChapterOnly && current !== void 0 && item.chapterId !== current.chapterId) {
-        log7.info("已到本章最后一个视频（连播范围＝止于本章），停在这里");
-        return null;
-      }
-      return item;
-    }
-    log7.info("目录里后面没有视频了，连播结束");
-    return null;
+  function scheduleAdvanceHop(delay) {
+    if (advanceTimer !== null) clearTimeout(advanceTimer);
+    advanceTimer = setTimeout(runAdvanceHop, delay);
   }
-  function advanceToNext() {
-    if (!isEnabled(SITE_ID, TOGGLE.AUTO_NEXT)) return;
-    if (Date.now() < advancingUntil) return;
-    const next = pickNextResource();
-    if (next === null) return;
-    advancingUntil = Date.now() + ADVANCE_LOCK_MS;
-    pendingAutoplayAt = Date.now();
-    const parts = parseHash();
-    const how = navigateToResource(
-      {
-        id: next.id,
-        type: RESOURCE_TYPE_VIDEO,
-        title: next.title,
-        chapterId: next.chapterId,
-        sectionId: next.sectionId
-      },
-      parts?.cid ?? ""
-    );
-    if (how === "none") {
-      pendingAutoplayAt = 0;
-      log7.warn(`找不到下一个视频 ${next.id} 的入口，连播中断`);
+  function runAdvanceHop() {
+    advanceTimer = null;
+    if (advanceDeadline === 0) return;
+    if (advanceHops >= ADVANCE_MAX_HOPS) {
+      log8.warn(`连播放弃：已经走了 ${ADVANCE_MAX_HOPS} 步还没找到可播的视频`);
+      stopAdvance();
       return;
     }
-    log7.info(`连播：下一个视频 ${next.id}${next.title === "" ? "" : `（${next.title}）`}，跳转方式＝${how}`);
+    if (Date.now() > advanceDeadline) {
+      log8.warn(`连播放弃：这一轮开了 ${Math.round(ADVANCE_SESSION_MS / 1e3)} 秒还没找到可播的视频`);
+      stopAdvance();
+      return;
+    }
+    advanceHops += 1;
+    const step = stepForward();
+    switch (step.kind) {
+      case "clicked":
+        advancingUntil = Date.now() + ADVANCE_LOCK_MS;
+        pendingAutoplayAt = Date.now();
+        landedAt = Date.now();
+        stopAdvance();
+        return;
+      case "quiz":
+        log8.info(
+          `连播停在测验 ${step.taskId}${step.title === "" ? "" : `（${step.title}）`}：没做过的测验不会自动跳过`
+        );
+        if (isEnabled(SITE_ID, TOGGLE.AUTO_SOLVE)) {
+          log8.warn("「自动作答」只做了开关，功能还没实现，先停在这一题");
+        }
+        stopAdvance();
+        return;
+      case "rendered":
+        scheduleAdvanceHop(ADVANCE_HOP_DELAY_MS);
+        return;
+      case "chapter-end":
+        if (getValue(SITE_ID, VALUE.NEXT_SCOPE) !== "all") {
+          log8.info("已到本章最后一个视频（连播范围＝止于本章），停在这里");
+          stopAdvance();
+          return;
+        }
+        if (goNextChapter()) {
+          scheduleAdvanceHop(ADVANCE_HOP_DELAY_MS);
+          return;
+        }
+        log8.info("目录里后面没有视频了，连播结束");
+        stopAdvance();
+        return;
+      default:
+        log8.warn(`连播中断：${step.reason}`);
+        stopAdvance();
+        return;
+    }
+  }
+  function startAdvance() {
+    if (!isEnabled(SITE_ID, TOGGLE.AUTO_NEXT)) return;
+    if (Date.now() < advancingUntil) return;
+    stopAdvance();
+    advanceDeadline = Date.now() + ADVANCE_SESSION_MS;
+    scheduleAdvanceHop(0);
+  }
+  function breakStall(v) {
+    if (landedAt === 0) return;
+    if (Date.now() - landedAt < ADVANCE_LOCK_MS + 4e3) return;
+    if (v.currentTime <= 3 || v.ended) return;
+    if (!v.paused || hasStarted.has(v)) return;
+    log8.info(`落点停在 ${Math.round(v.currentTime)}s 一直没播起来，按「看过的视频」继续往后跳`);
+    landedAt = 0;
+    startAdvance();
   }
   function tryPendingAutoplay(v) {
     if (pendingAutoplayAt === 0) return;
@@ -2326,7 +2633,7 @@ ${options.desc ?? ""}
     const p = v.play();
     if (p !== void 0 && typeof p.catch === "function") {
       p.catch((err) => {
-        log7.warn(`连播后自动播放被拒绝：${err instanceof Error ? err.message : String(err)}`);
+        log8.warn(`连播后自动播放被拒绝：${err instanceof Error ? err.message : String(err)}`);
       });
     }
   }
@@ -2358,10 +2665,12 @@ ${options.desc ?? ""}
     }
     applied.set(v, state);
     tryPendingAutoplay(v);
+    breakStall(v);
+    noteVideo(v);
     if (!announced.has(v)) {
       announced.add(v);
-      log7.info(
-        `播放器助手已就绪：二倍速=${wantRate ? "开" : "关"}，静音=${wantMute ? "开" : "关"}，防失焦=${isEnabled(SITE_ID, TOGGLE.KEEP_PLAYING) ? "开" : "关"}，自动连播=${isEnabled(SITE_ID, TOGGLE.AUTO_NEXT) ? "开" : "关"}（当前速率 ${v.playbackRate}x）`
+      log8.info(
+        `播放器助手已就绪：二倍速=${wantRate ? "开" : "关"}，静音=${wantMute ? "开" : "关"}，防失焦=${isEnabled(SITE_ID, TOGGLE.KEEP_PLAYING) ? "开" : "关"}，自动连播=${isEnabled(SITE_ID, TOGGLE.AUTO_NEXT) ? "开" : "关"}，进度上报=${isEnabled(SITE_ID, TOGGLE.AUTO_PROGRESS) ? "开" : "关"}（当前速率 ${v.playbackRate}x）`
       );
     }
   }
@@ -2374,7 +2683,7 @@ ${options.desc ?? ""}
     const p = v.play();
     if (p !== void 0 && typeof p.catch === "function") {
       p.catch((err) => {
-        log7.debug(`抢播被拒绝：${err instanceof Error ? err.message : String(err)}`);
+        log8.debug(`抢播被拒绝：${err instanceof Error ? err.message : String(err)}`);
       });
     }
   }
@@ -2391,7 +2700,7 @@ ${options.desc ?? ""}
         restorePlayback(v);
         return;
       case "ended":
-        advanceToNext();
+        startAdvance();
         return;
       case "ratechange":
         if (isEnabled(SITE_ID, TOGGLE.RATE_2X) && v.playbackRate !== TARGET_RATE && rateGuard()) {
@@ -2419,22 +2728,22 @@ ${options.desc ?? ""}
     "volumechange"
   ];
   function startVideoAssist() {
-    let timer3 = null;
+    let timer4 = null;
     let stopped = false;
     const scan2 = () => {
       if (stopped) return;
       const v = findVideo();
       if (v !== null) apply(v);
     };
-    const schedule2 = () => {
-      if (stopped || timer3 !== null) return;
-      timer3 = window.setTimeout(() => {
-        timer3 = null;
+    const schedule3 = () => {
+      if (stopped || timer4 !== null) return;
+      timer4 = window.setTimeout(() => {
+        timer4 = null;
         scan2();
       }, RESCAN_DEBOUNCE_MS);
     };
     scan2();
-    const observer = new MutationObserver(schedule2);
+    const observer = new MutationObserver(schedule3);
     observer.observe(document.documentElement, { childList: true, subtree: true });
     const onLoad = () => scan2();
     document.addEventListener("loadstart", onLoad, true);
@@ -2444,26 +2753,27 @@ ${options.desc ?? ""}
     document.addEventListener("pause", onMediaEvent, true);
     document.addEventListener("ratechange", onMediaEvent, true);
     document.addEventListener("volumechange", onMediaEvent, true);
-    window.addEventListener("hashchange", schedule2);
-    window.addEventListener("popstate", schedule2);
-    log7.debug("视频助手已挂载（二倍速 / 静音 / 防失焦）");
+    window.addEventListener("hashchange", schedule3);
+    window.addEventListener("popstate", schedule3);
+    log8.debug("视频助手已挂载（二倍速 / 静音 / 防失焦）");
     return () => {
       stopped = true;
-      if (timer3 !== null) {
-        window.clearTimeout(timer3);
-        timer3 = null;
+      stopProgress();
+      if (timer4 !== null) {
+        window.clearTimeout(timer4);
+        timer4 = null;
       }
       observer.disconnect();
       document.removeEventListener("loadstart", onLoad, true);
       document.removeEventListener("loadedmetadata", onLoad, true);
       for (const type of MEDIA_EVENTS) document.removeEventListener(type, onMediaEvent, true);
-      window.removeEventListener("hashchange", schedule2);
-      window.removeEventListener("popstate", schedule2);
+      window.removeEventListener("hashchange", schedule3);
+      window.removeEventListener("popstate", schedule3);
     };
   }
 
   // src/sites/uooc/index.ts
-  var log8 = scoped("site/uooc");
+  var log9 = scoped("site/uooc");
   var HOSTS = ["uooc.net.cn", "*.uooc.net.cn"];
   var PAGES = ["/home/learn/index*", "/home/learn/new/*", "/exam/*"];
   var LEARN_PATH_PREFIX = "/home/learn/";
@@ -2489,16 +2799,16 @@ ${options.desc ?? ""}
       if (onLearnPage) {
         startVideoAssist();
       } else {
-        log8.debug(`非学习页（${location.pathname}），本次不启动视频助手`);
+        log9.debug(`非学习页（${location.pathname}），本次不启动视频助手`);
       }
-      log8.info(
+      log9.info(
         `UOOC 适配器已启用：isFeaturePage=${String(ctx.isFeaturePage)}，路径=${location.pathname}，视频助手=${onLearnPage ? "已挂载" : "未挂载"}`
       );
     }
   };
 
   // src/sites/bkxk/settings.ts
-  var log9 = scoped("bkxk/settings");
+  var log10 = scoped("bkxk/settings");
   var SITE_ID2 = "bkxk";
   var TOGGLE2 = {
     /** 🔴 写接口总开关（抢课）。旧仓库红线 R1：默认 false，不得改 */
@@ -2643,13 +2953,13 @@ ${options.desc ?? ""}
     const raw = getValue(SITE_ID2, VALUE2.INTERVAL_MS);
     const ms = clampLimit("intervalMs", raw);
     if (isBelowRecommended("intervalMs", ms)) {
-      log9.warn(`请求间隔被设为 ${ms}ms，低于建议下限 ${LIMITS.intervalMs.recommended}ms`);
+      log10.warn(`请求间隔被设为 ${ms}ms，低于建议下限 ${LIMITS.intervalMs.recommended}ms`);
     }
     setIntervalMs(ms);
   }
 
   // src/sites/bkxk/session.ts
-  var log10 = scoped("bkxk/session");
+  var log11 = scoped("bkxk/session");
   var DEFAULT_CAMPUS = "01";
   var EMPTY_SESSION = {
     studentCode: "",
@@ -2708,7 +3018,7 @@ ${options.desc ?? ""}
   function readSession() {
     const ss = pageSessionStorage();
     if (ss === null) {
-      log10.warn("读不到 sessionStorage，按未登录处理");
+      log11.warn("读不到 sessionStorage，按未登录处理");
       return EMPTY_SESSION;
     }
     try {
@@ -2718,7 +3028,7 @@ ${options.desc ?? ""}
         token: ss.getItem("token")
       });
     } catch (err) {
-      log10.warn("读取会话失败，按未登录处理", err);
+      log11.warn("读取会话失败，按未登录处理", err);
       return EMPTY_SESSION;
     }
   }
@@ -2821,7 +3131,7 @@ ${options.desc ?? ""}
   }
 
   // src/sites/bkxk/legacy.ts
-  var log11 = scoped("bkxk/legacy");
+  var log12 = scoped("bkxk/legacy");
   var LEGACY_SETTINGS_KEY = "szubkxk.settings.v2";
   var LEGACY_STORE_PREFIX = "szubkxk.v2.";
   var LEGACY_DATA_KEY = {
@@ -2864,7 +3174,7 @@ ${options.desc ?? ""}
     return v;
   }
   function planMigration(snapshot, alreadyMigrated) {
-    const report = [];
+    const report2 = [];
     const notices = [];
     if (alreadyMigrated) {
       return { entries: [], report: ["旧数据已迁移过，本次跳过。"], notices: [], empty: true };
@@ -2890,7 +3200,7 @@ ${options.desc ?? ""}
           if (s === "") continue;
           entries2.push({ key: `value:bkxk:${m.to}`, value: s });
         }
-        report.push(`设置 ${m.from} → ${m.to}`);
+        report2.push(`设置 ${m.from} → ${m.to}`);
       }
       for (const d of DANGER_TOGGLE_MAP) {
         if (settings[d.from] === true) {
@@ -2906,7 +3216,7 @@ ${options.desc ?? ""}
         const slim = parseCustomCourses(ccRaw);
         const dropped = ccRaw.length - slim.length;
         entries2.push({ key: CUSTOM_COURSES_KEY, value: slim });
-        report.push(`自定义课程 ${slim.length} 门 → ${CUSTOM_COURSES_KEY}`);
+        report2.push(`自定义课程 ${slim.length} 门 → ${CUSTOM_COURSES_KEY}`);
         if (dropped > 0) notices.push(`有 ${dropped} 条自定义课程缺少 name / id，已丢弃。`);
       } else {
         notices.push("旧自定义课程不是数组，已跳过。");
@@ -2924,12 +3234,12 @@ ${options.desc ?? ""}
         continue;
       }
       entries2.push({ key: blob.newKey, value: parsed });
-      report.push(blob.label);
+      report2.push(blob.label);
     }
     if (entries2.length === 0) {
-      report.push("旧数据里没有可迁移的内容。");
+      report2.push("旧数据里没有可迁移的内容。");
     }
-    return { entries: entries2, report, notices, empty: entries2.length === 0 };
+    return { entries: entries2, report: report2, notices, empty: entries2.length === 0 };
   }
   function planCustomCarry(siteValue, commonValue) {
     const rawCount2 = Array.isArray(siteValue) ? siteValue.length : 0;
@@ -2962,12 +3272,12 @@ ${options.desc ?? ""}
     const plan = planCustomCarry(site, common);
     write(CARRY_FLAG_KEY, true);
     if (plan.empty) {
-      for (const line of plan.notices) log11.warn(`搬运 · ${line}`);
+      for (const line of plan.notices) log12.warn(`搬运 · ${line}`);
       return [];
     }
     for (const e of plan.entries) write(e.key, e.value);
-    log11.info(`自定义课程搬运完成：${plan.report.join("；")}`);
-    for (const line of plan.notices) log11.warn(`搬运 · ${line}`);
+    log12.info(`自定义课程搬运完成：${plan.report.join("；")}`);
+    for (const line of plan.notices) log12.warn(`搬运 · ${line}`);
     return [...plan.report, ...plan.notices];
   }
   function readLegacySnapshot() {
@@ -3007,7 +3317,7 @@ ${options.desc ?? ""}
     const lines = [];
     if (plan.empty && plan.notices.length === 0) {
       write(MIGRATION_FLAG_KEY, true);
-      log11.info("未发现旧版数据，跳过迁移");
+      log12.info("未发现旧版数据，跳过迁移");
       return [];
     }
     for (const e of plan.entries) {
@@ -3015,9 +3325,9 @@ ${options.desc ?? ""}
     }
     write(MIGRATION_FLAG_KEY, true);
     lines.push(...plan.report, ...plan.notices);
-    log11.info(`旧数据迁移完成：写入 ${plan.entries.length} 项`);
-    for (const line of plan.report) log11.info(`迁移 · ${line}`);
-    for (const line of plan.notices) log11.warn(`迁移 · ${line}`);
+    log12.info(`旧数据迁移完成：写入 ${plan.entries.length} 项`);
+    for (const line of plan.report) log12.info(`迁移 · ${line}`);
+    for (const line of plan.notices) log12.warn(`迁移 · ${line}`);
     return lines;
   }
 
@@ -3202,7 +3512,7 @@ ${options.desc ?? ""}
   }
 
   // src/sites/bkxk/hijack.ts
-  var log12 = scoped("bkxk/hijack");
+  var log13 = scoped("bkxk/hijack");
   var CUSTOM_ID_PREFIX = "szu-custom-";
   var LIST_RE = /elective\/(?:programCourse|unProgramCourse|publicCourse|recommendedCourse|queryCourse|course|minorCourse|retakeCourse|sportCourse)\.do/i;
   var TIMETABLE_RE = /elective\/teachingTime\.do/i;
@@ -3335,7 +3645,7 @@ ${options.desc ?? ""}
     if (String(root["code"]) !== "1") return null;
     const res = kind === "timetable" ? augmentTimetable(root, items2) : augmentList(root, items2);
     if (res.changed === 0) return null;
-    log12.info(`[接管] ${kind} 改写了 ${res.changed} 处`);
+    log13.info(`[接管] ${kind} 改写了 ${res.changed} 处`);
     return JSON.stringify(res.json);
   }
   function transformCurrentResponse(kind, text) {
@@ -3368,7 +3678,7 @@ ${options.desc ?? ""}
         Object.defineProperty(xhr, "response", { configurable: true, get: () => JSON.parse(next) });
       }
     } catch {
-      log12.warn("接管响应失败（无法改写 responseText）");
+      log13.warn("接管响应失败（无法改写 responseText）");
       return false;
     }
     return true;
@@ -3410,7 +3720,7 @@ ${options.desc ?? ""}
         const next = transformCurrentResponse(kind, text);
         if (next === null) return res;
         if (typeof ResponseCtor !== "function") {
-          log12.warn("接管响应失败（环境里没有 Response 构造器）");
+          log13.warn("接管响应失败（环境里没有 Response 构造器）");
           return res;
         }
         const Ctor = ResponseCtor;
@@ -3424,7 +3734,7 @@ ${options.desc ?? ""}
   function installHijack(target = pageRealm()) {
     const xhr = installXhr(target);
     const fetch2 = installFetch(target);
-    if (xhr || fetch2) log12.info(`响应接管已安装（XHR=${String(xhr)} fetch=${String(fetch2)}）`);
+    if (xhr || fetch2) log13.info(`响应接管已安装（XHR=${String(xhr)} fetch=${String(fetch2)}）`);
     return xhr || fetch2;
   }
 
@@ -3672,7 +3982,7 @@ ${options.desc ?? ""}
   }
 
   // src/sites/bkxk/api.ts
-  var log13 = scoped("bkxk/api");
+  var log14 = scoped("bkxk/api");
   var BASE_PATH = "/xsxkapp/sys/xsxkapp/";
   var EP = {
     // 只读：课程查询（按类别分派）
@@ -3860,7 +4170,7 @@ code: ${input.code ?? ""} | msg: ${input.msg}
 ${text}
 ──────────────────────────────
 `;
-    log13.error(
+    log14.error(
       `未识别返回（已全量落档） code=${input.code ?? ""}${input.msg !== "" ? ` msg=${input.msg}` : ""}`
     );
     console.log(`%c${block}`, "color:#c00");
@@ -3872,7 +4182,7 @@ ${text}
     const requestHeaders = token !== "" ? { ...headers(token), ...extra } : { ...extra };
     if (o.body !== void 0) requestHeaders["Content-Type"] = "application/x-www-form-urlencoded";
     const url = o.timestamp === true ? appendTimestamp(o.url) : o.url;
-    log13.info(`[请求] ${o.action} ${o.url}`);
+    log14.info(`[请求] ${o.action} ${o.url}`);
     const raw = await request({
       url,
       method: o.method ?? "POST",
@@ -3895,7 +4205,7 @@ ${text}
   }
 
   // src/sites/bkxk/courses.ts
-  var log14 = scoped("bkxk/courses");
+  var log15 = scoped("bkxk/courses");
   function asRecord4(value) {
     if (value === null || typeof value !== "object" || Array.isArray(value)) return {};
     return value;
@@ -3988,12 +4298,12 @@ ${text}
   function flatten(json) {
     const list = listFrom(json);
     if (list === null) {
-      log14.warn("列表响应里没有顶层 dataList，返回空列表（站点改版？端点形态变了？）");
+      log15.warn("列表响应里没有顶层 dataList，返回空列表（站点改版？端点形态变了？）");
       return [];
     }
     const out = [];
     for (const item of list) out.push(...classesOf(item));
-    log14.info(`列表响应 ${list.length} 项 → ${out.length} 个教学班`);
+    log15.info(`列表响应 ${list.length} 项 → ${out.length} 个教学班`);
     return out;
   }
   function remainOf(c) {
@@ -4016,15 +4326,15 @@ ${text}
     });
     const origin = p.origin ?? currentOrigin();
     if (origin === "") {
-      log14.warn("取不到 origin，放弃拉取课程列表");
+      log15.warn("取不到 origin，放弃拉取课程列表");
       return denied("取不到 origin");
     }
     if (p.studentCode === "") {
-      log14.warn("会话里没有学号，放弃拉取课程列表");
+      log15.warn("会话里没有学号，放弃拉取课程列表");
       return denied("缺少学号");
     }
     if (p.batchCode === null || p.batchCode === "") {
-      log14.warn("没有选课批次码，放弃拉取课程列表");
+      log15.warn("没有选课批次码，放弃拉取课程列表");
       return denied("缺少选课批次码");
     }
     const url = endpointUrl(CATEGORY_EP[p.category], origin);
@@ -4418,7 +4728,7 @@ ${text}
   }
 
   // src/sites/bkxk/monitor.ts
-  var log15 = scoped("bkxk/monitor");
+  var log16 = scoped("bkxk/monitor");
   var panel = null;
   function bindMonitorPanel(p) {
     panel = p;
@@ -4435,7 +4745,7 @@ ${text}
       try {
         fn();
       } catch (err) {
-        log15.warn("监控订阅回调抛错（已忽略）", err);
+        log16.warn("监控订阅回调抛错（已忽略）", err);
       }
     }
   }
@@ -4458,7 +4768,7 @@ ${text}
     return clampLimit("pollIntervalMs", getValue(SITE_ID2, VALUE2.POLL_INTERVAL_MS));
   }
   var polling = false;
-  var timer2 = null;
+  var timer3 = null;
   var wake = null;
   var lastPollAt = null;
   var pollCount = 0;
@@ -4468,17 +4778,17 @@ ${text}
   function sleepInterruptible(ms) {
     return new Promise((resolve2) => {
       wake = resolve2;
-      timer2 = setTimeout(() => {
-        timer2 = null;
+      timer3 = setTimeout(() => {
+        timer3 = null;
         wake = null;
         resolve2();
       }, ms);
     });
   }
   function interruptSleep() {
-    if (timer2 !== null) {
-      clearTimeout(timer2);
-      timer2 = null;
+    if (timer3 !== null) {
+      clearTimeout(timer3);
+      timer3 = null;
     }
     const w = wake;
     wake = null;
@@ -4492,7 +4802,7 @@ ${text}
       return false;
     }
     polling = true;
-    log15.info(`开始监控轮询（${currentMode()}），监控项 ${String(store.items.length)} 条`);
+    log16.info(`开始监控轮询（${currentMode()}），监控项 ${String(store.items.length)} 条`);
     panel?.toast(`开始监控（${String(store.items.length)} 条）`, "success");
     notify();
     void loop();
@@ -4502,7 +4812,7 @@ ${text}
     if (!polling) return false;
     polling = false;
     interruptSleep();
-    log15.info("已停止监控轮询");
+    log16.info("已停止监控轮询");
     panel?.toast("已停止监控轮询", "info");
     notify();
     return true;
@@ -4519,7 +4829,7 @@ ${text}
       }
     } catch (err) {
       polling = false;
-      log15.error("监控轮询异常结束", err);
+      log16.error("监控轮询异常结束", err);
       panel?.toast("监控轮询异常，已停止（详见日志）", "error");
     } finally {
       notify();
@@ -4551,7 +4861,7 @@ ${text}
   async function checkOne(store, tcId) {
     const ctx = bkxkContext();
     if (ctx.batchCode === "") {
-      log15.warn(`查容量跳过 ${tcId}：批次码为空（请刷新选课页）`);
+      log16.warn(`查容量跳过 ${tcId}：批次码为空（请刷新选课页）`);
       return {
         store,
         row: { teachingClassID: tcId, remain: null, kind: "nobatch", msg: "批次码为空（请刷新选课页）" }
@@ -4574,14 +4884,14 @@ ${text}
       if (kind === RESP_KIND.OK) remain = capacityRemain(r.cls.data);
     } catch (err) {
       const text = err instanceof Error ? err.message : String(err);
-      log15.warn(`查容量请求异常：${tcId}`, err);
+      log16.warn(`查容量请求异常：${tcId}`, err);
       const applied3 = applyCheck(store, tcId, null, Date.now(), `请求异常：${text}`);
       saveMonitorStore(applied3.store);
       return { store: applied3.store, row: { teachingClassID: tcId, remain: null, kind: "exception", msg: text } };
     }
     if (kind !== RESP_KIND.OK) {
       noteAuthLost(kind);
-      log15.warn(`查容量失败（${kind}）：${tcId} ${msg}`);
+      log16.warn(`查容量失败（${kind}）：${tcId} ${msg}`);
       const applied3 = applyCheck(store, tcId, null, Date.now(), msg);
       saveMonitorStore(applied3.store);
       return { store: applied3.store, row: { teachingClassID: tcId, remain: null, kind, msg } };
@@ -4606,27 +4916,27 @@ ${text}
           origin: pageOrigin()
         });
       } catch (err) {
-        log15.warn(`类别 ${category} 请求异常（pageNumber=${String(page)}）`, err);
+        log16.warn(`类别 ${category} 请求异常（pageNumber=${String(page)}）`, err);
         return out.length > 0 ? out : null;
       }
       if (r.kind !== RESP_KIND.OK) {
         noteAuthLost(r.kind);
-        log15.warn(`类别 ${category} 拉取失败（pageNumber=${String(page)}，${r.kind}）：${r.msg}`);
+        log16.warn(`类别 ${category} 拉取失败（pageNumber=${String(page)}，${r.kind}）：${r.msg}`);
         return out.length > 0 ? out : null;
       }
       for (const c of r.classes) out.push(c);
       if (r.classes.length < PAGE_SIZE) return out;
     }
-    log15.warn(`类别 ${category} 超过 ${String(MAX_PAGES)} 页上限，只用前 ${String(out.length)} 条比对`);
+    log16.warn(`类别 ${category} 超过 ${String(MAX_PAGES)} 页上限，只用前 ${String(out.length)} 条比对`);
     return out;
   }
   async function pollCategory(start) {
     const { groups, skipped } = groupByCategory(start.items);
     if (skipped > 0) {
-      log15.warn(`类别监控：跳过 ${String(skipped)} 条缺类别代码的监控项（无法按类别查询）`);
+      log16.warn(`类别监控：跳过 ${String(skipped)} 条缺类别代码的监控项（无法按类别查询）`);
     }
     if (groups.length === 0) {
-      log15.warn("类别监控：监控项都缺类别代码，无法按类别查询");
+      log16.warn("类别监控：监控项都缺类别代码，无法按类别查询");
       return { checked: 0, hits: [] };
     }
     let store = start;
@@ -4662,7 +4972,7 @@ ${text}
   function noteAuthLost(kind) {
     if (kind !== RESP_KIND.UNAUTHENTICATED) return false;
     stopPolling();
-    log15.error("登录态失效，已停止监控轮询");
+    log16.error("登录态失效，已停止监控轮询");
     panel?.toast("登录态失效，已停止监控，请刷新页面重新登录", "error");
     panel?.alertAuthExpired();
     return true;
@@ -4677,10 +4987,10 @@ ${text}
     const withCount = addHitCount(loadMonitorStore(), res.hits.length);
     saveMonitorStore(withCount);
     const summary = hitSummaryText(res.hits, (tcId) => nameOf(withCount, tcId));
-    log15.info(`监控命中余量：${summary}`);
+    log16.info(`监控命中余量：${summary}`);
     panel?.toast(`发现余量：${summary}`, "success");
     if (!isEnabled(SITE_ID2, TOGGLE2.WRITE_API)) {
-      log15.warn("监控命中余量，但写接口总开关未开启，只提醒不自动抢");
+      log16.warn("监控命中余量，但写接口总开关未开启，只提醒不自动抢");
       return;
     }
     for (const row3 of res.hits) {
@@ -4712,7 +5022,7 @@ ${text}
       });
       if (r.cls.kind === RESP_KIND.OK) {
         const name = item.courseName === "" ? item.teachingClassID : item.courseName;
-        log15.info(`监控自动抢成功 ${name}`);
+        log16.info(`监控自动抢成功 ${name}`);
         panel?.toast(`监控抢到：${name}`, "success");
         const removed = removeMonitorItem(loadMonitorStore(), item.teachingClassID);
         if (removed.removed) saveMonitorStore(removed.store);
@@ -4720,12 +5030,12 @@ ${text}
       }
       const msg = r.cls.msg === "" ? r.cls.kind : r.cls.msg;
       updateMonitor((s) => patchMonitor(s, item.teachingClassID, { lastMsg: msg }));
-      log15.warn(`监控自动抢未成功（${r.cls.kind}）：${msg}`);
+      log16.warn(`监控自动抢未成功（${r.cls.kind}）：${msg}`);
       noteAuthLost(r.cls.kind);
       return { ok: false, reason: r.cls.kind, msg };
     } catch (err) {
       const text = err instanceof Error ? err.message : String(err);
-      log15.warn(`监控自动抢请求异常：${item.teachingClassID}`, err);
+      log16.warn(`监控自动抢请求异常：${item.teachingClassID}`, err);
       return { ok: false, reason: "exception", msg: text };
     }
   }
@@ -4923,7 +5233,7 @@ ${text}
   }
 
   // src/sites/bkxk/tasks.ts
-  var log16 = scoped("bkxk/tasks");
+  var log17 = scoped("bkxk/tasks");
   var panel2 = null;
   function bindTaskPanel(p) {
     panel2 = p;
@@ -4940,7 +5250,7 @@ ${text}
       try {
         fn();
       } catch (err) {
-        log16.warn("任务订阅回调抛错（已忽略）", err);
+        log17.warn("任务订阅回调抛错（已忽略）", err);
       }
     }
   }
@@ -4962,7 +5272,7 @@ ${text}
   }
   function startTasks() {
     if (!isEnabled(SITE_ID2, TOGGLE2.WRITE_API)) {
-      log16.warn("写接口总开关未开启，拒绝开始抢课");
+      log17.warn("写接口总开关未开启，拒绝开始抢课");
       panel2?.toast("写接口总开关未开启，请先到【设置】里打开", "warn");
       return { ok: false, reason: "write-disabled", count: 0 };
     }
@@ -4972,7 +5282,7 @@ ${text}
     const stale = clearStaleTasks(loadTaskStore());
     if (stale.cleared > 0) {
       saveTaskStore(stale.store);
-      log16.info(`开始前清洗了 ${String(stale.cleared)} 条「已勾选但上次跑失败」的任务，它们会重新参与`);
+      log17.info(`开始前清洗了 ${String(stale.cleared)} 条「已勾选但上次跑失败」的任务，它们会重新参与`);
     }
     const list = activeTasks(loadTaskStore().items);
     if (list.length === 0) {
@@ -4980,7 +5290,7 @@ ${text}
       return { ok: false, reason: "no-task", count: 0 };
     }
     running = true;
-    log16.info(`开始抢课，任务数 ${String(list.length)}`);
+    log17.info(`开始抢课，任务数 ${String(list.length)}`);
     panel2?.toast(`开始抢课（${String(list.length)} 条）`, "success");
     void loop2();
     return { ok: true, reason: "", count: list.length };
@@ -4993,7 +5303,7 @@ ${text}
     const changed = after.items.some((t, i) => t !== before.items[i]);
     if (changed) saveTaskStore(after);
     else notify2();
-    log16.info("已停止抢课");
+    log17.info("已停止抢课");
     panel2?.toast("已停止抢课", "info");
     return true;
   }
@@ -5007,7 +5317,7 @@ ${text}
       while (running) {
         if (activeTasks(loadTaskStore().items).length === 0) {
           running = false;
-          log16.info("全部任务已结束");
+          log17.info("全部任务已结束");
           panel2?.toast("全部任务已结束", "info");
           return;
         }
@@ -5018,7 +5328,7 @@ ${text}
       }
     } catch (err) {
       running = false;
-      log16.error("抢课循环异常结束", err);
+      log17.error("抢课循环异常结束", err);
       panel2?.toast("抢课循环异常，已停止（详见日志）", "error");
     } finally {
       notify2();
@@ -5044,7 +5354,7 @@ ${text}
         lastMsg: "缺少学号或选课批次码，请在设置中补全",
         lastKind: TASK_KIND.TERMINAL
       });
-      log16.error(`抢课中止：缺少学号或批次码 ${task.teachingClassID}`);
+      log17.error(`抢课中止：缺少学号或批次码 ${task.teachingClassID}`);
       return;
     }
     if (task.category === "") {
@@ -5053,7 +5363,7 @@ ${text}
         lastMsg: "未能识别该教学班的类别代码，请重新在列表中点击「添加抢课」",
         lastKind: TASK_KIND.TERMINAL
       });
-      log16.error(`抢课中止：类别代码未知 ${task.teachingClassID}`);
+      log17.error(`抢课中止：类别代码未知 ${task.teachingClassID}`);
       return;
     }
     finish(task.id, { status: TASK_STATUS.RUNNING, attempts: task.attempts + 1 });
@@ -5085,20 +5395,20 @@ ${text}
         lastMsg: `请求异常：${text}`,
         lastKind: TASK_KIND.UNKNOWN
       });
-      log16.warn(`抢课请求异常（${retry ? "稍后重试" : "已停手"}）：${task.teachingClassID}`, err);
+      log17.warn(`抢课请求异常（${retry ? "稍后重试" : "已停手"}）：${task.teachingClassID}`, err);
       return;
     }
     if (kind === RESP_KIND.OK) {
       finish(task.id, { status: TASK_STATUS.SUCCESS, lastMsg: msg, lastKind: TASK_KIND.OK });
       const name = task.courseName === "" ? task.teachingClassID : task.courseName;
-      log16.info(`抢课成功 ${name}`);
+      log17.info(`抢课成功 ${name}`);
       panel2?.toast(`抢课成功：${name}`, "success");
       return;
     }
     if (kind === RESP_KIND.UNAUTHENTICATED) {
       running = false;
       finish(task.id, { status: TASK_STATUS.FAILED, lastMsg: AUTH_MSG2, lastKind: TASK_KIND.AUTH });
-      log16.error("登录态失效，已停止全部任务");
+      log17.error("登录态失效，已停止全部任务");
       panel2?.toast("登录态失效，已停止全部任务，请刷新页面重新登录", "error");
       panel2?.alertAuthExpired();
       return;
@@ -5106,16 +5416,16 @@ ${text}
     const cls = kind === RESP_KIND.BUSINESS ? classifyMsg(msg) : TASK_KIND.UNKNOWN;
     if (shouldRetry(task.retryMode, cls)) {
       finish(task.id, { status: TASK_STATUS.PENDING, lastMsg: msg, lastKind: cls });
-      log16.warn(`抢课未成功，稍后重试（${kindLabel(cls)}）：${msg}`);
+      log17.warn(`抢课未成功，稍后重试（${kindLabel(cls)}）：${msg}`);
     } else {
       finish(task.id, { status: TASK_STATUS.FAILED, lastMsg: msg, lastKind: cls });
       const mode = RETRY_MODE_NAME[task.retryMode] ?? task.retryMode;
-      log16.warn(`抢课失败，已按「${mode}」停手（${kindLabel(cls)}）：${msg}`);
+      log17.warn(`抢课失败，已按「${mode}」停手（${kindLabel(cls)}）：${msg}`);
     }
   }
 
   // src/sites/bkxk/list.ts
-  var log17 = scoped("site/bkxk/list");
+  var log18 = scoped("site/bkxk/list");
   var LIST_PAGE_MARK = "grablessons.do";
   var RESCAN_DELAY_MS = 120;
   var MAX_BLOCKS_PER_SCAN = 400;
@@ -5208,11 +5518,11 @@ ${text}
   async function copyId(tcId, panel3) {
     const res = await copyText(tcId);
     if (res.ok) {
-      log17.info(`已复制教学班ID ${tcId} 到剪贴板（方式：${res.method}）`);
+      log18.info(`已复制教学班ID ${tcId} 到剪贴板（方式：${res.method}）`);
       panel3.toast("已复制教学班ID", "success");
       return;
     }
-    log17.warn(`复制教学班ID 失败：${res.detail}（可手动选中那一行复制）`);
+    log18.warn(`复制教学班ID 失败：${res.detail}（可手动选中那一行复制）`);
     panel3.toast("复制失败，请手动选中复制", "warn");
   }
   function applyGrabButton(btn, on) {
@@ -5249,13 +5559,13 @@ ${text}
     });
     applyGrabButton(btn, nowOn);
     if (nowOn) {
-      log17.info(`已加入抢课队列：${targetText(info)}（本轮只入队，不会发送任何请求）`);
+      log18.info(`已加入抢课队列：${targetText(info)}（本轮只入队，不会发送任何请求）`);
       ctx.panel.toast(
         `已加入抢课队列：${info.courseName === "" ? info.tcId : info.courseName}`,
         "success"
       );
     } else {
-      log17.info(`已移出抢课队列：${targetText(info)}（站点上已经选到的课不会被退掉）`);
+      log18.info(`已移出抢课队列：${targetText(info)}（站点上已经选到的课不会被退掉）`);
       ctx.panel.toast("已移出抢课队列（不会退掉已经选上的课）", "info");
     }
   }
@@ -5271,10 +5581,10 @@ ${text}
     });
     applyMonitorButton(btn, nowOn);
     if (nowOn) {
-      log17.info(`已加入监控列表：${targetText(info)}（到监控页点【开始监控】才会轮询）`);
+      log18.info(`已加入监控列表：${targetText(info)}（到监控页点【开始监控】才会轮询）`);
       ctx.panel.toast("已加入监控", "success");
     } else {
-      log17.info(`已移出监控列表：${targetText(info)}`);
+      log18.info(`已移出监控列表：${targetText(info)}`);
       ctx.panel.toast("已移出监控", "info");
     }
   }
@@ -5332,7 +5642,7 @@ ${text}
     if (ownsBlock(unit)) return;
     const tcId = tcIdIn(unit);
     if (tcId === null) {
-      log17.debug("卡片 .cv-info 未取到教学班 id，跳过（站点结构可能已变）");
+      log18.debug("卡片 .cv-info 未取到教学班 id，跳过（站点结构可能已变）");
       return;
     }
     const info = infoForUnit(unit, tcId);
@@ -5349,7 +5659,7 @@ ${text}
     if (cell === null) return;
     const ids = tcIdsIn(cell);
     if (ids.length === 0) {
-      log17.debug("列表行未取到教学班 id，跳过（站点结构可能已变）");
+      log18.debug("列表行未取到教学班 id，跳过（站点结构可能已变）");
       return;
     }
     const col = el("div", { class: "sztb-bkxk-col" });
@@ -5390,9 +5700,9 @@ ${text}
   function reorderH5(h5) {
     const kids = Array.from(h5.children);
     if (kids.length < 2) return;
-    const current = kids.map((node) => elementKey(Array.from(node.classList)));
-    const wanted = orderH5Children(current);
-    if (current.every((key, i) => key === wanted[i])) return;
+    const current2 = kids.map((node) => elementKey(Array.from(node.classList)));
+    const wanted = orderH5Children(current2);
+    if (current2.every((key, i) => key === wanted[i])) return;
     const byKey = /* @__PURE__ */ new Map();
     for (const node of kids) {
       const key = elementKey(Array.from(node.classList));
@@ -5415,7 +5725,7 @@ ${text}
     const nodes = document.querySelectorAll(".sztb-bkxk-block, .sztb-bkxk-col, .sztb-bkxk-head");
     if (nodes.length === 0) return;
     for (const node of nodes) node.remove();
-    log17.info(`列表注入开关已关闭：移除 ${String(nodes.length)} 个注入节点`);
+    log18.info(`列表注入开关已关闭：移除 ${String(nodes.length)} 个注入节点`);
   }
   function scan(ctx) {
     if (!isEnabled(SITE_ID2, TOGGLE2.LIST_INJECT)) {
@@ -5435,7 +5745,7 @@ ${text}
   }
   function startListInjection(panel3) {
     if (!location.pathname.includes(LIST_PAGE_MARK)) {
-      log17.debug(`当前不是选课页（${location.pathname}），跳过列表注入`);
+      log18.debug(`当前不是选课页（${location.pathname}），跳过列表注入`);
       return () => void 0;
     }
     const ctx = {
@@ -5443,20 +5753,20 @@ ${text}
       budget: 0
     };
     let observer = null;
-    let timer3 = null;
-    const schedule2 = () => {
-      if (timer3 !== null) return;
-      timer3 = window.setTimeout(() => {
-        timer3 = null;
+    let timer4 = null;
+    const schedule3 = () => {
+      if (timer4 !== null) return;
+      timer4 = window.setTimeout(() => {
+        timer4 = null;
         scan(ctx);
       }, RESCAN_DELAY_MS);
     };
     const unsubscribes = [subscribeTasks(syncInjectedButtons), subscribeMonitor(syncInjectedButtons)];
     whenDomReady(() => {
       scan(ctx);
-      observer = new MutationObserver(schedule2);
+      observer = new MutationObserver(schedule3);
       observer.observe(document.body, { childList: true, subtree: true });
-      log17.info(
+      log18.info(
         `选课列表注入已就绪：抢课队列 ${String(loadTaskStore().items.length)} 条 / 监控 ${String(loadMonitorStore().items.length)} 条（本轮点击只入队，不发请求）`
       );
     });
@@ -5464,9 +5774,9 @@ ${text}
       for (const off of unsubscribes) off();
       observer?.disconnect();
       observer = null;
-      if (timer3 !== null) {
-        window.clearTimeout(timer3);
-        timer3 = null;
+      if (timer4 !== null) {
+        window.clearTimeout(timer4);
+        timer4 = null;
       }
     };
   }
@@ -5501,7 +5811,7 @@ ${text}
   }
 
   // src/sites/bkxk/timetable.ts
-  var log18 = scoped("site/bkxk/timetable");
+  var log19 = scoped("site/bkxk/timetable");
   var TT_PAGE_MARK = "curriculum.do";
   var MAX_TRIES = 20;
   var RETRY_MS = 500;
@@ -5527,12 +5837,12 @@ ${text}
   function askSiteToRefetch(reason) {
     const mod = pageRecord()[SITE_TIMETABLE_MODULE];
     if (mod === void 0 || typeof mod.init !== "function") {
-      log18.warn(
+      log19.warn(
         `站点没有 ${SITE_TIMETABLE_MODULE}.init（改版了？）—— 这一轮的自定义课程不会出现，刷新页面可重来`
       );
       return false;
     }
-    log18.info(
+    log19.info(
       `请站点重新请求一次课表（${reason}；上一发响应${didRewriteTimetable() ? "已被我们改写" : "我们没赶上"}）⇒ ${SITE_TIMETABLE_MODULE}.init()`
     );
     mod.init.call(mod);
@@ -5553,7 +5863,7 @@ ${text}
     if (!ok) {
       if (!loggedDrawn && tags > 0) {
         loggedDrawn = true;
-        log18.info(
+        log19.info(
           `站点画出的课表里已经带上我们的标记 ${String(tags)} 个（自定义课程 ${String(enabled)} 门）`
         );
       }
@@ -5573,17 +5883,17 @@ ${text}
   }
   function startTimetableInjection() {
     if (!location.pathname.includes(TT_PAGE_MARK)) {
-      log18.debug(`当前不是课表页（${location.pathname}），跳过课表接管`);
+      log19.debug(`当前不是课表页（${location.pathname}），跳过课表接管`);
       return () => void 0;
     }
     let observer = null;
-    let timer3 = null;
+    let timer4 = null;
     let retry = null;
     let tries = 0;
-    const schedule2 = () => {
-      if (timer3 !== null) return;
-      timer3 = window.setTimeout(() => {
-        timer3 = null;
+    const schedule3 = () => {
+      if (timer4 !== null) return;
+      timer4 = window.setTimeout(() => {
+        timer4 = null;
         const table = findTable();
         if (table === null) return;
         injectTagStyle();
@@ -5597,26 +5907,26 @@ ${text}
         if (tries < MAX_TRIES) {
           retry = window.setTimeout(attempt2, RETRY_MS);
         } else {
-          log18.warn(`未找到课表容器 #${SITE_TABLE_ID}，放弃接管（站点的课表可能还没出数据）`);
+          log19.warn(`未找到课表容器 #${SITE_TABLE_ID}，放弃接管（站点的课表可能还没出数据）`);
         }
         return;
       }
       injectTagStyle();
       const courses = readEnabledCustomCourses();
-      log18.info(
+      log19.info(
         `课表页接管就绪：自定义课程 ${String(courses.length)} 门；课表由站点自己画，我们只加「自定义」标签`
       );
       autoRefetchIfNeeded(table);
-      observer = new MutationObserver(schedule2);
+      observer = new MutationObserver(schedule3);
       observer.observe(table, { childList: true, subtree: true });
     };
     whenDomReady(attempt2);
     return () => {
       observer?.disconnect();
       observer = null;
-      if (timer3 !== null) {
-        window.clearTimeout(timer3);
-        timer3 = null;
+      if (timer4 !== null) {
+        window.clearTimeout(timer4);
+        timer4 = null;
       }
       if (retry !== null) {
         window.clearTimeout(retry);
@@ -5765,7 +6075,7 @@ ${text}
 `;
 
   // src/sites/bkxk/tabs/tasks.ts
-  var log19 = scoped("bkxk/tasks-tab");
+  var log20 = scoped("bkxk/tasks-tab");
   var BKXK_TASKS_TAB_ID = "bkxk:tasks";
   var MODE_ORDER = [RETRY_MODE.SMART, RETRY_MODE.NEVER, RETRY_MODE.ALWAYS];
   var GATE_POLL_MS = 1e3;
@@ -5867,7 +6177,7 @@ ${text}
       check.checked = task.enabled;
       check.addEventListener("change", () => {
         updateTasks((s) => toggleTask2(s, task.id).store);
-        log19.info(
+        log20.info(
           `${task.enabled ? "取消勾选" : "勾选"}任务「${task.courseName === "" ? task.teachingClassID : task.courseName}」`
         );
         render();
@@ -5938,7 +6248,7 @@ ${text}
       mode.value = RETRY_MODE_NAME[task.retryMode] === void 0 ? RETRY_MODE.SMART : task.retryMode;
       mode.addEventListener("change", () => {
         updateTasks((s) => setRetryMode(s, task.id, mode.value));
-        log19.info(`任务「${task.courseName || task.teachingClassID}」的重试策略改为 ${mode.value}`);
+        log20.info(`任务「${task.courseName || task.teachingClassID}」的重试策略改为 ${mode.value}`);
         render();
       });
       ops.appendChild(mode);
@@ -5949,7 +6259,7 @@ ${text}
       });
       del.addEventListener("click", () => {
         updateTasks((s) => removeTask(s, task.id).store);
-        log19.info(`已从队列删除任务「${task.courseName || task.teachingClassID}」`);
+        log20.info(`已从队列删除任务「${task.courseName || task.teachingClassID}」`);
         render();
       });
       ops.appendChild(del);
@@ -5957,7 +6267,7 @@ ${text}
       return item;
     }
     startBtn.addEventListener("click", () => {
-      if (!syncGate()) log19.warn("写接口总开关未开，拒绝开始");
+      if (!syncGate()) log20.warn("写接口总开关未开，拒绝开始");
       const res = startTasks();
       if (!res.ok && res.reason === "already-running") ctx.host.toast("已经在抢课中了", "info");
       render();
@@ -5980,7 +6290,7 @@ ${text}
       }).then((yes) => {
         if (!yes) return;
         updateTasks((s) => resetTasks(s));
-        log19.info(`已重置 ${String(stale)} 条未成功的任务`);
+        log20.info(`已重置 ${String(stale)} 条未成功的任务`);
         ctx.host.toast("已重置", "success");
         render();
       });
@@ -6000,7 +6310,7 @@ ${text}
       }).then((yes) => {
         if (!yes) return;
         updateTasks(() => clearTasks());
-        log19.info(`已清空抢课队列（${String(n)} 条）`);
+        log20.info(`已清空抢课队列（${String(n)} 条）`);
         ctx.host.toast("已清空队列", "success");
         render();
       });
@@ -6144,7 +6454,7 @@ ${text}
 `;
 
   // src/sites/bkxk/tabs/monitor.ts
-  var log20 = scoped("bkxk/monitor-tab");
+  var log21 = scoped("bkxk/monitor-tab");
   var BKXK_MONITOR_TAB_ID = "bkxk:monitor";
   var TICK_MS = 1e3;
   var GRAB_REASON = {
@@ -6180,7 +6490,7 @@ ${text}
     modeRow.appendChild(modeSelect);
     modeSelect.addEventListener("change", () => {
       setValue(SITE_ID2, VALUE2.MONITOR_MODE, modeSelect.value);
-      log20.info(`监控模式改为 ${modeSelect.value}`);
+      log21.info(`监控模式改为 ${modeSelect.value}`);
       render();
     });
     const modeHint = el("span", { class: "sztb-bkxk-mo-meta" });
@@ -6243,7 +6553,7 @@ ${text}
       }
       for (const item of store.items) listBox.appendChild(buildItem(item, now));
     }
-    function tick() {
+    function tick2() {
       const now = Date.now();
       for (const [tcId, node] of agoNodes) {
         const item = loadMonitorStore().items.find((m) => m.teachingClassID === tcId);
@@ -6320,7 +6630,7 @@ ${text}
       });
       del.addEventListener("click", () => {
         updateMonitor((s) => removeMonitorItem(s, item.teachingClassID).store);
-        log20.info(`已移出监控列表：${item.courseName || item.teachingClassID}`);
+        log21.info(`已移出监控列表：${item.courseName || item.teachingClassID}`);
         render();
       });
       ops.appendChild(del);
@@ -6354,7 +6664,7 @@ ${text}
     });
     resetBtn.addEventListener("click", () => {
       updateMonitor((s) => resetMonitorStats(s));
-      log20.info("已重置监控统计（余量、检查时间、命中次数与上次抢课结果）");
+      log21.info("已重置监控统计（余量、检查时间、命中次数与上次抢课结果）");
       ctx.host.toast("已重置统计，下次检查会重新填", "success");
       render();
     });
@@ -6374,7 +6684,7 @@ ${text}
         if (!yes) return;
         stopPolling();
         updateMonitor(() => clearMonitor());
-        log20.info(`已清空监控列表（${String(n)} 条）`);
+        log21.info(`已清空监控列表（${String(n)} 条）`);
         ctx.host.toast("已清空监控列表", "success");
         render();
       });
@@ -6390,7 +6700,7 @@ ${text}
         syncGate();
         render();
       }
-      tick();
+      tick2();
     }, TICK_MS);
     return () => {
       off();
@@ -6641,7 +6951,7 @@ ${text}
 `;
 
   // src/sites/bkxk/tabs/custom.ts
-  var log21 = scoped("bkxk/custom-tab");
+  var log22 = scoped("bkxk/custom-tab");
   var BKXK_CUSTOM_TAB_ID = "bkxk:custom";
   var PARITY_OPTIONS = [
     ["", "每周"],
@@ -6923,7 +7233,7 @@ ${text}
       }
       const parsed = parsePlace(place);
       if (parsed.length !== segs.length) {
-        log21.warn(
+        log22.warn(
           `生成的时间文本与解析结果对不上：${place}（解析出 ${String(parsed.length)} 段，表单有 ${String(segs.length)} 段）`
         );
         const msg = "时间文本生成异常，已取消本次提交（请把这条日志报给开发者）";
@@ -6936,7 +7246,7 @@ ${text}
       const next = editing === null ? appendCourse(courses, draft, makeCourseId(Date.now(), Math.random())) : updateCourse(courses, editing, draft);
       mutate(next);
       resetForm();
-      log21.info(`${editing === null ? "添加" : "修改"}自定义课程「${name}」（${place}）`);
+      log22.info(`${editing === null ? "添加" : "修改"}自定义课程「${name}」（${place}）`);
       ctx.host.toast(editing === null ? "已添加" : "已保存修改", "success");
     }
     function beginEdit(course) {
@@ -6950,7 +7260,7 @@ ${text}
         const msg = "这门课原本的时间文本解析不出，已按默认值回填，请重新填写";
         showHint(msg);
         ctx.host.toast(msg, "warn");
-        log21.warn(`自定义课程「${course.name}」的 place 解析不出：${course.place}`);
+        log22.warn(`自定义课程「${course.name}」的 place 解析不出：${course.place}`);
       } else {
         segs = drafts.map((d) => ({ ...d }));
         hideHint();
@@ -6974,7 +7284,7 @@ ${text}
           return;
         }
         mutate(setCourseEnabled(courses, course.id, toggle.checked));
-        log21.info(`${toggle.checked ? "启用" : "停用"}自定义课程「${course.name}」`);
+        log22.info(`${toggle.checked ? "启用" : "停用"}自定义课程「${course.name}」`);
       });
       item.appendChild(toggle);
       const main2 = el("div", { class: "sztb-bkxk-itemmain" });
@@ -7008,7 +7318,7 @@ ${text}
         const wasEditing = editingId === course.id;
         mutate(removeCourse(courses, course.id));
         if (wasEditing) resetForm();
-        log21.info(`删除自定义课程「${course.name}」`);
+        log22.info(`删除自定义课程「${course.name}」`);
         ctx.host.toast("已删除", "success");
       });
       ops.appendChild(editBtn);
@@ -7044,7 +7354,7 @@ ${text}
       writeCustomCourses(next);
       renderList();
       renderConflicts();
-      if (refreshTimetable() > 0) log21.info("已请站点重画课表（这次带的课程就是你刚改的）");
+      if (refreshTimetable() > 0) log22.info("已请站点重画课表（这次带的课程就是你刚改的）");
     }
     addSegBtn.addEventListener("click", () => {
       if (!guard()) return;
@@ -7076,7 +7386,7 @@ ${text}
         if (!ok) return;
         mutate([]);
         resetForm();
-        log21.info(`清空自定义课程：删除 ${String(n)} 门`);
+        log22.info(`清空自定义课程：删除 ${String(n)} 门`);
         ctx.host.toast("已清空", "success");
       });
     });
@@ -7104,7 +7414,7 @@ ${text}
   };
 
   // src/sites/bkxk/index.ts
-  var log22 = scoped("site/bkxk");
+  var log23 = scoped("site/bkxk");
   var HOSTS2 = ["bkxk.szu.edu.cn"];
   var PAGES2 = ["*default/grablessons.do*", "*default/curriculum.do*"];
   var bkxkAdapter = {
@@ -7130,13 +7440,13 @@ ${text}
       registerBkxkSettings();
       const carried = runCustomCarry();
       if (lines.length > 0) {
-        log22.info(`已从旧版迁移 ${lines.length} 条内容，详情见日志页`);
+        log23.info(`已从旧版迁移 ${lines.length} 条内容，详情见日志页`);
       }
       if (carried.length > 0) {
-        log22.info(`自定义课程已搬到通用键（${carried.length} 条说明见日志页）`);
+        log23.info(`自定义课程已搬到通用键（${carried.length} 条说明见日志页）`);
       }
       if (lines.length === 0 && carried.length === 0) {
-        log22.debug(`无旧数据需要迁移（earlyInit @ ${ctx.url.pathname}）`);
+        log23.debug(`无旧数据需要迁移（earlyInit @ ${ctx.url.pathname}）`);
       }
     },
     /** 挂载期：DOM 已就绪，可以安全地把配置推给运行时并报登录态。 */
@@ -7146,11 +7456,11 @@ ${text}
       bindMonitorPanel(ctx.panel);
       const session = readSession();
       if (!session.loggedIn) {
-        log22.warn("未读到有效登录态：学号或 token 缺失，功能接口会失败。请先在站内完成登录。");
+        log23.warn("未读到有效登录态：学号或 token 缺失，功能接口会失败。请先在站内完成登录。");
       } else {
-        log22.info(`站点已就绪：${sessionSummary(session)}`);
+        log23.info(`站点已就绪：${sessionSummary(session)}`);
       }
-      log22.info(`功能页=${String(ctx.isFeaturePage)}（任务 / 监控 / 自定义 / 设置四个站点标签页已就绪）`);
+      log23.info(`功能页=${String(ctx.isFeaturePage)}（任务 / 监控 / 自定义 / 设置四个站点标签页已就绪）`);
       startListInjection(ctx.panel);
       startTimetableInjection();
     }
@@ -7169,10 +7479,10 @@ ${text}
   }
 
   // src/main.ts
-  var log23 = scoped("main");
+  var log24 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-05T14:31:00.674Z" : null;
-  var BUILD_NO = true ? 51 : null;
+  var BUILD_TIME = true ? "2026-10-05T15:18:11.242Z" : null;
+  var BUILD_NO = true ? 53 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();
@@ -7212,7 +7522,7 @@ ${text}
       version: VERSION
     }));
     booted = { panel: panel3, adapterId: res.adapter?.id ?? null };
-    log23.info(
+    log24.info(
       `深大人工具箱 ${VERSION_LABEL} 已装载（host=${url.hostname}，分派=${res.reason}，站点=${res.adapter?.id ?? "无"}，功能页=${res.autoExpand ? "是" : "否"}）`
     );
     res.adapter?.init?.({
@@ -7232,10 +7542,10 @@ ${text}
         return;
       }
       if (!res.inject) {
-        log23.debug(`站内跳转后不再属于支持范围，保持现有悬浮窗`);
+        log24.debug(`站内跳转后不再属于支持范围，保持现有悬浮窗`);
         return;
       }
-      log23.info(`站内跳转导致重新分派：${bootedFor} → ${location.href}`);
+      log24.info(`站内跳转导致重新分派：${bootedFor} → ${location.href}`);
       bootedFor = location.href;
       boot(url, res);
     };
@@ -7262,9 +7572,9 @@ ${text}
     if (res.adapter?.earlyInit !== void 0) {
       try {
         res.adapter.earlyInit({ adapter: res.adapter, url });
-        log23.debug(`已执行启动期钩子：${res.adapter.id}`);
+        log24.debug(`已执行启动期钩子：${res.adapter.id}`);
       } catch (err) {
-        log23.error(`启动期钩子执行失败：${res.adapter.id}`, err);
+        log24.error(`启动期钩子执行失败：${res.adapter.id}`, err);
       }
     }
     whenDomReady(() => {

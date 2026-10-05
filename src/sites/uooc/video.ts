@@ -37,7 +37,8 @@
 
 import { scoped } from '../../common/core/log.ts';
 import { getValue, isEnabled } from '../../common/core/settings.ts';
-import { RESOURCE_TYPE_VIDEO, navigateToResource, parseHash, readCatalog } from './catalog.ts';
+import { goNextChapter, stepForward } from './catalog.ts';
+import { noteVideo, stopProgress } from './progress.ts';
 import { SITE_ID, TOGGLE, VALUE } from './settings.ts';
 
 const log = scoped('uooc/video');
@@ -173,92 +174,137 @@ let advancingUntil = 0;
 /** 跳转后等待新片源 ready 的时间戳；0 = 没有待播放 */
 let pendingAutoplayAt = 0;
 
-/**
- * 当前 hash 指向的资源 id（两个版本都是 `#/{cid}/{chapterId}/{sectionId}/{resourceId}/section`）
- */
-function currentResourceId(): string | null {
-  return parseHash()?.resourceId ?? null;
+/** 这一轮连播会话的截止时间；0 = 没有会话 */
+let advanceDeadline = 0;
+
+/** 这一轮已经走了几步（空节 / 页面异常时靠它兜底） */
+let advanceHops = 0;
+
+/** 下一次「走一步」的定时器 */
+let advanceTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** 落在一个新视频上的时间戳；0 = 没有落点 */
+let landedAt = 0;
+
+const ADVANCE_HOP_DELAY_MS = 700;
+const ADVANCE_MAX_HOPS = 40;
+const ADVANCE_SESSION_MS = 45000;
+
+function stopAdvance(): void {
+  if (advanceTimer !== null) {
+    clearTimeout(advanceTimer);
+    advanceTimer = null;
+  }
+  advanceDeadline = 0;
+  advanceHops = 0;
+  landedAt = 0;
+}
+
+function scheduleAdvanceHop(delay: number): void {
+  if (advanceTimer !== null) clearTimeout(advanceTimer);
+  advanceTimer = setTimeout(runAdvanceHop, delay);
 }
 
 /**
- * 找下一个该播的资源。
+ * U3：往后走一步。
  *
- * 顺序 = 目录的拍平顺序（章 → 节 → 资源），只挑**视频**（`type === 10`）。
- * 「连播范围」取的是站点设置里的 `nextScope`：
- *   - `chapter`（默认，止于本章）：只在当前章内向后找，到章尾就停；
- *   - `all`（跨章继续）：继续往后找，章与章之间自动跨过去。
+ * 站点是**按需渲染**的（点完节标题要等一个请求才出资源），所以一次只走一步，
+ * 按目录层返回的 `kind` 决定「等一下再来」还是收工。
+ * 每一步的取舍（跳过文档 / 附件 / 看过的视频 / 做过的测验）都在
+ * `catalog.ts` 的 `stepForward()` 里，本函数只管节奏与护栏。
  */
-function pickNextResource(): { id: string; title: string; chapterId: string; sectionId: string } | null {
-  const catalog = readCatalog();
-  if (catalog === null) return null;
+function runAdvanceHop(): void {
+  advanceTimer = null;
 
-  const currentId = currentResourceId();
-  if (currentId === null) {
-    log.warn('hash 里读不到当前资源 id（不是学习页的资源路由？），不连播');
-    return null;
+  if (advanceDeadline === 0) return;
+  if (advanceHops >= ADVANCE_MAX_HOPS) {
+    log.warn(`连播放弃：已经走了 ${ADVANCE_MAX_HOPS} 步还没找到可播的视频`);
+    stopAdvance();
+    return;
   }
-
-  const index = catalog.findIndex((r) => r.id === currentId);
-  if (index < 0) {
-    log.warn(`当前资源 ${currentId} 不在目录里（可能是目录尚未加载完），不连播`);
-    return null;
+  if (Date.now() > advanceDeadline) {
+    log.warn(`连播放弃：这一轮开了 ${Math.round(ADVANCE_SESSION_MS / 1000)} 秒还没找到可播的视频`);
+    stopAdvance();
+    return;
   }
+  advanceHops += 1;
 
-  const current = catalog[index];
-  const sameChapterOnly = getValue<string>(SITE_ID, VALUE.NEXT_SCOPE) !== 'all';
+  const step = stepForward();
+  switch (step.kind) {
+    case 'clicked':
+      advancingUntil = Date.now() + ADVANCE_LOCK_MS;
+      pendingAutoplayAt = Date.now();
+      landedAt = Date.now();
+      stopAdvance();
+      return;
 
-  for (let i = index + 1; i < catalog.length; i++) {
-    const item = catalog[i];
-    if (item === undefined) continue;
-    if (item.type !== RESOURCE_TYPE_VIDEO) continue;
-    if (sameChapterOnly && current !== undefined && item.chapterId !== current.chapterId) {
-      log.info('已到本章最后一个视频（连播范围＝止于本章），停在这里');
-      return null;
-    }
-    return item;
+    case 'quiz':
+      log.info(
+        `连播停在测验 ${step.taskId}${step.title === '' ? '' : `（${step.title}）`}：` +
+          '没做过的测验不会自动跳过',
+      );
+      if (isEnabled(SITE_ID, TOGGLE.AUTO_SOLVE)) {
+        log.warn('「自动作答」只做了开关，功能还没实现，先停在这一题');
+      }
+      stopAdvance();
+      return;
+
+    case 'rendered':
+      scheduleAdvanceHop(ADVANCE_HOP_DELAY_MS);
+      return;
+
+    case 'chapter-end':
+      if (getValue<string>(SITE_ID, VALUE.NEXT_SCOPE) !== 'all') {
+        log.info('已到本章最后一个视频（连播范围＝止于本章），停在这里');
+        stopAdvance();
+        return;
+      }
+      if (goNextChapter()) {
+        scheduleAdvanceHop(ADVANCE_HOP_DELAY_MS);
+        return;
+      }
+      log.info('目录里后面没有视频了，连播结束');
+      stopAdvance();
+      return;
+
+    default:
+      log.warn(`连播中断：${step.reason}`);
+      stopAdvance();
+      return;
   }
-
-  log.info('目录里后面没有视频了，连播结束');
-  return null;
 }
 
 /**
- * U3：一个视频播完 → 跳到下一个视频。
+ * U3 入口：一个视频播完时调用。
  *
- * 跳转前后的两个动作：
- *   - 跳之前把 `pendingAutoplayAt` 置上，让**新片源**能被自动播放（否则会被
- *     `hasStarted` 门槛挡住，用户得自己点一下）；
- *   - 跳之后由 `apply()` 在每次扫描时尝试兑现它，超时即作废。
+ * 跳转之后由 `apply()` 通过 `pendingAutoplayAt` 把新片源播起来
+ * （否则会被 `hasStarted` 门槛挡住，用户得自己点一下）。
  */
-function advanceToNext(): void {
+function startAdvance(): void {
   if (!isEnabled(SITE_ID, TOGGLE.AUTO_NEXT)) return;
   if (Date.now() < advancingUntil) return;
 
-  const next = pickNextResource();
-  if (next === null) return;
+  stopAdvance();
+  advanceDeadline = Date.now() + ADVANCE_SESSION_MS;
+  scheduleAdvanceHop(0);
+}
 
-  advancingUntil = Date.now() + ADVANCE_LOCK_MS;
-  pendingAutoplayAt = Date.now();
+/**
+ * 兜底：落在了一个「看过一部分」的视频上。
+ *
+ * 目录里的 `video_pos` / `finished` 只在展开过的节上才填得准，所以再加一道判据 ——
+ * 跳过去之后落点**一直没播起来**、进度条却不在 0 上（站点把进度条拖到了上次的位置），
+ * 说明这就是个看过的视频。这时直接再往后跳。
+ */
+function breakStall(v: HTMLVideoElement): void {
+  if (landedAt === 0) return;
+  if (Date.now() - landedAt < ADVANCE_LOCK_MS + 4000) return;
+  if (v.currentTime <= 3 || v.ended) return;
+  if (!v.paused || hasStarted.has(v)) return;
 
-  const parts = parseHash();
-  const how = navigateToResource(
-    {
-      id: next.id,
-      type: RESOURCE_TYPE_VIDEO,
-      title: next.title,
-      chapterId: next.chapterId,
-      sectionId: next.sectionId,
-    },
-    parts?.cid ?? '',
-  );
-
-  if (how === 'none') {
-    pendingAutoplayAt = 0;
-    log.warn(`找不到下一个视频 ${next.id} 的入口，连播中断`);
-    return;
-  }
-
-  log.info(`连播：下一个视频 ${next.id}${next.title === '' ? '' : `（${next.title}）`}，跳转方式＝${how}`);
+  log.info(`落点停在 ${Math.round(v.currentTime)}s 一直没播起来，按「看过的视频」继续往后跳`);
+  landedAt = 0;
+  startAdvance();
 }
 
 /** 跳转后兑现「自动播放下一集」；超时或还没 ready 时什么都不做 */
@@ -322,13 +368,18 @@ function apply(v: HTMLVideoElement): void {
 
   // 连播跳过来之后，第一件事是把新片源播起来
   tryPendingAutoplay(v);
+  breakStall(v);
+
+  // 随机进度上报的「重新计时」也挂在这条路径上（换集 / 改区间 / 开关切换都靠它）
+  noteVideo(v);
 
   if (!announced.has(v)) {
     announced.add(v);
     log.info(
       `播放器助手已就绪：二倍速=${wantRate ? '开' : '关'}，静音=${wantMute ? '开' : '关'}，` +
         `防失焦=${isEnabled(SITE_ID, TOGGLE.KEEP_PLAYING) ? '开' : '关'}，` +
-        `自动连播=${isEnabled(SITE_ID, TOGGLE.AUTO_NEXT) ? '开' : '关'}（当前速率 ${v.playbackRate}x）`,
+        `自动连播=${isEnabled(SITE_ID, TOGGLE.AUTO_NEXT) ? '开' : '关'}，` +
+        `进度上报=${isEnabled(SITE_ID, TOGGLE.AUTO_PROGRESS) ? '开' : '关'}（当前速率 ${v.playbackRate}x）`,
     );
   }
 }
@@ -372,7 +423,7 @@ function onMediaEvent(ev: Event): void {
       return;
 
     case 'ended':
-      advanceToNext();
+      startAdvance();
       return;
 
     case 'ratechange':
@@ -453,6 +504,7 @@ export function startVideoAssist(): () => void {
 
   return () => {
     stopped = true;
+    stopProgress();
     if (timer !== null) {
       window.clearTimeout(timer);
       timer = null;

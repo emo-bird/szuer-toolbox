@@ -8,7 +8,8 @@
  * 风险门禁（需求文档 §8.1 N1）由 `common/core/settings.ts` 的 `isEnabled` 统一兜底：
  *   - 🟢 safe        按声明的 `default` 走；
  *   - 🟠 trace       也按 `default` 走（v0.24 起放宽），只是「会改变站点看到的返回内容」；
- *   - 🔴 irreversible **一律强制 false**，与 `default` 写什么无关。
+ *   - 🔴 irreversible 在**用户没动过**时按 false 处理（`default` 写什么都不算数），
+ *     但用户显式勾选过之后是真的会生效的 —— 见 `settings.ts:79-82`。
  * 所以 🔴 的 `default` 也一律写 false —— 写 true 不生效，只会误导后来人。
  */
 
@@ -31,13 +32,24 @@ export const TOGGLE = {
   KEEP_PLAYING: 'keep-playing',
   /** 🟠 自动连播（U3） */
   AUTO_NEXT: 'auto-next',
+  /** 🔴 随机进度上报（心跳）—— 会往站点写进度 */
+  AUTO_PROGRESS: 'auto-progress',
+  /** 🔴 自动作答（U8）—— 目前只是占位，还没有实现 */
+  AUTO_SOLVE: 'auto-solve',
 } as const;
 
 /** 配置项 id 常量 */
 export const VALUE = {
   /** 连播范围：章内 / 跨章 */
   NEXT_SCOPE: 'nextScope',
+  /** 进度上报间隔下限（秒） */
+  PROGRESS_MIN: 'progressMin',
+  /** 进度上报间隔上限（秒） */
+  PROGRESS_MAX: 'progressMax',
 } as const;
+
+/** 进度上报区间的默认值（秒）。`progress.ts` 拿它当兜底，避免两处写两遍。 */
+export const PROGRESS_DEFAULT = { min: '30', max: '90' } as const;
 
 export const UOOC_TOGGLES: readonly SiteToggleDef[] = [
   {
@@ -72,6 +84,22 @@ export const UOOC_TOGGLES: readonly SiteToggleDef[] = [
     default: false,
     group: '视频',
   },
+  {
+    id: TOGGLE.AUTO_PROGRESS,
+    label: '进度上报',
+    desc: '按下面的随机间隔，替你把视频进度报给站点',
+    risk: 'irreversible',
+    default: false,
+    group: '视频',
+  },
+  {
+    id: TOGGLE.AUTO_SOLVE,
+    label: '自动作答',
+    desc: '连播遇到没做过的测验时自动作答（还没实现，先占位）',
+    risk: 'irreversible',
+    default: false,
+    group: '测验',
+  },
 ];
 
 /**
@@ -91,17 +119,54 @@ export function registerUoocSettings(): void {
       { value: 'all', label: '跨章继续' },
     ],
   });
+
+  registerValue<string>({
+    siteId: SITE_ID,
+    id: VALUE.PROGRESS_MIN,
+    label: '上报间隔下限',
+    desc: '秒。和下面的上限一起决定随机区间',
+    default: PROGRESS_DEFAULT.min,
+    kind: 'number',
+    validate: (value) => positiveIntHint(value, 5, 3600),
+  });
+
+  registerValue<string>({
+    siteId: SITE_ID,
+    id: VALUE.PROGRESS_MAX,
+    label: '上报间隔上限',
+    desc: '秒。改完立刻按新区间重新计时',
+    default: PROGRESS_DEFAULT.max,
+    kind: 'number',
+    validate: (value) => positiveIntHint(value, 5, 3600),
+  });
+}
+
+/** 数字配置项的通用校验：不合法就提示，**不**偷偷改值（`ValueDef.validate` 的约定） */
+function positiveIntHint(value: unknown, lo: number, hi: number): string | null {
+  const n = Number(value);
+  if (!Number.isFinite(n) || !Number.isInteger(n)) return `要填整数秒（${lo} ~ ${hi}）`;
+  if (n < lo || n > hi) return `要填 ${lo} ~ ${hi} 之间的秒数`;
+  return null;
 }
 
 /**
  * 把配置项推进运行时（启动时跑一次）。
  *
- * 目前只有连播范围，`video.ts` 每次触发时自己读，所以这里只做一次存在性检查，
- * 保证拼错 id 时能在日志里立刻看见，而不是静默用默认值。
+ * 连播范围、上报区间都是「用的时候现读」，所以这里只做一次存在性检查，
+ * 保证拼错 id / 存了脏值时能在日志里立刻看见，而不是静默用默认值。
  */
 export function applyUoocSettings(): void {
   const scope = getStoredValue<string>(SITE_ID, VALUE.NEXT_SCOPE);
   if (scope !== 'chapter' && scope !== 'all') {
     log.warn(`连播范围取值异常（${scope}），按「止于本章」处理`);
+  }
+
+  const min = getStoredValue<string>(SITE_ID, VALUE.PROGRESS_MIN);
+  const max = getStoredValue<string>(SITE_ID, VALUE.PROGRESS_MAX);
+  if (positiveIntHint(min, 5, 3600) !== null) {
+    log.warn(`上报间隔下限取值异常（${min}），按 ${PROGRESS_DEFAULT.min} 秒处理`);
+  }
+  if (positiveIntHint(max, 5, 3600) !== null) {
+    log.warn(`上报间隔上限取值异常（${max}），按 ${PROGRESS_DEFAULT.max} 秒处理`);
   }
 }

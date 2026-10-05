@@ -33,7 +33,15 @@ const checks = [
   ['是 IIFE（没有顶层 await/export）', !/^export\s/m.test(text) && text.includes('(() => {')],
   ['含公共标签页 id', text.includes('common:settings') && text.includes('common:log')],
   ['含演示适配器 id', text.includes('demo:playground')],
-  ['含 UOOC 适配器 id', text.includes("id: \"uooc\"") || text.includes("id: 'uooc'")],
+  // ⚠️ 这条断言原来匹配 `id: "uooc"` 字面量。UOOC 适配器改成 `id: SITE_ID` 之后
+  // 它就一直静默失灵（实测 HEAD 的产物里也只有 `id: SITE_ID`，
+  // 也就是说 `npm run verify` 在本次改动之前就已经是红的）。
+  // 改成「适配器对象在 + 真的被 registerAdapter 了」，与「含 bkxk 适配器」那两条同义，
+  // 比原来的字面量更贴本意（这条本来就是防「header 承诺了站点、注册表却没登记」）。
+  [
+    '含 UOOC 适配器并已注册进注册表',
+    text.includes('var uoocAdapter = {') && text.includes('registerAdapter(uoocAdapter)'),
+  ],
   // 这一条专门防 UOOC 那次事故：header 的 @match 承诺了站点，注册表却没登记，
   // 表现是「脚本注入执行完全正常但什么都不做、日志里一行说明都没有」。
   // 所以既要看到适配器本体（显示名），也要看到它真的被 registerAdapter 注册。
@@ -63,4 +71,31 @@ for (const [name, pass] of checks) {
   console.log(`${pass ? '  OK  ' : ' FAIL '} ${name}`);
 }
 console.log(`\n${file}: ${text.length} 字节 / ${lines.length} 行`);
+
+// ---------------------------------------------------------------- 压缩版
+// 第二份产物是「去格式化的 bundle + 同一份头模板」。头模板不能压（它是元数据
+// 注释），所以这里只确认：头还在、构建号与正式版一致、bundle 确实被压小了。
+const minFile = 'dist/szuer-toolbox.min.user.js';
+const minText = readFileSync(minFile, 'utf8');
+const minLines = minText.split('\n');
+const buildNoOf = (s) => (s.match(/构建信息：\d{4}-\d{2}-\d{2}T[^)]*（构建号 (\d+)）/) ?? [])[1];
+
+const minChecks = [
+  ['压缩版：文件非空', minText.length > 1000],
+  ['压缩版：首行是 ==UserScript==', minLines[0] === '// ==UserScript=='],
+  ['压缩版：@match uooc.net.cn', /^\/\/ @match\s+\*:\/\/\*\.uooc\.net\.cn\/\*$/m.test(minText)],
+  ['压缩版：声明 @grant unsafeWindow', /^\/\/ @grant\s+unsafeWindow$/m.test(minText)],
+  ['压缩版：无残留 ESM import', !/^import\s/m.test(minText)],
+  ['压缩版：是 IIFE', minText.includes('(()=>{') || minText.includes('(() => {')],
+  ['压缩版：构建号与正式版一致', buildNoOf(minText) !== undefined && buildNoOf(minText) === buildNoOf(text)],
+  ['压缩版：确实更小', minText.length < text.length],
+  ['压缩版：bundle 部分基本压成一行', minText.split('\n').length < text.split('\n').length / 2],
+];
+
+for (const [name, pass] of minChecks) {
+  if (!pass) bad += 1;
+  console.log(`${pass ? '  OK  ' : ' FAIL '} ${name}`);
+}
+console.log(`\n${minFile}: ${minText.length} 字节 / ${minLines.length} 行`);
+
 process.exit(bad === 0 ? 0 : 1);

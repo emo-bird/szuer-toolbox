@@ -10,9 +10,12 @@
  *    用管道捕获输出会 EPERM）。
  *
  * 流程：
- *   main.ts + 全部依赖 ──esbuild.exe──> dist/.bundle.js
+ *   main.ts + 全部依赖 ──esbuild.exe──> dist/.tmp/bundle.js
  *   userscript-header.txt（替换 {{VERSION}} / {{BUILD_TIME}} / {{BUILD_NO}}） + bundle
  *                                        ──> dist/szuer-toolbox.user.js
+ *   再跑一次 esbuild（`--minify`）得到去格式化的 bundle，
+ *   与**同一份**头模板拼起来 ──> dist/szuer-toolbox.min.user.js
+ *   （头模板是元数据注释，不参与压缩；两份产物的构建号 / 时间完全一致）
  *
  * 构建号（BUILD_NO）：
  *   版本号固定的阶段里，靠单调递增的构建号区分「装的是哪一次构建」。
@@ -34,7 +37,9 @@ const ROOT = dirname(fileURLToPath(import.meta.url));
 const OUT_DIR = join(ROOT, 'dist');
 const TMP_DIR = join(OUT_DIR, '.tmp');
 const OUT_FILE = join(OUT_DIR, 'szuer-toolbox.user.js');
+const OUT_MIN_FILE = join(OUT_DIR, 'szuer-toolbox.min.user.js');
 const BUNDLE_FILE = join(TMP_DIR, 'bundle.js');
+const BUNDLE_MIN_FILE = join(TMP_DIR, 'bundle.min.js');
 const STDOUT_LOG = join(TMP_DIR, 'esbuild.out.log');
 const STDERR_LOG = join(TMP_DIR, 'esbuild.err.log');
 const BUILD_NO_FILE = join(OUT_DIR, '.build-no');
@@ -135,6 +140,9 @@ function main() {
 
   if (checkOnly && existsSync(OUT_FILE)) {
     info(`产物：${relative(ROOT, OUT_FILE)}（${fmtSize(statSync(OUT_FILE).size)}）`);
+    if (existsSync(OUT_MIN_FILE)) {
+      info(`产物：${relative(ROOT, OUT_MIN_FILE)}（${fmtSize(statSync(OUT_MIN_FILE).size)}）`);
+    }
     return;
   }
 
@@ -146,7 +154,7 @@ function main() {
   const exe = resolveEsbuildExe();
   info(`esbuild：${relative(ROOT, exe)}`);
 
-  const esbuildArgs = [
+  const esbuildBaseArgs = [
     'src/main.ts',
     '--bundle',
     '--format=iife',
@@ -156,25 +164,31 @@ function main() {
     '--legal-comments=none',
     '--log-level=warning',
     '--loader:.css=text',
-    `--outfile=${BUNDLE_FILE}`,
     `--define:__SZB_VERSION__=${JSON.stringify(version)}`,
     `--define:__SZB_BUILD_TIME__=${JSON.stringify(buildTime)}`,
     `--define:__SZB_BUILD_NO__=${JSON.stringify(buildNo)}`,
   ];
 
-  const res = runExe(exe, esbuildArgs);
-  if (res.stdout.trim() !== '') dim(res.stdout.trim());
-  if (res.stderr.trim() !== '') process.stderr.write(`${res.stderr.trim()}\n`);
-  if (res.error) {
-    fail(`启动 esbuild 失败：${res.error.message}`);
-    process.exit(1);
-  }
-  if (res.status !== 0) {
-    fail(`esbuild 退出码 ${res.status}`);
-    process.exit(res.status ?? 1);
+  /** 跑一次 esbuild，返回产物文本；失败直接退出 */
+  function bundleTo(outfile, extraArgs) {
+    const res = runExe(exe, [...esbuildBaseArgs, `--outfile=${outfile}`, ...extraArgs]);
+    if (res.stdout.trim() !== '') dim(res.stdout.trim());
+    if (res.stderr.trim() !== '') process.stderr.write(`${res.stderr.trim()}\n`);
+    if (res.error) {
+      fail(`启动 esbuild 失败：${res.error.message}`);
+      process.exit(1);
+    }
+    if (res.status !== 0) {
+      fail(`esbuild 退出码 ${res.status}`);
+      process.exit(res.status ?? 1);
+    }
+    return readFileSync(outfile, 'utf8');
   }
 
-  const bundle = readFileSync(BUNDLE_FILE, 'utf8');
+  const bundle = bundleTo(BUNDLE_FILE, []);
+  // 第二份：去掉全部格式化（`--minify` 同时做去空白 + 改标识符 + 去注释）
+  const bundleMin = bundleTo(BUNDLE_MIN_FILE, ['--minify']);
+
   // 换行符防御：本机 core.autocrlf=true 会把头模板 checkout 成 CRLF，
   // 产物首行于是变成 "// ==UserScript==\r"，把 verify-build 的自检骗到。
   // .gitattributes 已强制 LF，但构建不该依赖别人的 git 配置 —— 这里再兜一层。
@@ -187,6 +201,10 @@ function main() {
   const output = `${header}\n${bundle.replace(/\r\n?/g, '\n')}\n`;
   writeFileSync(OUT_FILE, output, 'utf8');
 
+  // 头模板**不压缩**（它是元数据注释），只压 bundle
+  const outputMin = `${header}\n${bundleMin.replace(/\r\n?/g, '\n')}\n`;
+  writeFileSync(OUT_MIN_FILE, outputMin, 'utf8');
+
   // 清理中间产物
   rmSync(TMP_DIR, { recursive: true, force: true });
 
@@ -195,6 +213,9 @@ function main() {
   info(`  时间：${buildTime}`);
   info(`  体积：${fmtSize(Buffer.byteLength(output, 'utf8'))}`);
   info(`  行数：${output.split('\n').length}`);
+  ok(`构建完成（压缩版）：${relative(ROOT, OUT_MIN_FILE)}`);
+  info(`  体积：${fmtSize(Buffer.byteLength(outputMin, 'utf8'))}`);
+  info(`  行数：${outputMin.split('\n').length}`);
 }
 
 main();
