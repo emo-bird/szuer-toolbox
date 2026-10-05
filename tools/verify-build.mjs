@@ -72,30 +72,7 @@ for (const [name, pass] of checks) {
 }
 console.log(`\n${file}: ${text.length} 字节 / ${lines.length} 行`);
 
-// ---------------------------------------------------------------- 压缩版
-// 第二份产物是「去格式化的 bundle + 同一份头模板」。头模板不能压（它是元数据
-// 注释），所以这里只确认：头还在、构建号与正式版一致、bundle 确实被压小了。
-const minFile = 'dist/szuer-toolbox.min.user.js';
-const minText = readFileSync(minFile, 'utf8');
-const minLines = minText.split('\n');
-const buildNoOf = (s) => (s.match(/构建信息：\d{4}-\d{2}-\d{2}T[^)]*（构建号 (\d+)）/) ?? [])[1];
-
-const minChecks = [
-  ['压缩版：文件非空', minText.length > 1000],
-  ['压缩版：首行是 ==UserScript==', minLines[0] === '// ==UserScript=='],
-  ['压缩版：@match uooc.net.cn', /^\/\/ @match\s+\*:\/\/\*\.uooc\.net\.cn\/\*$/m.test(minText)],
-  ['压缩版：声明 @grant unsafeWindow', /^\/\/ @grant\s+unsafeWindow$/m.test(minText)],
-  ['压缩版：无残留 ESM import', !/^import\s/m.test(minText)],
-  ['压缩版：是 IIFE', minText.includes('(()=>{') || minText.includes('(() => {')],
-  ['压缩版：构建号与正式版一致', buildNoOf(minText) !== undefined && buildNoOf(minText) === buildNoOf(text)],
-  ['压缩版：确实更小', minText.length < text.length],
-  ['压缩版：bundle 部分基本压成一行', minText.split('\n').length < text.split('\n').length / 2],
-];
-
-for (const [name, pass] of minChecks) {
-  if (!pass) bad += 1;
-  console.log(`${pass ? '  OK  ' : ' FAIL '} ${name}`);
-}
-console.log(`\n${minFile}: ${minText.length} 字节 / ${minLines.length} 行`);
-
+// 曾经还有一份 `dist/szuer-toolbox.min.user.js`（esbuild --minify 的第二产物）。
+// 用户实测它在浏览器里触发**严重卡顿**，且压缩带来的收益不值这个代价 ——
+// 已放弃，构建器只产一份普通版。这里不再校验它。
 process.exit(bad === 0 ? 0 : 1);

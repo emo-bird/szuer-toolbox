@@ -21,9 +21,6 @@
  * 而悬浮窗必须等 body 存在。**不要把两件事塞进同一个时机。**
  */
 
-// CSS 走 esbuild 的 `--loader:.css=text` 打进包里；压缩由 `build.mjs` 在
-// 打包**之前**对一份 src 副本做完（`--minify` 压不到字符串内容，见 build.mjs 的
-// `prepareCssOverlay()`），所以这里拿到的已经是压过的文本。
 import baseCss from './common/ui/style.css';
 
 import { scoped } from './common/core/log.ts';
