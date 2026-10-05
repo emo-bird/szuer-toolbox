@@ -49,7 +49,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-05T19:38:27.708Z（构建号 61） */
+/* 构建信息：2026-10-05T19:57:43.667Z（构建号 62） */
 
 "use strict";
 (() => {
@@ -2348,7 +2348,8 @@ ${options.desc ?? ""}
   var RESOURCE_TYPE_FILE = 50;
   var RESOURCE_TYPE_DOC = 60;
   var RESOURCE_TYPE_QUIZ = 80;
-  var RESOURCE_ITEM_SELECTOR = `[ng-click="goSource(source, 'section')"]`;
+  var RESOURCE_ITEM_SELECTOR = '[ng-click^="goSource("]';
+  var RESOURCE_ITEM_STRICT_SELECTOR = `[ng-click="goSource(source, 'section')"]`;
   var CHAPTER_TITLE_SELECTOR = '[ng-click="toggleChapter(chapterItem)"]';
   var SECTION_TITLE_SELECTOR = '[ng-click="toggleChapter(sectionItem)"]';
   var CHAPTER_ITEM_SELECTOR = 'li[ng-repeat="chapterItem in chapterList"]';
@@ -2429,9 +2430,7 @@ ${options.desc ?? ""}
     if (cid === "") return null;
     return { cid, chapterId: pick2(1), sectionId: pick2(2), resourceId: pick2(3) };
   }
-  function readSourceOf(el2) {
-    const scope = scopeOf(el2);
-    const raw = scope?.["source"];
+  function toSource(raw) {
     if (!isObject(raw)) return null;
     const id = asString(raw["id"]);
     const type = asNumber(raw["type"]);
@@ -2446,6 +2445,25 @@ ${options.desc ?? ""}
       finished: asBool(raw["finished"]),
       videoPos: pos > 0 ? pos : 0
     };
+  }
+  function looksLikeSource(v) {
+    if (!isObject(v)) return false;
+    if (asString(v["id"]) === "" || asNumber(v["type"]) < 0) return false;
+    return "is_task" in v || "finished" in v || "video_pos" in v || "task_id" in v;
+  }
+  function readSourceOf(el2) {
+    const scope = scopeOf(el2);
+    if (scope === null) return null;
+    const direct = toSource(scope["source"]);
+    if (direct !== null) return direct;
+    for (const key of Object.keys(scope)) {
+      if (key.startsWith("$") || key === "source") continue;
+      const value = scope[key];
+      if (!looksLikeSource(value)) continue;
+      const found = toSource(value);
+      if (found !== null) return found;
+    }
+    return null;
   }
   function resourceItems() {
     return queryAll(RESOURCE_ITEM_SELECTOR);
@@ -2557,13 +2575,17 @@ ${options.desc ?? ""}
       const el2 = pool[i];
       const src = readSourceOf(el2);
       if (src === null) continue;
-      if (src.type === RESOURCE_TYPE_QUIZ && !src.finished) {
+      if (src.type === RESOURCE_TYPE_QUIZ) {
+        if (src.finished) {
+          log7.info(`连播：测验 ${src.id} 已完成，不再打开`);
+          return { kind: "clicked", id: src.id, title: src.title, type: src.type, finished: true };
+        }
         const url = quizUrlFor(src.taskId);
         if (url !== "") {
           log7.info(`连播：去测验 ${src.taskId}${src.title === "" ? "" : `（${src.title}）`}`);
           return { kind: "quiz", resourceId: src.id, taskId: src.taskId, title: src.title, url };
         }
-        log7.info(`连播：打开测验 ${src.id}${src.title === "" ? "" : `（${src.title}）`}`);
+        log7.info(`连播：打开测验 ${src.id}（旧版内嵌方式）`);
         clickElement(el2);
         return { kind: "quiz", resourceId: src.id, taskId: src.taskId, title: src.title, url: "" };
       }
@@ -2662,6 +2684,54 @@ ${options.desc ?? ""}
         videoPos: src.videoPos
       });
     }
+    const curSecLi = parts === null ? null : sections.find((li) => sectionIdOf(li) === parts.sectionId) ?? null;
+    const outline = [];
+    const reps = [];
+    const clickables = [];
+    if (curSecLi !== null) {
+      const brief = (el2) => {
+        const first = el2.children[0];
+        if (first === void 0) return null;
+        return {
+          tag: first.tagName.toLowerCase(),
+          cls: asString(first.getAttribute("class")),
+          ngClick: asString(first.getAttribute("ng-click")),
+          uiSref: asString(first.getAttribute("ui-sref")),
+          text: asString(first.textContent).replace(/\s+/g, " ").trim().slice(0, 40),
+          resources: first.querySelectorAll(RESOURCE_ITEM_SELECTOR).length
+        };
+      };
+      for (const child of Array.from(curSecLi.children)) {
+        outline.push({
+          tag: child.tagName.toLowerCase(),
+          cls: asString(child.getAttribute("class")),
+          ngRepeat: asString(child.getAttribute("ng-repeat")),
+          ngIf: asString(child.getAttribute("ng-if")),
+          children: child.children.length,
+          descendants: child.querySelectorAll("*").length,
+          firstChild: brief(child)
+        });
+      }
+      for (const el2 of Array.from(curSecLi.querySelectorAll("[ng-repeat]"))) {
+        reps.push({
+          cls: asString(el2.getAttribute("class")),
+          ngRepeat: asString(el2.getAttribute("ng-repeat")),
+          children: el2.children.length,
+          firstChild: brief(el2)
+        });
+      }
+      for (const el2 of Array.from(curSecLi.querySelectorAll("[ng-click], [ui-sref]"))) {
+        if (el2.closest(RESOURCE_ITEM_SELECTOR) !== null) continue;
+        if (clickables.length >= 15) break;
+        clickables.push({
+          tag: el2.tagName.toLowerCase(),
+          cls: asString(el2.getAttribute("class")),
+          ngClick: asString(el2.getAttribute("ng-click")),
+          uiSref: asString(el2.getAttribute("ui-sref")),
+          text: asString(el2.textContent).replace(/\s+/g, " ").trim().slice(0, 40)
+        });
+      }
+    }
     return {
       hasAngular: angular() !== null,
       hash: parts,
@@ -2670,14 +2740,19 @@ ${options.desc ?? ""}
         chapterTitle: queryAll(CHAPTER_TITLE_SELECTOR).length,
         sectionItem: queryAll(SECTION_ITEM_SELECTOR).length,
         sectionTitle: queryAll(SECTION_TITLE_SELECTOR).length,
-        resourceItem: items2.length
+        resourceItem: items2.length,
+        resourceItemStrict: queryAll(RESOURCE_ITEM_STRICT_SELECTOR).length
       },
       chapterIds,
       currentChapterFound: currentChapter !== null,
       sectionIds,
       currentSectionFound: parts !== null && parts.sectionId !== "" && findSectionIndex(sections, parts.sectionId) >= 0,
       resources,
-      resourceReadFailures: failures
+      resourceReadFailures: failures,
+      sectionCollapsed: curSecLi !== null && isSectionCollapsed(curSecLi),
+      sectionOutline: outline,
+      sectionReps: reps,
+      sectionClickables: clickables
     };
   }
   var SCOPE_MAX_DEPTH = 15;
@@ -8030,8 +8105,8 @@ ${text}
   // src/main.ts
   var log25 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-05T19:38:27.708Z" : null;
-  var BUILD_NO = true ? 61 : null;
+  var BUILD_TIME = true ? "2026-10-05T19:57:43.667Z" : null;
+  var BUILD_NO = true ? 62 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();

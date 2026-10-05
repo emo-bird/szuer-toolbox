@@ -67,7 +67,25 @@ export const RESOURCE_TYPE_QUIZ = 80;
 
 // ------------------------------------------------------------ 跨版本选择器
 
-const RESOURCE_ITEM_SELECTOR = '[ng-click="goSource(source, \'section\')"]';
+/**
+ * 资源项的锚点。
+ *
+ * ⚠️ 用**前缀匹配** `ng-click^="goSource("`，不是原来那条逐字等值的
+ * `[ng-click="goSource(source, 'section')"]`。
+ *
+ * 为什么放开：逐字那条只在「章 → 节 → 资源」这一层实测过。有些课程的资源挂在
+ * **更深一层**（1.4.1 / 1.4.2 这种子目录）里，那一层的 `goSource` 第二个参数
+ * 很可能不是 `'section'` —— 于是整页 `resourceItem` 是 0，我们却以为「这一节是空的」
+ * 直接跳过去了（用户 m01152 第 1 条就是这个现象）。
+ *
+ * 放开是安全的：`goSource` 是本项目实测到的**资源项专用**指令，
+ * 章 / 节标题用的是 `toggleChapter`，不会误伤；真读到不认识的节点时
+ * `readSourceOf()` 返回 null，会被照常跳过。
+ */
+const RESOURCE_ITEM_SELECTOR = '[ng-click^="goSource("]';
+
+/** 原来那条逐字选择器，只用来在诊断里对比「放开前 / 放开后各命中多少」 */
+const RESOURCE_ITEM_STRICT_SELECTOR = '[ng-click="goSource(source, \'section\')"]';
 const CHAPTER_TITLE_SELECTOR = '[ng-click="toggleChapter(chapterItem)"]';
 const SECTION_TITLE_SELECTOR = '[ng-click="toggleChapter(sectionItem)"]';
 const CHAPTER_ITEM_SELECTOR = 'li[ng-repeat="chapterItem in chapterList"]';
@@ -239,10 +257,8 @@ export interface UoocSource {
   videoPos: number;
 }
 
-/** 读某个资源项节点上的 `scope.source` */
-export function readSourceOf(el: Element): UoocSource | null {
-  const scope = scopeOf(el);
-  const raw = scope?.['source'];
+/** 把一个候选对象转成资源信息；不像资源就返回 null */
+function toSource(raw: unknown): UoocSource | null {
   if (!isObject(raw)) return null;
   const id = asString(raw['id']);
   const type = asNumber(raw['type']);
@@ -257,6 +273,39 @@ export function readSourceOf(el: Element): UoocSource | null {
     finished: asBool(raw['finished']),
     videoPos: pos > 0 ? pos : 0,
   };
+}
+
+/** 一眼就能认出「这是个资源对象」的字段 */
+function looksLikeSource(v: unknown): boolean {
+  if (!isObject(v)) return false;
+  if (asString(v['id']) === '' || asNumber(v['type']) < 0) return false;
+  return 'is_task' in v || 'finished' in v || 'video_pos' in v || 'task_id' in v;
+}
+
+/**
+ * 读某个资源项节点上的资源对象。
+ *
+ * 首选 `scope.source` —— 「章 → 节 → 资源」这一层实测就是这个键。
+ * 但**更深一层的子目录**（1.4.1 / 1.4.2 这种）可能把 ng-repeat 变量叫别的名字，
+ * 所以再按「像不像资源对象」在 scope 的自有属性里兜一圈：
+ * 必须有非空 `id`、有合法 `type`，并且带 `is_task` / `finished` / `video_pos` / `task_id`
+ * 之一。这样既不会误认（`courseInfo` 之类没有这几个字段），也不怕它换名。
+ */
+export function readSourceOf(el: Element): UoocSource | null {
+  const scope = scopeOf(el);
+  if (scope === null) return null;
+
+  const direct = toSource(scope['source']);
+  if (direct !== null) return direct;
+
+  for (const key of Object.keys(scope)) {
+    if (key.startsWith('$') || key === 'source') continue;
+    const value = scope[key];
+    if (!looksLikeSource(value)) continue;
+    const found = toSource(value);
+    if (found !== null) return found;
+  }
+  return null;
 }
 
 /** 页面上所有已渲染的资源项（**文档顺序** ＝ 站点的资源顺序） */
@@ -463,16 +512,24 @@ export function stepForward(afterId = ''): AdvanceStep {
     const src = readSourceOf(el);
     if (src === null) continue;
 
-    // 测验：交给调用方**整页跳过去**（新版 `/exam/{tid}`），做完由测验页跳回来。
-    // 旧版给不出这种地址（它的答题界面是学习页里的 iframe），于是 url 为空，
-    // 退回「点元素」让站点自己决定怎么开。
-    if (src.type === RESOURCE_TYPE_QUIZ && !src.finished) {
+    // 测验：**绝不点元素** —— 新版那个节点点下去会开**新标签页**（用户实测），
+    // 而用户要的是「当前标签页跳过去、做完跳回来」（m01058 第 4 条）。
+    // 能构造出地址就整页跳；构造不出来（旧版内嵌方式）才退回点元素。
+    if (src.type === RESOURCE_TYPE_QUIZ) {
+      if (src.finished) {
+        // 做过的测验不重复打开：跳过去也只会被测验页判成「已交过」再弹回来，
+        // 白跑一趟。按「这一项好了」直接进统一出口（提醒 + 等 N 秒 + 切下一项）。
+        log.info(`连播：测验 ${src.id} 已完成，不再打开`);
+        return { kind: 'clicked', id: src.id, title: src.title, type: src.type, finished: true };
+      }
+
       const url = quizUrlFor(src.taskId);
       if (url !== '') {
         log.info(`连播：去测验 ${src.taskId}${src.title === '' ? '' : `（${src.title}）`}`);
         return { kind: 'quiz', resourceId: src.id, taskId: src.taskId, title: src.title, url };
       }
-      log.info(`连播：打开测验 ${src.id}${src.title === '' ? '' : `（${src.title}）`}`);
+
+      log.info(`连播：打开测验 ${src.id}（旧版内嵌方式）`);
       clickElement(el);
       return { kind: 'quiz', resourceId: src.id, taskId: src.taskId, title: src.title, url: '' };
     }
@@ -606,7 +663,10 @@ export interface UoocDiag {
     chapterTitle: number;
     sectionItem: number;
     sectionTitle: number;
+    /** 现在用的宽口径（`goSource(` 前缀）命中数 */
     resourceItem: number;
+    /** 原来那条逐字口径的命中数 —— 两者不等就说明资源项用了别的 ng-click */
+    resourceItemStrict: number;
   };
   chapterIds: string[];
   currentChapterFound: boolean;
@@ -622,6 +682,47 @@ export interface UoocDiag {
     videoPos: number;
   }[];
   resourceReadFailures: number;
+  /** 当前节是不是折叠的（`sectionItem.hide === true`） */
+  sectionCollapsed: boolean;
+  /** 当前节 `li` 的**直接子元素**逐个体检（找「资源到底挂在哪一层」） */
+  sectionOutline: {
+    tag: string;
+    cls: string;
+    ngRepeat: string;
+    ngIf: string;
+    children: number;
+    descendants: number;
+    firstChild: {
+      tag: string;
+      cls: string;
+      ngClick: string;
+      uiSref: string;
+      text: string;
+      resources: number;
+    } | null;
+  }[];
+  /** 当前节里所有 `[ng-repeat]` 容器（含深层）—— 深一层的目录多半是一个新的 ng-repeat */
+  sectionReps: {
+    cls: string;
+    ngRepeat: string;
+    children: number;
+    firstChild: {
+      tag: string;
+      cls: string;
+      ngClick: string;
+      uiSref: string;
+      text: string;
+      resources: number;
+    } | null;
+  }[];
+  /** 当前节里所有可点节点（不含资源项本身）—— 要知道「该点谁来展开」 */
+  sectionClickables: {
+    tag: string;
+    cls: string;
+    ngClick: string;
+    uiSref: string;
+    text: string;
+  }[];
 }
 
 export function collectDiag(): UoocDiag {
@@ -651,6 +752,65 @@ export function collectDiag(): UoocDiag {
     });
   }
 
+  // 「这一节为什么没渲染出资源」—— 把这一节的**结构**也一并交出来。
+  // 有些课程（内容挂在 1.4.1 / 1.4.2 这种更深一层里）资源不属于
+  // `sectionItem.unitSource`，只看 `resources: []` 根本分不清是空节还是没展开。
+  // 这几项就是为那种页面准备的，跑一次 `__sztbUooc()` 就能拿到。
+  const curSecLi =
+    parts === null ? null : (sections.find((li) => sectionIdOf(li) === parts.sectionId) ?? null);
+
+  const outline: UoocDiag['sectionOutline'] = [];
+  const reps: UoocDiag['sectionReps'] = [];
+  const clickables: UoocDiag['sectionClickables'] = [];
+
+  if (curSecLi !== null) {
+    const brief = (el: Element): UoocDiag['sectionOutline'][number]['firstChild'] => {
+      const first = el.children[0];
+      if (first === undefined) return null;
+      return {
+        tag: first.tagName.toLowerCase(),
+        cls: asString(first.getAttribute('class')),
+        ngClick: asString(first.getAttribute('ng-click')),
+        uiSref: asString(first.getAttribute('ui-sref')),
+        text: asString(first.textContent).replace(/\s+/g, ' ').trim().slice(0, 40),
+        resources: first.querySelectorAll(RESOURCE_ITEM_SELECTOR).length,
+      };
+    };
+
+    for (const child of Array.from(curSecLi.children)) {
+      outline.push({
+        tag: child.tagName.toLowerCase(),
+        cls: asString(child.getAttribute('class')),
+        ngRepeat: asString(child.getAttribute('ng-repeat')),
+        ngIf: asString(child.getAttribute('ng-if')),
+        children: child.children.length,
+        descendants: child.querySelectorAll('*').length,
+        firstChild: brief(child),
+      });
+    }
+
+    for (const el of Array.from(curSecLi.querySelectorAll('[ng-repeat]'))) {
+      reps.push({
+        cls: asString(el.getAttribute('class')),
+        ngRepeat: asString(el.getAttribute('ng-repeat')),
+        children: el.children.length,
+        firstChild: brief(el),
+      });
+    }
+
+    for (const el of Array.from(curSecLi.querySelectorAll('[ng-click], [ui-sref]'))) {
+      if (el.closest(RESOURCE_ITEM_SELECTOR) !== null) continue;
+      if (clickables.length >= 15) break;
+      clickables.push({
+        tag: el.tagName.toLowerCase(),
+        cls: asString(el.getAttribute('class')),
+        ngClick: asString(el.getAttribute('ng-click')),
+        uiSref: asString(el.getAttribute('ui-sref')),
+        text: asString(el.textContent).replace(/\s+/g, ' ').trim().slice(0, 40),
+      });
+    }
+  }
+
   return {
     hasAngular: angular() !== null,
     hash: parts,
@@ -660,6 +820,7 @@ export function collectDiag(): UoocDiag {
       sectionItem: queryAll(SECTION_ITEM_SELECTOR).length,
       sectionTitle: queryAll(SECTION_TITLE_SELECTOR).length,
       resourceItem: items.length,
+      resourceItemStrict: queryAll(RESOURCE_ITEM_STRICT_SELECTOR).length,
     },
     chapterIds,
     currentChapterFound: currentChapter !== null,
@@ -667,6 +828,10 @@ export function collectDiag(): UoocDiag {
     currentSectionFound: parts !== null && parts.sectionId !== '' && findSectionIndex(sections, parts.sectionId) >= 0,
     resources,
     resourceReadFailures: failures,
+    sectionCollapsed: curSecLi !== null && isSectionCollapsed(curSecLi),
+    sectionOutline: outline,
+    sectionReps: reps,
+    sectionClickables: clickables,
   };
 }
 
