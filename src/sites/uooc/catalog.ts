@@ -298,10 +298,10 @@ function findSectionIndex(sections: readonly HTMLElement[], sectionId: string): 
 // ------------------------------------------------------------- 推进一步
 
 export type AdvanceStep =
-  /** 已经点开了下一个资源（视频 / 文档 / 附件）；调用方按 `type` 决定怎么收尾 */
-  | { kind: 'clicked'; id: string; title: string; type: number }
-  /** 撞上一道**没做过**的测验；已经替用户点开了，等交卷信号 */
-  | { kind: 'quiz'; resourceId: string; taskId: string; title: string }
+  /** 已经点开了下一个资源；调用方按 `type` / `finished` 决定怎么收尾 */
+  | { kind: 'clicked'; id: string; title: string; type: number; finished: boolean }
+  /** 撞上一道**没做过**的测验；`url` 非空时应该**整页跳过去**，为空表示已点开 */
+  | { kind: 'quiz'; resourceId: string; taskId: string; title: string; url: string }
   /** 本节一个资源项都没有（空节，或还没渲染）——调用方决定等多久再往后跳 */
   | { kind: 'blank' }
   /** 点了节 / 章标题，页面正在按需渲染；调用方稍后再走一步 */
@@ -318,6 +318,22 @@ export function labelOf(type: number): string {
   if (type === RESOURCE_TYPE_FILE) return '附件';
   if (type === RESOURCE_TYPE_QUIZ) return '测验';
   return `资源(type=${type})`;
+}
+
+/**
+ * 测验页地址，用来**整页跳过去**（用户 m01058 第 4 条的方案）。
+ *
+ * 新版是 `/exam/{tid}` —— 实测 `local/capture/dom-uooc-quiz-新-提交通过.txt`
+ * 的 url 就是 `https://www.uooc.net.cn/exam/702751707`，`702751707` 正是目录里
+ * 那一项的 `task_id`。
+ *
+ * 旧版**不给地址**（返回空串）：它的答题界面是嵌在学习页里的 iframe
+ * （`/exam/paper?cid=&tid=`），整页跳过去不一定能用，交给调用方退回「点元素」。
+ */
+function quizUrlFor(taskId: string): string {
+  if (taskId === '' || taskId === '0') return '';
+  if (!location.pathname.startsWith('/home/learn/new/')) return '';
+  return `/exam/${taskId}`;
 }
 
 /**
@@ -447,37 +463,36 @@ export function stepForward(afterId = ''): AdvanceStep {
     const src = readSourceOf(el);
     if (src === null) continue;
 
-    // 站点已经标完成的，不必再点开 —— 这是唯一还会「跳过」的情况
-    if (src.finished) {
-      log.info(`跳过已完成的${labelOf(src.type)} ${src.id}`);
-      continue;
-    }
-
-    // 测验：**替用户点开**（新版会开一个新标签页，见 `quiz.ts`）。
-    // 点完之后这里就收工，等「交卷了」的跨标签页信号回来再由调用方接着走。
-    if (src.type === RESOURCE_TYPE_QUIZ) {
+    // 测验：交给调用方**整页跳过去**（新版 `/exam/{tid}`），做完由测验页跳回来。
+    // 旧版给不出这种地址（它的答题界面是学习页里的 iframe），于是 url 为空，
+    // 退回「点元素」让站点自己决定怎么开。
+    if (src.type === RESOURCE_TYPE_QUIZ && !src.finished) {
+      const url = quizUrlFor(src.taskId);
+      if (url !== '') {
+        log.info(`连播：去测验 ${src.taskId}${src.title === '' ? '' : `（${src.title}）`}`);
+        return { kind: 'quiz', resourceId: src.id, taskId: src.taskId, title: src.title, url };
+      }
       log.info(`连播：打开测验 ${src.id}${src.title === '' ? '' : `（${src.title}）`}`);
       clickElement(el);
-      return { kind: 'quiz', resourceId: src.id, taskId: src.taskId, title: src.title };
+      return { kind: 'quiz', resourceId: src.id, taskId: src.taskId, title: src.title, url: '' };
     }
 
-    // 视频一律点开播完（用户明确「一律看完后等待 5 秒再跳」）。
-    // 文档 / 附件则**只在是任务点时才值得点开** ——
-    // 站点不要求完成的项连「完成」图标都没有（新版），它的 `finished` 永远是 0，
-    // 点开也永远不会「完成」，只会被反复打开（m00961 第 1 条就是这么转圈的）。
-    // `source.is_task` 新旧两版都有；旧版正是用 `ng-class="{taskpoint: source.is_task == 1}"`
-    // 把它画成那个【任务点】小标的。
-    if (src.type !== RESOURCE_TYPE_VIDEO && !src.isTask) {
-      log.info(`跳过非任务点的${labelOf(src.type)} ${src.id}`);
-      continue;
-    }
-
-    // 其余（视频 / 是任务点的文档·附件）点开，点开之后由调用方按 type 决定怎么收尾
+    // 其余的**一律点开**，包含已经完成的那些 ——
+    // 用户 m01058 第 2 条：「不要直接就跳过已完成内容，你必须点那一章节等待 5 秒」。
+    // 所以这里没有任何「跳过」分支了；是等它播完（视频）还是直接进等待，
+    // 由调用方按 `finished` / `type` 决定。
     log.info(
-      `连播：打开${labelOf(src.type)} ${src.id}${src.title === '' ? '' : `（${src.title}）`}`,
+      `连播：打开${src.finished ? '已完成的' : ''}${labelOf(src.type)} ${src.id}` +
+        `${src.title === '' ? '' : `（${src.title}）`}`,
     );
     clickElement(el);
-    return { kind: 'clicked', id: src.id, title: src.title, type: src.type };
+    return {
+      kind: 'clicked',
+      id: src.id,
+      title: src.title,
+      type: src.type,
+      finished: src.finished,
+    };
   }
 
   // 本节一个资源项都没渲染出来，两种可能，按顺序试：

@@ -176,6 +176,45 @@
     }
   }
 
+  // ---------------------- I. 节内所有 ng-repeat 容器（含深层，找闯关模式那层）
+  // 有些新课（闯关模式）内容挂在 2.3.1 / 2.3.2 这种**更深一层**里，
+  // 那一层的资源不属于 sectionItem.unitSource，得先弄清它的 ng-repeat 是什么。
+  say('');
+  say('=== I. 节内所有 ng-repeat 容器（含深层） ===');
+  if (secLi) {
+    const repsDeep = q('[ng-repeat]', secLi);
+    say('  节内带 ng-repeat 的元素数: ' + repsDeep.length + '（不含节标题那一层）');
+    repsDeep.slice(0, 20).forEach((el, i) => {
+      const first = el.children[0];
+      say('   [' + i + '] <' + el.tagName.toLowerCase() + '> class=' + JSON.stringify(el.className) +
+          ' ng-repeat=' + JSON.stringify(trunc(el.getAttribute('ng-repeat'), 70)) +
+          ' 子元素=' + el.children.length);
+      if (first) {
+        say('        首个子元素: <' + first.tagName.toLowerCase() + '> class=' + JSON.stringify(first.className) +
+            ' ng-click=' + JSON.stringify(trunc(first.getAttribute('ng-click'), 50)) +
+            ' ui-sref=' + JSON.stringify(trunc(first.getAttribute('ui-sref'), 50)) +
+            ' 文本=' + trunc(first.textContent, 50) +
+            ' 内部资源项=' + q(SEL.resource, first).length);
+      }
+    });
+  }
+
+  // ------------------------------------ J. 节内所有可点节点（找「要展开谁」）
+  say('');
+  say('=== J. 节内可点节点（ng-click / ui-sref） ===');
+  if (secLi) {
+    const clickable = q('[ng-click], [ui-sref]', secLi).filter(
+      (el) => el.closest(SEL.resource) === null,
+    );
+    say('  可点节点数: ' + clickable.length);
+    clickable.slice(0, 20).forEach((el, i) => {
+      say('   [' + i + '] <' + el.tagName.toLowerCase() + '> class=' + JSON.stringify(el.className) +
+          ' ng-click=' + JSON.stringify(trunc(el.getAttribute('ng-click'), 50)) +
+          ' ui-sref=' + JSON.stringify(trunc(el.getAttribute('ui-sref'), 50)) +
+          ' 文本=' + trunc(el.textContent, 40));
+    });
+  }
+
   // --------------------------------------------------------- H. 统计
   say('');
   say('=== H. 统计 ===');

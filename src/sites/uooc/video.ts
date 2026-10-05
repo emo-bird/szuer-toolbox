@@ -51,8 +51,7 @@ import {
   stepForward,
 } from './catalog.ts';
 import { noteVideo, stopProgress } from './progress.ts';
-import { clearQuizDone, onQuizDone, readQuizDone, writeQuizOpening } from './quiz-signal.ts';
-import type { QuizSignal } from './quiz-signal.ts';
+import { beginQuiz, clearQuizState, readQuizState } from './quiz-return.ts';
 import { SITE_ID, TOGGLE, VALUE } from './settings.ts';
 
 const log = scoped('uooc/video');
@@ -317,28 +316,43 @@ function runAdvanceHop(): void {
       advancingUntil = Date.now() + ADVANCE_LOCK_MS;
       pendingAutoplayAt = Date.now();
       landedAt = Date.now();
-      // 视频交给它自己播完（`ended` 会来触发切换）；
-      // 文档 / 附件没有「播完」这回事，按「打开看一眼就算过」处理 ——
-      // 用户明确说了文档不必等完成判定（m00553 答复 3）。
-      if (step.type !== RESOURCE_TYPE_VIDEO) {
+      // 收尾方式三选一：
+      //   - 已完成的 → 不等它，直接进「提醒 + 等 N 秒」（用户 m01058 第 2 条：
+      //     不要跳过已完成内容，要点开、提醒、等 N 秒再走）；
+      //   - 没完成的视频 → 交给它自己播完（`ended` 会来触发切换）；
+      //   - 其它（文档 / 附件）→ 没有「播完」这回事，按「打开看一眼就算过」。
+      if (step.finished) {
+        scheduleSwitch(`已完成的${labelOf(step.type)}`);
+      } else if (step.type !== RESOURCE_TYPE_VIDEO) {
         scheduleSwitch(`已打开${labelOf(step.type)}`);
       }
       return;
 
     case 'quiz': {
-      const cid = parseHash()?.cid ?? '';
-      log.info(
-        `连播：已替你打开测验 ${step.taskId}${step.title === '' ? '' : `（${step.title}）`}，` +
-          '交卷后会自动继续',
-      );
       if (isEnabled(SITE_ID, TOGGLE.AUTO_SOLVE)) {
         log.warn('「自动作答」只做了开关，功能还没实现，这一题还得你自己做');
       }
+      const cid = parseHash()?.cid ?? '';
       const opening = { cid, taskId: step.taskId, resourceId: step.resourceId };
       setWaitingQuiz(opening);
-      // 给测验页留一张「这个标签页是连播开的」通行证 ——
-      // 它据此才敢在交卷后把自己关掉（用户自己开的卷子页不该被我们关）。
-      writeQuizOpening(opening);
+
+      if (step.url !== '') {
+        // 用户 m01058 第 4 条：**同一个标签页**跳过去，做完由测验页跳回来。
+        // 回程地址特意写成「那一项资源」的路由 —— 回来时 hash 带着 resourceId，
+        // 扫描起点就不会退回本节开头（否则整节会被重放一遍）。
+        const parts = parseHash();
+        const returnUrl =
+          parts === null
+            ? location.href
+            : `${location.origin}${location.pathname}#/${parts.cid}/${parts.chapterId}/${parts.sectionId}/${step.resourceId}/section`;
+        beginQuiz({ ...opening, returnUrl });
+        log.info(`连播：整页跳去测验 ${step.url}，做完跳回 ${returnUrl}`);
+        stopAdvance();
+        location.href = step.url;
+        return;
+      }
+
+      log.info(`连播：已打开测验 ${step.taskId}（旧版内嵌方式），交卷后会自动继续`);
       siteToast('连播：已为你打开测验，交卷后自动继续', 'info', 6000);
       stopAdvance();
       return;
@@ -478,6 +492,14 @@ const WAITING_QUIZ_KEY = 'uooc:waitingQuiz';
 /** 正在等的测验；`null` = 没在等 */
 let waitingQuiz: WaitingQuiz | null = null;
 
+/**
+ * 「这次加载是刚从已交卷的测验页跳回来的」。
+ *
+ * 用户 m01058 第 4 条定的方案：同一个标签页跳去测验、做完跳回来，
+ * 于是不需要任何跨标签页通信 —— 回程状态就在 `sessionStorage` 里（`quiz-return.ts`）。
+ */
+let quizJustDone = false;
+
 interface WaitingQuiz {
   /** 所属课程 id —— 换课程时必须作废，否则会拿着旧 id 去新课程里瞎判 */
   cid: string;
@@ -521,27 +543,22 @@ function restoreWaitingQuiz(): void {
 /**
  * 确认「等的那道测验做完了」，然后走统一出口（提醒 + 等 N 秒 + 切下一项）。
  *
- * @param signal 跨标签页标记；`null` = 是「看目录」这条兜底路进来的
+ * 现在只有两条来路，都在**同一个标签页**内（用户 m01058 第 4 条：取消了跨标签页通信）：
+ *   1. 测验页确认交卷后跳回来 —— `sessionStorage` 里那份状态带了 `done: true`；
+ *   2. 学习页目录上那一项变成「已完成」—— 兜底。
  */
-function handleQuizDone(signal: QuizSignal | null): void {
-  if (waitingQuiz === null) return;
-  if (signal !== null) {
-    if (signal.taskId !== '' && waitingQuiz.taskId !== '' && signal.taskId !== waitingQuiz.taskId) return;
-    if (signal.cid !== '' && waitingQuiz.cid !== '' && signal.cid !== waitingQuiz.cid) return;
-  }
-  log.info(`测验 ${waitingQuiz.taskId || '(未知)'} 已完成`);
+function handleQuizDone(): void {
   setWaitingQuiz(null);
-  clearQuizDone();
+  clearQuizState();
   scheduleSwitch('测验已完成');
 }
 
 /**
  * 兜底：每次扫描时看一眼**学习页目录**上那一项标没标完成。
  *
- * 主路是测验页写下的跨标签页标记（`onQuizDone`），但有些场景标记到不了：
- * 比如测验是**同一个标签页**内跳过去的，`storage` 事件不跨同一个标签页自身。
- * 那时只能靠目录。**只在开关开着时才动它** —— 用户把自动连播关了，
- * 这个标记就该原地留着，下次开开关才继续。
+ * 主路是「测验页跳回来时带着 done 标记」，但有些场景到不了那条路
+ * （比如用户自己手点开的测验、或目录本来就刷新出了完成状态）。
+ * **只在开关开着时才动它** —— 用户把自动连播关了，这个标记就该原地留着。
  */
 function checkWaitingQuiz(): void {
   if (waitingQuiz === null) return;
@@ -551,7 +568,7 @@ function checkWaitingQuiz(): void {
   if (el === null) return;
   if (!isResourceFinished(el)) return;
 
-  handleQuizDone(null);
+  handleQuizDone();
 }
 
 /**
@@ -740,6 +757,13 @@ export function startVideoAssist(): () => void {
 
   const scan = (): void => {
     if (stopped) return;
+    if (quizJustDone) {
+      quizJustDone = false;
+      if (isEnabled(SITE_ID, TOGGLE.AUTO_NEXT)) {
+        log.info('检测到是从「已交卷」的测验页跳回来的，继续连播');
+        handleQuizDone();
+      }
+    }
     checkWaitingQuiz();
     const v = findVideo();
     if (v !== null) apply(v);
@@ -754,6 +778,13 @@ export function startVideoAssist(): () => void {
   };
 
   restoreWaitingQuiz();
+  // 这次是不是「从已交卷的测验页跳回来」的？同一个标签页，状态就在 sessionStorage 里，
+  // 由 `scan()` 的第一次调用兑现（那时页面已经挂上了）。
+  const backFromQuiz = readQuizState();
+  if (backFromQuiz !== null && backFromQuiz.done) {
+    log.info('这次是从「已交卷」的测验页跳回来的');
+    quizJustDone = true;
+  }
   scan();
 
   const observer = new MutationObserver(schedule);
@@ -783,23 +814,6 @@ export function startVideoAssist(): () => void {
   };
   window.addEventListener('hashchange', onRoute);
   window.addEventListener('popstate', onRoute);
-
-  // 测验页交卷了 → 学习页接着播。三条来路都接上：
-  //   1. `storage` 事件（测验页写了标记，浏览器原生广播给同源其它标签页）；
-  //   2. 切回本标签页时主动读一次（事件可能已经错过，或测验是同标签页跳走的）；
-  //   3. `scan()` 里 `checkWaitingQuiz()` 看学习页目录（最后兜底）。
-  const offQuizDone = onQuizDone((signal) => {
-    if (!isEnabled(SITE_ID, TOGGLE.AUTO_NEXT)) return;
-    handleQuizDone(signal);
-  });
-  const onVisible = (): void => {
-    if (document.visibilityState !== 'visible') return;
-    if (!isEnabled(SITE_ID, TOGGLE.AUTO_NEXT)) return;
-    const mark = readQuizDone();
-    if (mark !== null) handleQuizDone(mark);
-  };
-  document.addEventListener('visibilitychange', onVisible);
-  window.addEventListener('focus', onVisible);
 
   log.debug('视频助手已挂载（二倍速 / 静音 / 防失焦）');
 
@@ -833,8 +847,5 @@ export function startVideoAssist(): () => void {
     for (const type of MEDIA_EVENTS) document.removeEventListener(type, onMediaEvent, true);
     window.removeEventListener('hashchange', onRoute);
     window.removeEventListener('popstate', onRoute);
-    offQuizDone();
-    document.removeEventListener('visibilitychange', onVisible);
-    window.removeEventListener('focus', onVisible);
   };
 }

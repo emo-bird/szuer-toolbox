@@ -49,7 +49,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-05T19:22:28.469Z（构建号 60） */
+/* 构建信息：2026-10-05T19:38:27.708Z（构建号 61） */
 
 "use strict";
 (() => {
@@ -763,20 +763,20 @@
       }
       setCollapsed(false);
     });
-    function makeDraggable(handle, read2, write2, sizeOf) {
+    function makeDraggable(handle, read3, write3, sizeOf) {
       handle.addEventListener("pointerdown", (ev) => {
-        const origin = read2();
+        const origin = read3();
         dragged = false;
         startDrag(
           ev,
           (dx, dy) => {
             if (Math.abs(dx) > 2 || Math.abs(dy) > 2) dragged = true;
             const { w, h } = sizeOf();
-            write2(clampPosition({ left: origin.left + dx, top: origin.top + dy }, w, h));
+            write3(clampPosition({ left: origin.left + dx, top: origin.top + dy }, w, h));
             applyGeometry();
           },
           () => {
-            if (dragged) write2(read2());
+            if (dragged) write3(read3());
           }
         );
       });
@@ -2004,67 +2004,55 @@ ${options.desc ?? ""}
     }, Math.max(600, durationMs));
   }
 
-  // src/sites/uooc/quiz-signal.ts
-  var PREFIX = "sztb:uooc:";
-  var QUIZ_OPENING_KEY = `${PREFIX}quizOpening`;
-  var QUIZ_DONE_KEY = `${PREFIX}quizDone`;
-  var OPENING_TTL_MS = 10 * 60 * 1e3;
-  function writeJson(key, value) {
+  // src/sites/uooc/quiz-return.ts
+  var KEY = "sztb:uooc:quiz";
+  var TTL_MS = 12 * 60 * 60 * 1e3;
+  function read2() {
     try {
-      localStorage.setItem(key, JSON.stringify(value));
-    } catch {
-    }
-  }
-  function readJson(key) {
-    try {
-      const raw = localStorage.getItem(key);
+      const raw = sessionStorage.getItem(KEY);
       if (raw === null) return null;
       const parsed = JSON.parse(raw);
       if (typeof parsed !== "object" || parsed === null) return null;
       const o = parsed;
       const str3 = (k) => typeof o[k] === "string" ? o[k] : "";
-      return {
+      const state = {
+        returnUrl: str3("returnUrl"),
         cid: str3("cid"),
         taskId: str3("taskId"),
         resourceId: str3("resourceId"),
-        at: typeof o["at"] === "number" ? o["at"] : 0
+        at: typeof o["at"] === "number" ? o["at"] : 0,
+        done: o["done"] === true
       };
+      if (state.returnUrl === "") return null;
+      if (Date.now() - state.at > TTL_MS) return null;
+      return state;
     } catch {
       return null;
     }
   }
-  function writeQuizOpening(signal) {
-    writeJson(QUIZ_OPENING_KEY, { ...signal, at: Date.now() });
-  }
-  function readQuizOpening() {
-    const s = readQuizOpeningRaw();
-    if (s === null) return null;
-    if (Date.now() - s.at > OPENING_TTL_MS) return null;
-    return s;
-  }
-  function readQuizOpeningRaw() {
-    return readJson(QUIZ_OPENING_KEY);
-  }
-  function writeQuizDone(signal) {
-    writeJson(QUIZ_DONE_KEY, { ...signal, at: Date.now() });
-  }
-  function readQuizDone() {
-    return readJson(QUIZ_DONE_KEY);
-  }
-  function clearQuizDone() {
+  function write2(state) {
     try {
-      localStorage.removeItem(QUIZ_DONE_KEY);
+      sessionStorage.setItem(KEY, JSON.stringify(state));
     } catch {
     }
   }
-  function onQuizDone(cb) {
-    const handler = (ev) => {
-      if (ev.key !== null && ev.key !== QUIZ_DONE_KEY) return;
-      const signal = readQuizDone();
-      if (signal !== null) cb(signal);
-    };
-    window.addEventListener("storage", handler);
-    return () => window.removeEventListener("storage", handler);
+  function beginQuiz(state) {
+    write2({ ...state, at: Date.now(), done: false });
+  }
+  function readQuizState() {
+    return read2();
+  }
+  function markQuizDone() {
+    const state = read2();
+    if (state === null) return null;
+    write2({ ...state, done: true, at: Date.now() });
+    return state;
+  }
+  function clearQuizState() {
+    try {
+      sessionStorage.removeItem(KEY);
+    } catch {
+    }
   }
 
   // src/sites/uooc/quiz.ts
@@ -2080,7 +2068,7 @@ ${options.desc ?? ""}
   var PAPER_SELECTOR = ".queContainer";
   var TICK_MS = 1e3;
   var SETTLE_MS = 2e3;
-  var CLOSE_DELAY_MS = 1200;
+  var BACK_DELAY_MS = 1e3;
   function parseExamParams(search = location.search, pathname = location.pathname) {
     let cid = "";
     let taskId = "";
@@ -2114,10 +2102,7 @@ ${options.desc ?? ""}
     }
   }
   function startQuizWatcher() {
-    const { cid, taskId } = parseExamParams();
-    const opening = readQuizOpening();
-    const managed = opening !== null && (taskId === "" || opening.taskId === taskId);
-    if (managed) log5.info(`连播打开的测验页（tid=${taskId || "(未知)"}），交卷后会自动关闭`);
+    const { taskId } = parseExamParams();
     let sawSubmit = false;
     let finished = false;
     let timer4 = null;
@@ -2129,24 +2114,17 @@ ${options.desc ?? ""}
         clearInterval(timer4);
         timer4 = null;
       }
-      const signal = {
-        cid: cid !== "" ? cid : opening?.cid ?? "",
-        taskId: taskId !== "" ? taskId : opening?.taskId ?? "",
-        resourceId: opening?.resourceId ?? ""
-      };
-      writeQuizDone(signal);
-      log5.info(`判定 ${reason}，已通知学习页继续连播`);
-      if (!managed) {
-        siteToast("测验已完成，学习页会自动接着播", "success", 4e3);
+      const state = markQuizDone();
+      const back = state?.returnUrl ?? "";
+      log5.info(`判定 ${reason}（tid=${taskId || "(未知)"}），准备跳回课程页`);
+      if (back === "") {
+        siteToast("测验已完成", "success", 4e3);
         return;
       }
-      siteToast("测验已完成，正在关闭这个标签页…", "success", CLOSE_DELAY_MS + 3e3);
+      siteToast("测验已完成，正在返回课程页…", "success", BACK_DELAY_MS + 2e3);
       window.setTimeout(() => {
-        window.close();
-        window.setTimeout(() => {
-          siteToast("这个标签页需要你手动关闭（浏览器不允许脚本关）", "info", 6e3);
-        }, 800);
-      }, CLOSE_DELAY_MS);
+        location.replace(back);
+      }, BACK_DELAY_MS);
     };
     const tick2 = () => {
       if (finished) return;
@@ -2499,6 +2477,11 @@ ${options.desc ?? ""}
     if (type === RESOURCE_TYPE_QUIZ) return "测验";
     return `资源(type=${type})`;
   }
+  function quizUrlFor(taskId) {
+    if (taskId === "" || taskId === "0") return "";
+    if (!location.pathname.startsWith("/home/learn/new/")) return "";
+    return `/exam/${taskId}`;
+  }
   var expandTriedFor = "";
   var blankSeenFor = "";
   var sectionExpandTriedFor = "";
@@ -2574,24 +2557,27 @@ ${options.desc ?? ""}
       const el2 = pool[i];
       const src = readSourceOf(el2);
       if (src === null) continue;
-      if (src.finished) {
-        log7.info(`跳过已完成的${labelOf(src.type)} ${src.id}`);
-        continue;
-      }
-      if (src.type === RESOURCE_TYPE_QUIZ) {
+      if (src.type === RESOURCE_TYPE_QUIZ && !src.finished) {
+        const url = quizUrlFor(src.taskId);
+        if (url !== "") {
+          log7.info(`连播：去测验 ${src.taskId}${src.title === "" ? "" : `（${src.title}）`}`);
+          return { kind: "quiz", resourceId: src.id, taskId: src.taskId, title: src.title, url };
+        }
         log7.info(`连播：打开测验 ${src.id}${src.title === "" ? "" : `（${src.title}）`}`);
         clickElement(el2);
-        return { kind: "quiz", resourceId: src.id, taskId: src.taskId, title: src.title };
-      }
-      if (src.type !== RESOURCE_TYPE_VIDEO && !src.isTask) {
-        log7.info(`跳过非任务点的${labelOf(src.type)} ${src.id}`);
-        continue;
+        return { kind: "quiz", resourceId: src.id, taskId: src.taskId, title: src.title, url: "" };
       }
       log7.info(
-        `连播：打开${labelOf(src.type)} ${src.id}${src.title === "" ? "" : `（${src.title}）`}`
+        `连播：打开${src.finished ? "已完成的" : ""}${labelOf(src.type)} ${src.id}${src.title === "" ? "" : `（${src.title}）`}`
       );
       clickElement(el2);
-      return { kind: "clicked", id: src.id, title: src.title, type: src.type };
+      return {
+        kind: "clicked",
+        id: src.id,
+        title: src.title,
+        type: src.type,
+        finished: src.finished
+      };
     }
     if (pool.length === 0) {
       const sectionKey = `${parts.chapterId}/${parts.sectionId}`;
@@ -2989,21 +2975,29 @@ ${options.desc ?? ""}
         advancingUntil = Date.now() + ADVANCE_LOCK_MS;
         pendingAutoplayAt = Date.now();
         landedAt = Date.now();
-        if (step.type !== RESOURCE_TYPE_VIDEO) {
+        if (step.finished) {
+          scheduleSwitch(`已完成的${labelOf(step.type)}`);
+        } else if (step.type !== RESOURCE_TYPE_VIDEO) {
           scheduleSwitch(`已打开${labelOf(step.type)}`);
         }
         return;
       case "quiz": {
-        const cid = parseHash()?.cid ?? "";
-        log9.info(
-          `连播：已替你打开测验 ${step.taskId}${step.title === "" ? "" : `（${step.title}）`}，交卷后会自动继续`
-        );
         if (isEnabled(SITE_ID, TOGGLE.AUTO_SOLVE)) {
           log9.warn("「自动作答」只做了开关，功能还没实现，这一题还得你自己做");
         }
+        const cid = parseHash()?.cid ?? "";
         const opening = { cid, taskId: step.taskId, resourceId: step.resourceId };
         setWaitingQuiz(opening);
-        writeQuizOpening(opening);
+        if (step.url !== "") {
+          const parts = parseHash();
+          const returnUrl = parts === null ? location.href : `${location.origin}${location.pathname}#/${parts.cid}/${parts.chapterId}/${parts.sectionId}/${step.resourceId}/section`;
+          beginQuiz({ ...opening, returnUrl });
+          log9.info(`连播：整页跳去测验 ${step.url}，做完跳回 ${returnUrl}`);
+          stopAdvance();
+          location.href = step.url;
+          return;
+        }
+        log9.info(`连播：已打开测验 ${step.taskId}（旧版内嵌方式），交卷后会自动继续`);
         siteToast("连播：已为你打开测验，交卷后自动继续", "info", 6e3);
         stopAdvance();
         return;
@@ -3089,6 +3083,7 @@ ${options.desc ?? ""}
   }
   var WAITING_QUIZ_KEY = "uooc:waitingQuiz";
   var waitingQuiz = null;
+  var quizJustDone = false;
   function setWaitingQuiz(q) {
     waitingQuiz = q;
     if (q === null) remove(WAITING_QUIZ_KEY);
@@ -3111,15 +3106,9 @@ ${options.desc ?? ""}
     waitingQuiz = { cid, resourceId, taskId };
     log9.info(`上次停在测验 ${taskId || "(未知)"}，做完会自动继续连播`);
   }
-  function handleQuizDone(signal) {
-    if (waitingQuiz === null) return;
-    if (signal !== null) {
-      if (signal.taskId !== "" && waitingQuiz.taskId !== "" && signal.taskId !== waitingQuiz.taskId) return;
-      if (signal.cid !== "" && waitingQuiz.cid !== "" && signal.cid !== waitingQuiz.cid) return;
-    }
-    log9.info(`测验 ${waitingQuiz.taskId || "(未知)"} 已完成`);
+  function handleQuizDone() {
     setWaitingQuiz(null);
-    clearQuizDone();
+    clearQuizState();
     scheduleSwitch("测验已完成");
   }
   function checkWaitingQuiz() {
@@ -3128,7 +3117,7 @@ ${options.desc ?? ""}
     const el2 = findResourceItem(waitingQuiz.resourceId);
     if (el2 === null) return;
     if (!isResourceFinished(el2)) return;
-    handleQuizDone(null);
+    handleQuizDone();
   }
   function breakStall(v) {
     if (landedAt === 0) return;
@@ -3258,6 +3247,13 @@ ${options.desc ?? ""}
     let stopped = false;
     const scan2 = () => {
       if (stopped) return;
+      if (quizJustDone) {
+        quizJustDone = false;
+        if (isEnabled(SITE_ID, TOGGLE.AUTO_NEXT)) {
+          log9.info("检测到是从「已交卷」的测验页跳回来的，继续连播");
+          handleQuizDone();
+        }
+      }
       checkWaitingQuiz();
       const v = findVideo();
       if (v !== null) apply(v);
@@ -3270,6 +3266,11 @@ ${options.desc ?? ""}
       }, RESCAN_DEBOUNCE_MS);
     };
     restoreWaitingQuiz();
+    const backFromQuiz = readQuizState();
+    if (backFromQuiz !== null && backFromQuiz.done) {
+      log9.info("这次是从「已交卷」的测验页跳回来的");
+      quizJustDone = true;
+    }
     scan2();
     const observer = new MutationObserver(schedule3);
     observer.observe(document.documentElement, { childList: true, subtree: true });
@@ -3287,18 +3288,6 @@ ${options.desc ?? ""}
     };
     window.addEventListener("hashchange", onRoute);
     window.addEventListener("popstate", onRoute);
-    const offQuizDone = onQuizDone((signal) => {
-      if (!isEnabled(SITE_ID, TOGGLE.AUTO_NEXT)) return;
-      handleQuizDone(signal);
-    });
-    const onVisible = () => {
-      if (document.visibilityState !== "visible") return;
-      if (!isEnabled(SITE_ID, TOGGLE.AUTO_NEXT)) return;
-      const mark = readQuizDone();
-      if (mark !== null) handleQuizDone(mark);
-    };
-    document.addEventListener("visibilitychange", onVisible);
-    window.addEventListener("focus", onVisible);
     log9.debug("视频助手已挂载（二倍速 / 静音 / 防失焦）");
     const pageWin = pageOrSelf();
     pageWin["__sztbUooc"] = () => ({
@@ -3325,9 +3314,6 @@ ${options.desc ?? ""}
       for (const type of MEDIA_EVENTS) document.removeEventListener(type, onMediaEvent, true);
       window.removeEventListener("hashchange", onRoute);
       window.removeEventListener("popstate", onRoute);
-      offQuizDone();
-      document.removeEventListener("visibilitychange", onVisible);
-      window.removeEventListener("focus", onVisible);
     };
   }
 
@@ -8044,8 +8030,8 @@ ${text}
   // src/main.ts
   var log25 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-05T19:22:28.469Z" : null;
-  var BUILD_NO = true ? 60 : null;
+  var BUILD_TIME = true ? "2026-10-05T19:38:27.708Z" : null;
+  var BUILD_NO = true ? 61 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();
