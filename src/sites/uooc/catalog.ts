@@ -110,6 +110,22 @@ function queryOne(selector: string, root: ParentNode): HTMLElement | null {
   return asElement(root.querySelector(selector));
 }
 
+/**
+ * 模拟一次点击。
+ *
+ * 用 `dispatchEvent` 而不是裸 `el.click()`：显式带上 `bubbles: true`，
+ * 这样既走站点挂在节点自己的 `ng-click`，也走可能存在的父级委托监听。
+ * 与手点的差别只剩 `isTrusted`（AngularJS 1.x 不看这个）。
+ * 万一 `MouseEvent` 构造不可用（极老的宿主）再退回 `el.click()`。
+ */
+function clickElement(el: HTMLElement): void {
+  try {
+    el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+  } catch {
+    el.click();
+  }
+}
+
 // --------------------------------------------------------------- Angular
 
 interface Scope {
@@ -262,7 +278,7 @@ export type AdvanceStep =
   /** 已经点开了下一个视频；调用方负责兑现自动播放 */
   | { kind: 'clicked'; id: string; title: string }
   /** 撞上一道**没做过**的测验，停下来（要不要作答由调用方决定） */
-  | { kind: 'quiz'; taskId: string; title: string }
+  | { kind: 'quiz'; resourceId: string; taskId: string; title: string }
   /** 点了节 / 章标题，页面正在按需渲染；调用方稍后再走一步 */
   | { kind: 'rendered' }
   /** 本章资源已经走到头（要不要跨章由调用方按「连播范围」决定） */
@@ -300,7 +316,7 @@ export function stepForward(): AdvanceStep {
       const title = queryOne(SECTION_TITLE_SELECTOR, first);
       if (title !== null) {
         log.info('连播：进入下一章的第一节');
-        title.click();
+        clickElement(title);
         return { kind: 'rendered' };
       }
     }
@@ -308,7 +324,7 @@ export function stepForward(): AdvanceStep {
     if (chapterTitle === null) {
       return { kind: 'stop', reason: `章 ${parts.chapterId} 上没有可点的标题节点` };
     }
-    chapterTitle.click();
+    clickElement(chapterTitle);
     return { kind: 'rendered' };
   }
 
@@ -349,7 +365,7 @@ export function stepForward(): AdvanceStep {
         continue;
       }
       log.info(`连播：打开下一个视频 ${src.id}${src.title === '' ? '' : `（${src.title}）`}`);
-      el.click();
+      clickElement(el);
       return { kind: 'clicked', id: src.id, title: src.title };
     }
 
@@ -358,7 +374,7 @@ export function stepForward(): AdvanceStep {
         log.info(`跳过已做过的测验 ${src.taskId}`);
         continue;
       }
-      return { kind: 'quiz', taskId: src.taskId, title: src.title };
+      return { kind: 'quiz', resourceId: src.id, taskId: src.taskId, title: src.title };
     }
 
     const label = src.type === RESOURCE_TYPE_DOC ? '文档' : '附件';
@@ -400,8 +416,96 @@ export function goNextChapter(): boolean {
   const title = queryOne(CHAPTER_TITLE_SELECTOR, next);
   if (title === null) return false;
   log.info(`连播：跨到下一章 ${next.getAttribute('id') ?? ''}`);
-  title.click();
+  clickElement(title);
   return true;
+}
+
+// ------------------------------------------------ 跨时间的观察（等测验做完）
+
+/**
+ * 按资源 id 找目录里那一项。
+ *
+ * 连播撞上没做过的测验会停下来，之后要靠它回头确认「做完了没有」——
+ * 那时页面可能已经换过一轮（测验开在别的路由上），所以只能按 id 重新找。
+ */
+export function findResourceItem(id: string): HTMLElement | null {
+  if (id === '') return null;
+  for (const el of resourceItems()) {
+    const src = readSourceOf(el);
+    if (src !== null && src.id === id) return el;
+  }
+  return null;
+}
+
+/** 这一项站点标记为完成了吗：scope 的 `finished`，或目录项上的 `complete` 类 */
+export function isResourceFinished(el: Element): boolean {
+  const src = readSourceOf(el);
+  if (src !== null && src.finished) return true;
+  return el.classList.contains('complete');
+}
+
+/**
+ * 连播诊断快照（手测用）。
+ *
+ * 连播是「点一下、等页面反应、再看一眼」的状态机，出问题时最缺的就是
+ * 「此刻目录到底长什么样」。这里把判定要用到的每一项都数出来，
+ * **不改任何东西、不点任何东西**，可以随便在 Console 里反复调。
+ */
+export interface UoocDiag {
+  hasAngular: boolean;
+  hash: UoocHashParts | null;
+  selectorHits: {
+    chapterItem: number;
+    chapterTitle: number;
+    sectionItem: number;
+    sectionTitle: number;
+    resourceItem: number;
+  };
+  chapterIds: string[];
+  currentChapterFound: boolean;
+  sectionIds: string[];
+  currentSectionFound: boolean;
+  resources: { id: string; type: number; finished: boolean; videoPos: number }[];
+  resourceReadFailures: number;
+}
+
+export function collectDiag(): UoocDiag {
+  const parts = parseHash();
+  const chapters = chapterItems();
+  const chapterIds = chapters.map((li) => li.getAttribute('id') ?? '');
+  const currentChapter = parts === null ? null : findChapterItem(parts.chapterId);
+  const sections = currentChapter === null ? [] : sectionItems(currentChapter);
+  const sectionIds = sections.map((li) => li.getAttribute('id') ?? '');
+  const items = resourceItems();
+
+  const resources: UoocDiag['resources'] = [];
+  let failures = 0;
+  for (const el of items) {
+    const src = readSourceOf(el);
+    if (src === null) {
+      failures += 1;
+      continue;
+    }
+    resources.push({ id: src.id, type: src.type, finished: src.finished, videoPos: src.videoPos });
+  }
+
+  return {
+    hasAngular: angular() !== null,
+    hash: parts,
+    selectorHits: {
+      chapterItem: chapters.length,
+      chapterTitle: queryAll(CHAPTER_TITLE_SELECTOR).length,
+      sectionItem: queryAll(SECTION_ITEM_SELECTOR).length,
+      sectionTitle: queryAll(SECTION_TITLE_SELECTOR).length,
+      resourceItem: items.length,
+    },
+    chapterIds,
+    currentChapterFound: currentChapter !== null,
+    sectionIds,
+    currentSectionFound: parts !== null && parts.sectionId !== '' && findSectionIndex(sections, parts.sectionId) >= 0,
+    resources,
+    resourceReadFailures: failures,
+  };
 }
 
 // ------------------------------------------------- 学习上下文（供进度上报用）

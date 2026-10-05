@@ -49,13 +49,10 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-05T15:18:11.242Z（构建号 53） */
+/* 构建信息：2026-10-05T17:56:37.482Z（构建号 55） */
 
 "use strict";
 (() => {
-  // src/common/ui/style.css
-  var style_default = '/* ============================================================\n   深大人工具箱 —— 悬浮窗基础样式\n   本文件被 esbuild 以 --loader:.css=text 打成字符串，\n   运行时整段塞进 shadow root 的 <style>。\n   因为处在 Shadow DOM 内，天然不受宿主页面 CSS 影响，\n   反向也绝不会污染宿主页面。\n   ============================================================ */\n\n:host,\n.sztb-root {\n  --sztb-accent: #1e6fff;\n  --sztb-accent-hover: #175be0;\n  --sztb-bg: #ffffff;\n  --sztb-bg-alt: #f5f6f8;\n  --sztb-border: #e3e5e9;\n  --sztb-text: #1f2329;\n  --sztb-text-dim: #8a9099;\n  --sztb-danger: #e5484d;\n  --sztb-warn: #f5a623;\n  --sztb-ok: #30a46c;\n\n  all: initial;\n  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;\n  font-size: 13px;\n  line-height: 1.5;\n  color: var(--sztb-text);\n  box-sizing: border-box;\n}\n\n.sztb-root *,\n.sztb-root *::before,\n.sztb-root *::after {\n  box-sizing: border-box;\n}\n\n/* ---------------------------------------------------------- 悬浮球 */\n.sztb-ball {\n  position: fixed;\n  z-index: 2147483000;\n  width: 44px;\n  height: 44px;\n  border-radius: 50%;\n  background: var(--sztb-accent);\n  color: #fff;\n  display: none;\n  align-items: center;\n  justify-content: center;\n  font-size: 15px;\n  font-weight: 600;\n  cursor: grab;\n  user-select: none;\n  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.22);\n  transition: transform 0.15s ease, background 0.15s ease;\n}\n\n.sztb-root[data-collapsed="true"] .sztb-ball {\n  display: flex;\n}\n\n.sztb-ball:hover {\n  background: var(--sztb-accent-hover);\n  transform: scale(1.06);\n}\n\n.sztb-ball:active {\n  cursor: grabbing;\n}\n\n/* ---------------------------------------------------------- 面板 */\n.sztb-panel {\n  position: fixed;\n  z-index: 2147483001;\n  display: flex;\n  flex-direction: column;\n  background: var(--sztb-bg);\n  border: 1px solid var(--sztb-border);\n  border-radius: 10px;\n  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);\n  overflow: hidden;\n  min-width: 260px;\n  min-height: 180px;\n}\n\n.sztb-root[data-collapsed="true"] .sztb-panel {\n  display: none;\n}\n\n/* ---------------------------------------------------------- 标题栏 */\n.sztb-head {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  padding: 8px 10px;\n  background: var(--sztb-bg-alt);\n  border-bottom: 1px solid var(--sztb-border);\n  cursor: move;\n  user-select: none;\n  flex: 0 0 auto;\n}\n\n.sztb-title {\n  flex: 1 1 auto;\n  font-weight: 600;\n  font-size: 13px;\n  white-space: nowrap;\n  overflow: hidden;\n  text-overflow: ellipsis;\n}\n\n.sztb-site {\n  color: var(--sztb-text-dim);\n  font-weight: 400;\n}\n\n.sztb-iconbtn {\n  flex: 0 0 auto;\n  width: 22px;\n  height: 22px;\n  padding: 0;\n  border: none;\n  border-radius: 5px;\n  background: transparent;\n  color: var(--sztb-text-dim);\n  font-size: 14px;\n  line-height: 1;\n  cursor: pointer;\n}\n\n.sztb-iconbtn:hover {\n  background: rgba(0, 0, 0, 0.07);\n  color: var(--sztb-text);\n}\n\n/* ---------------------------------------------------------- 标签栏 */\n.sztb-tabbar {\n  display: flex;\n  flex-wrap: wrap;\n  gap: 2px;\n  padding: 6px 8px 0;\n  border-bottom: 1px solid var(--sztb-border);\n  background: var(--sztb-bg);\n  flex: 0 0 auto;\n}\n\n.sztb-tab {\n  padding: 5px 10px;\n  border: none;\n  border-bottom: 2px solid transparent;\n  background: transparent;\n  color: var(--sztb-text-dim);\n  font-size: 12.5px;\n  cursor: pointer;\n  border-radius: 6px 6px 0 0;\n  white-space: nowrap;\n}\n\n.sztb-tab:hover {\n  color: var(--sztb-text);\n  background: var(--sztb-bg-alt);\n}\n\n.sztb-tab[aria-selected="true"] {\n  color: var(--sztb-accent);\n  border-bottom-color: var(--sztb-accent);\n  font-weight: 600;\n}\n\n/**\n * 站点组与公共组之间的分组竖线。\n *\n * - `align-self: center` 而不是 `stretch`：标签按钮自带上下内边距，\n *   竖线只有它们高度的一部分才像「分组线」而不是「分割框」。\n * - 用固定 px 高度（约标签按钮高度的 60%）而不是百分比：\n *   `flex-wrap` 换行后每行的行高由内容决定，百分比会跟着抖。\n * - `flex: 0 0 auto` 防止它在窄面板里被压扁。\n * - 标签栏本身有 `gap: 2px`，所以左右各留 4px 即可得到 6px 的视觉间距。\n */\n.sztb-tab-sep {\n  align-self: center;\n  flex: 0 0 auto;\n  width: 1px;\n  height: 14px;\n  margin: 0 4px;\n  background: var(--sztb-border);\n}\n\n/* ---------------------------------------------------------- 内容区 */\n.sztb-body {\n  flex: 1 1 auto;\n  overflow: auto;\n  padding: 10px;\n}\n\n.sztb-pane {\n  display: none;\n  flex-direction: column;\n  gap: 8px;\n}\n\n.sztb-pane[data-active="true"] {\n  display: flex;\n}\n\n/* ---------------------------------------------------------- 表单控件 */\n.sztb-row {\n  display: flex;\n  align-items: flex-start;\n  gap: 8px;\n  padding: 7px 8px;\n  border-radius: 6px;\n}\n\n.sztb-row:hover {\n  background: var(--sztb-bg-alt);\n}\n\n.sztb-row input[type="checkbox"] {\n  flex: 0 0 auto;\n  margin: 2px 0 0;\n  width: 15px;\n  height: 15px;\n  accent-color: var(--sztb-accent);\n  cursor: pointer;\n}\n\n.sztb-row-main {\n  flex: 1 1 auto;\n  min-width: 0;\n}\n\n.sztb-row-label {\n  display: block;\n  font-size: 13px;\n  cursor: pointer;\n}\n\n.sztb-row-desc {\n  display: block;\n  color: var(--sztb-text-dim);\n  font-size: 12px;\n  margin-top: 1px;\n  word-break: break-word;\n}\n\n.sztb-risk {\n  display: inline-block;\n  margin-left: 6px;\n  padding: 0 5px;\n  border-radius: 4px;\n  font-size: 11px;\n  font-weight: 600;\n  vertical-align: 1px;\n}\n\n.sztb-risk[data-risk="trace"] {\n  background: rgba(245, 166, 35, 0.16);\n  color: #b3730a;\n}\n\n.sztb-risk[data-risk="irreversible"] {\n  background: rgba(229, 72, 77, 0.14);\n  color: var(--sztb-danger);\n}\n\n.sztb-field {\n  display: flex;\n  flex-direction: column;\n  gap: 3px;\n  margin-bottom: 10px;\n  padding: 0 8px;\n}\n\n.sztb-field-label {\n  font-size: 13px;\n  color: var(--sztb-text);\n}\n\n/* 配置项提示：单独一行，紧跟在标签下面（不塞进输入框里） */\n.sztb-field-desc {\n  font-size: 12px;\n  line-height: 1.45;\n  color: var(--sztb-text-dim);\n  word-break: break-word;\n}\n\n.sztb-input,\n.sztb-select {\n  width: 100%;\n  padding: 5px 8px;\n  border: 1px solid var(--sztb-border);\n  border-radius: 6px;\n  font-size: 13px;\n  font-family: inherit;\n  color: var(--sztb-text);\n  background: var(--sztb-bg);\n  box-sizing: border-box;\n}\n\n.sztb-input:focus,\n.sztb-select:focus {\n  outline: none;\n  border-color: var(--sztb-accent);\n}\n\n/* 空值时显示的灰色默认值 */\n.sztb-input::placeholder {\n  color: var(--sztb-text-dim);\n  opacity: 0.8;\n}\n\n.sztb-select {\n  cursor: pointer;\n}\n\n/* 校验提示：校验通过时用 hidden 收起来，不占高度 */\n.sztb-field-hint {\n  font-size: 12px;\n  line-height: 1.45;\n  color: #b3730a;\n}\n\n.sztb-field-hint[hidden] {\n  display: none;\n}\n\n.sztb-field[data-invalid="true"] .sztb-input,\n.sztb-field[data-invalid="true"] .sztb-select {\n  border-color: #d9a340;\n}\n\n.sztb-btn {\n  padding: 5px 12px;\n  border: 1px solid var(--sztb-border);\n  border-radius: 6px;\n  background: var(--sztb-bg);\n  color: var(--sztb-text);\n  font-size: 12.5px;\n  font-family: inherit;\n  cursor: pointer;\n}\n\n.sztb-btn:hover {\n  background: var(--sztb-bg-alt);\n}\n\n.sztb-btn[data-variant="primary"] {\n  background: var(--sztb-accent);\n  border-color: var(--sztb-accent);\n  color: #fff;\n}\n\n.sztb-btn[data-variant="primary"]:hover {\n  background: var(--sztb-accent-hover);\n}\n\n.sztb-btn[data-variant="danger"] {\n  background: var(--sztb-danger);\n  border-color: var(--sztb-danger);\n  color: #fff;\n}\n\n.sztb-group-title {\n  margin: 10px 0 2px;\n  font-size: 12px;\n  font-weight: 600;\n  color: var(--sztb-text-dim);\n}\n\n.sztb-group-title:first-child {\n  margin-top: 0;\n}\n\n.sztb-empty {\n  padding: 16px 8px;\n  text-align: center;\n  color: var(--sztb-text-dim);\n  font-size: 12.5px;\n}\n\n/* 段首说明文字：站点自己的设置标签页用它交代门禁规则 */\n.sztb-note {\n  margin: 0 0 8px;\n  padding: 7px 9px;\n  border-left: 2px solid var(--sztb-border);\n  border-radius: 0 5px 5px 0;\n  background: var(--sztb-bg-alt);\n  color: var(--sztb-text-dim);\n  font-size: 12px;\n  line-height: 1.6;\n}\n\n/* ---------------------------------------------------------- 日志面板 */\n.sztb-log {\n  font-family: Consolas, "Cascadia Mono", monospace;\n  font-size: 11.5px;\n  line-height: 1.6;\n  white-space: pre-wrap;\n  word-break: break-all;\n  margin: 0;\n  flex: 1 1 auto;\n}\n\n.sztb-log-line[data-level="warn"] {\n  color: #b3730a;\n}\n\n.sztb-log-line[data-level="error"] {\n  color: var(--sztb-danger);\n}\n\n.sztb-log-line[data-level="debug"] {\n  color: var(--sztb-text-dim);\n}\n\n.sztb-toolbar {\n  display: flex;\n  gap: 6px;\n  flex: 0 0 auto;\n  align-items: center;\n}\n\n/* ---------------------------------------------------------- Toast */\n.sztb-toasts {\n  position: fixed;\n  z-index: 2147483003;\n  display: flex;\n  flex-direction: column;\n  gap: 6px;\n  align-items: flex-end;\n  pointer-events: none;\n}\n\n.sztb-toast {\n  max-width: 260px;\n  padding: 7px 11px;\n  border-radius: 7px;\n  background: rgba(31, 35, 41, 0.94);\n  color: #fff;\n  font-size: 12.5px;\n  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.24);\n  animation: sztb-toast-in 0.16s ease;\n  word-break: break-word;\n}\n\n.sztb-toast[data-kind="error"] {\n  background: var(--sztb-danger);\n}\n\n.sztb-toast[data-kind="warn"] {\n  background: #b3730a;\n}\n\n.sztb-toast[data-kind="success"] {\n  background: var(--sztb-ok);\n}\n\n@keyframes sztb-toast-in {\n  from {\n    opacity: 0;\n    transform: translateY(-6px);\n  }\n  to {\n    opacity: 1;\n    transform: none;\n  }\n}\n\n/* ---------------------------------------------------------- 确认框 */\n.sztb-modal-mask {\n  position: fixed;\n  inset: 0;\n  z-index: 2147483002;\n  background: rgba(0, 0, 0, 0.35);\n  display: flex;\n  align-items: center;\n  justify-content: center;\n}\n\n.sztb-modal {\n  width: 300px;\n  max-width: calc(100vw - 32px);\n  background: var(--sztb-bg);\n  border-radius: 10px;\n  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);\n  overflow: hidden;\n}\n\n.sztb-modal-title {\n  padding: 12px 14px 0;\n  font-weight: 600;\n  font-size: 13.5px;\n}\n\n.sztb-modal-title[data-danger="true"] {\n  color: var(--sztb-danger);\n}\n\n.sztb-modal-body {\n  padding: 8px 14px 14px;\n  font-size: 12.5px;\n  color: var(--sztb-text-dim);\n  white-space: pre-wrap;\n  word-break: break-word;\n}\n\n.sztb-modal-foot {\n  display: flex;\n  justify-content: flex-end;\n  gap: 8px;\n  padding: 10px 14px;\n  background: var(--sztb-bg-alt);\n  border-top: 1px solid var(--sztb-border);\n}\n\n/* ------------------------------------------ 登录态失效（全屏提示） */\n/* 比确认框更重：遮罩再深一点、层级再高一点（万一确认框正开着） */\n.sztb-auth-mask {\n  z-index: 2147483003;\n  background: rgba(0, 0, 0, 0.45);\n}\n\n/* 正文比确认框长，放宽一行；窄屏仍受 max-width 约束 */\n.sztb-auth-box {\n  width: 360px;\n}\n\n/* ---------------------------------------------------------- 缩放手柄 */\n.sztb-resize {\n  position: absolute;\n  right: 0;\n  bottom: 0;\n  width: 14px;\n  height: 14px;\n  cursor: nwse-resize;\n  background: linear-gradient(\n    135deg,\n    transparent 0 50%,\n    var(--sztb-border) 50% 60%,\n    transparent 60% 72%,\n    var(--sztb-border) 72% 82%,\n    transparent 82%\n  );\n}\n';
-
   // src/common/core/log.ts
   var LEVEL_RANK = { debug: 10, info: 20, warn: 30, error: 40 };
   var CAPACITY = 500;
@@ -663,7 +660,7 @@
     document.addEventListener("pointerup", up, true);
     document.addEventListener("pointercancel", up, true);
   }
-  function createPanel(baseCss, entries2, options) {
+  function createPanel(baseCss2, entries2, options) {
     const host = el("div", { class: "sztb-host" });
     host.style.setProperty("position", "fixed");
     host.style.setProperty("inset", "0");
@@ -672,7 +669,7 @@
     host.style.setProperty("z-index", "2147483000");
     const shadow = host.attachShadow({ mode: "open" });
     const baseStyle = document.createElement("style");
-    baseStyle.textContent = baseCss;
+    baseStyle.textContent = baseCss2;
     shadow.appendChild(baseStyle);
     const blockKeyLeak = (ev) => {
       ev.stopPropagation();
@@ -1946,7 +1943,7 @@ ${options.desc ?? ""}
     /** 进度上报间隔上限（秒） */
     PROGRESS_MAX: "progressMax"
   };
-  var PROGRESS_DEFAULT = { min: "30", max: "90" };
+  var PROGRESS_DEFAULT = { min: "300", max: "600" };
   var UOOC_TOGGLES = [
     {
       id: TOGGLE.RATE_2X,
@@ -2120,6 +2117,13 @@ ${options.desc ?? ""}
   function queryOne(selector, root) {
     return asElement(root.querySelector(selector));
   }
+  function clickElement(el2) {
+    try {
+      el2.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+    } catch {
+      el2.click();
+    }
+  }
   function angular() {
     const w = pageOrSelf();
     const ng = w["angular"];
@@ -2213,7 +2217,7 @@ ${options.desc ?? ""}
         const title = queryOne(SECTION_TITLE_SELECTOR, first);
         if (title !== null) {
           log6.info("连播：进入下一章的第一节");
-          title.click();
+          clickElement(title);
           return { kind: "rendered" };
         }
       }
@@ -2221,7 +2225,7 @@ ${options.desc ?? ""}
       if (chapterTitle === null) {
         return { kind: "stop", reason: `章 ${parts.chapterId} 上没有可点的标题节点` };
       }
-      chapterTitle.click();
+      clickElement(chapterTitle);
       return { kind: "rendered" };
     }
     const secIndex = findSectionIndex(sections, parts.sectionId);
@@ -2255,7 +2259,7 @@ ${options.desc ?? ""}
           continue;
         }
         log6.info(`连播：打开下一个视频 ${src.id}${src.title === "" ? "" : `（${src.title}）`}`);
-        el2.click();
+        clickElement(el2);
         return { kind: "clicked", id: src.id, title: src.title };
       }
       if (src.type === RESOURCE_TYPE_QUIZ) {
@@ -2263,7 +2267,7 @@ ${options.desc ?? ""}
           log6.info(`跳过已做过的测验 ${src.taskId}`);
           continue;
         }
-        return { kind: "quiz", taskId: src.taskId, title: src.title };
+        return { kind: "quiz", resourceId: src.id, taskId: src.taskId, title: src.title };
       }
       const label = src.type === RESOURCE_TYPE_DOC ? "文档" : "附件";
       log6.info(`跳过${label} ${src.id}${src.title === "" ? "" : `（${src.title}）`}`);
@@ -2293,8 +2297,57 @@ ${options.desc ?? ""}
     const title = queryOne(CHAPTER_TITLE_SELECTOR, next);
     if (title === null) return false;
     log6.info(`连播：跨到下一章 ${next.getAttribute("id") ?? ""}`);
-    title.click();
+    clickElement(title);
     return true;
+  }
+  function findResourceItem(id) {
+    if (id === "") return null;
+    for (const el2 of resourceItems()) {
+      const src = readSourceOf(el2);
+      if (src !== null && src.id === id) return el2;
+    }
+    return null;
+  }
+  function isResourceFinished(el2) {
+    const src = readSourceOf(el2);
+    if (src !== null && src.finished) return true;
+    return el2.classList.contains("complete");
+  }
+  function collectDiag() {
+    const parts = parseHash();
+    const chapters = chapterItems();
+    const chapterIds = chapters.map((li) => li.getAttribute("id") ?? "");
+    const currentChapter = parts === null ? null : findChapterItem(parts.chapterId);
+    const sections = currentChapter === null ? [] : sectionItems(currentChapter);
+    const sectionIds = sections.map((li) => li.getAttribute("id") ?? "");
+    const items2 = resourceItems();
+    const resources = [];
+    let failures = 0;
+    for (const el2 of items2) {
+      const src = readSourceOf(el2);
+      if (src === null) {
+        failures += 1;
+        continue;
+      }
+      resources.push({ id: src.id, type: src.type, finished: src.finished, videoPos: src.videoPos });
+    }
+    return {
+      hasAngular: angular() !== null,
+      hash: parts,
+      selectorHits: {
+        chapterItem: chapters.length,
+        chapterTitle: queryAll(CHAPTER_TITLE_SELECTOR).length,
+        sectionItem: queryAll(SECTION_ITEM_SELECTOR).length,
+        sectionTitle: queryAll(SECTION_TITLE_SELECTOR).length,
+        resourceItem: items2.length
+      },
+      chapterIds,
+      currentChapterFound: currentChapter !== null,
+      sectionIds,
+      currentSectionFound: parts !== null && parts.sectionId !== "" && findSectionIndex(sections, parts.sectionId) >= 0,
+      resources,
+      resourceReadFailures: failures
+    };
   }
   var SCOPE_MAX_DEPTH = 15;
   function activeResourceItem() {
@@ -2328,12 +2381,7 @@ ${options.desc ?? ""}
   var log7 = scoped("uooc/progress");
   var MARK_PATH = "/home/learn/markVideoLearn";
   var SITE_FN_NAMES = ["LearnMark", "learnMark", "markVideoLearn"];
-  var FIXED_PARAMS = [
-    ["hidemsg_", "true"],
-    ["network", "2"],
-    ["source", "1"],
-    ["subsection_id", "0"]
-  ];
+  var NETWORK = "2";
   var MIN_INTERVAL_S = 5;
   var MAX_INTERVAL_S = 3600;
   var current = null;
@@ -2402,12 +2450,15 @@ ${options.desc ?? ""}
     const payload = {
       chapter_id: ctx.chapterId,
       cid: ctx.cid,
+      hidemsg_: "true",
+      network: NETWORK,
       resource_id: ctx.resourceId,
       section_id: ctx.sectionId,
+      source: "1",
+      subsection_id: "0",
       video_length: v.duration.toFixed(2),
       video_pos: v.currentTime.toFixed(2)
     };
-    for (const [k, val] of FIXED_PARAMS) payload[k] = val;
     const fn = findScopeFunction(v, SITE_FN_NAMES);
     if (fn !== null) {
       try {
@@ -2474,6 +2525,7 @@ ${options.desc ?? ""}
   var applied = /* @__PURE__ */ new WeakMap();
   var announced = /* @__PURE__ */ new WeakSet();
   var hasStarted = /* @__PURE__ */ new WeakSet();
+  var endedBound = /* @__PURE__ */ new WeakSet();
   function asVideo(el2) {
     return el2 !== null && el2.tagName === "VIDEO" ? el2 : null;
   }
@@ -2565,18 +2617,19 @@ ${options.desc ?? ""}
     const step = stepForward();
     switch (step.kind) {
       case "clicked":
+        stopAdvance();
         advancingUntil = Date.now() + ADVANCE_LOCK_MS;
         pendingAutoplayAt = Date.now();
         landedAt = Date.now();
-        stopAdvance();
         return;
       case "quiz":
         log8.info(
-          `连播停在测验 ${step.taskId}${step.title === "" ? "" : `（${step.title}）`}：没做过的测验不会自动跳过`
+          `连播停在测验 ${step.taskId}${step.title === "" ? "" : `（${step.title}）`}：没做过的测验不会自动跳过，做完会自动继续`
         );
         if (isEnabled(SITE_ID, TOGGLE.AUTO_SOLVE)) {
           log8.warn("「自动作答」只做了开关，功能还没实现，先停在这一题");
         }
+        setWaitingQuiz({ resourceId: step.resourceId, taskId: step.taskId });
         stopAdvance();
         return;
       case "rendered":
@@ -2604,9 +2657,37 @@ ${options.desc ?? ""}
   function startAdvance() {
     if (!isEnabled(SITE_ID, TOGGLE.AUTO_NEXT)) return;
     if (Date.now() < advancingUntil) return;
+    if (advanceDeadline !== 0) return;
     stopAdvance();
     advanceDeadline = Date.now() + ADVANCE_SESSION_MS;
     scheduleAdvanceHop(0);
+  }
+  var WAITING_QUIZ_KEY = "uooc:waitingQuiz";
+  var waitingQuiz = null;
+  function setWaitingQuiz(q) {
+    waitingQuiz = q;
+    if (q === null) remove(WAITING_QUIZ_KEY);
+    else write(WAITING_QUIZ_KEY, q);
+  }
+  function restoreWaitingQuiz() {
+    const raw = read(WAITING_QUIZ_KEY, null);
+    if (typeof raw !== "object" || raw === null) return;
+    const o = raw;
+    const resourceId = typeof o["resourceId"] === "string" ? o["resourceId"] : "";
+    const taskId = typeof o["taskId"] === "string" ? o["taskId"] : "";
+    if (resourceId === "") return;
+    waitingQuiz = { resourceId, taskId };
+    log8.info(`上次停在测验 ${taskId || "(未知)"}，做完会自动继续连播`);
+  }
+  function checkWaitingQuiz() {
+    if (waitingQuiz === null) return;
+    if (!isEnabled(SITE_ID, TOGGLE.AUTO_NEXT)) return;
+    const el2 = findResourceItem(waitingQuiz.resourceId);
+    if (el2 === null) return;
+    if (!isResourceFinished(el2)) return;
+    log8.info(`测验 ${waitingQuiz.taskId || "(未知)"} 已完成，继续连播`);
+    setWaitingQuiz(null);
+    startAdvance();
   }
   function breakStall(v) {
     if (landedAt === 0) return;
@@ -2664,6 +2745,10 @@ ${options.desc ?? ""}
       state.mute = false;
     }
     applied.set(v, state);
+    if (!endedBound.has(v)) {
+      endedBound.add(v);
+      v.addEventListener("ended", onMediaEvent);
+    }
     tryPendingAutoplay(v);
     breakStall(v);
     noteVideo(v);
@@ -2732,6 +2817,7 @@ ${options.desc ?? ""}
     let stopped = false;
     const scan2 = () => {
       if (stopped) return;
+      checkWaitingQuiz();
       const v = findVideo();
       if (v !== null) apply(v);
     };
@@ -2742,6 +2828,7 @@ ${options.desc ?? ""}
         scan2();
       }, RESCAN_DEBOUNCE_MS);
     };
+    restoreWaitingQuiz();
     scan2();
     const observer = new MutationObserver(schedule3);
     observer.observe(document.documentElement, { childList: true, subtree: true });
@@ -2751,14 +2838,26 @@ ${options.desc ?? ""}
     document.addEventListener("play", onMediaEvent, true);
     document.addEventListener("playing", onMediaEvent, true);
     document.addEventListener("pause", onMediaEvent, true);
+    document.addEventListener("ended", onMediaEvent, true);
     document.addEventListener("ratechange", onMediaEvent, true);
     document.addEventListener("volumechange", onMediaEvent, true);
     window.addEventListener("hashchange", schedule3);
     window.addEventListener("popstate", schedule3);
     log8.debug("视频助手已挂载（二倍速 / 静音 / 防失焦）");
+    const pageWin = pageOrSelf();
+    pageWin["__sztbUooc"] = () => ({
+      ...collectDiag(),
+      autoNext: isEnabled(SITE_ID, TOGGLE.AUTO_NEXT),
+      nextScope: getValue(SITE_ID, VALUE.NEXT_SCOPE),
+      autoProgress: isEnabled(SITE_ID, TOGGLE.AUTO_PROGRESS),
+      waitingQuiz
+    });
+    pageWin["__sztbUoocStep"] = () => stepForward();
     return () => {
       stopped = true;
       stopProgress();
+      delete pageWin["__sztbUooc"];
+      delete pageWin["__sztbUoocStep"];
       if (timer4 !== null) {
         window.clearTimeout(timer4);
         timer4 = null;
@@ -7479,10 +7578,11 @@ ${text}
   }
 
   // src/main.ts
+  var baseCss = true ? ":host,.sztb-root{--sztb-accent: #1e6fff;--sztb-accent-hover: #175be0;--sztb-bg: #ffffff;--sztb-bg-alt: #f5f6f8;--sztb-border: #e3e5e9;--sztb-text: #1f2329;--sztb-text-dim: #8a9099;--sztb-danger: #e5484d;--sztb-warn: #f5a623;--sztb-ok: #30a46c;all:initial;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Microsoft YaHei,sans-serif;font-size:13px;line-height:1.5;color:var(--sztb-text);box-sizing:border-box}.sztb-root *,.sztb-root *:before,.sztb-root *:after{box-sizing:border-box}.sztb-ball{position:fixed;z-index:2147483000;width:44px;height:44px;border-radius:50%;background:var(--sztb-accent);color:#fff;display:none;align-items:center;justify-content:center;font-size:15px;font-weight:600;cursor:grab;user-select:none;box-shadow:0 4px 16px #00000038;transition:transform .15s ease,background .15s ease}.sztb-root[data-collapsed=true] .sztb-ball{display:flex}.sztb-ball:hover{background:var(--sztb-accent-hover);transform:scale(1.06)}.sztb-ball:active{cursor:grabbing}.sztb-panel{position:fixed;z-index:2147483001;display:flex;flex-direction:column;background:var(--sztb-bg);border:1px solid var(--sztb-border);border-radius:10px;box-shadow:0 8px 32px #0000002e;overflow:hidden;min-width:260px;min-height:180px}.sztb-root[data-collapsed=true] .sztb-panel{display:none}.sztb-head{display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--sztb-bg-alt);border-bottom:1px solid var(--sztb-border);cursor:move;user-select:none;flex:0 0 auto}.sztb-title{flex:1 1 auto;font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.sztb-site{color:var(--sztb-text-dim);font-weight:400}.sztb-iconbtn{flex:0 0 auto;width:22px;height:22px;padding:0;border:none;border-radius:5px;background:transparent;color:var(--sztb-text-dim);font-size:14px;line-height:1;cursor:pointer}.sztb-iconbtn:hover{background:#00000012;color:var(--sztb-text)}.sztb-tabbar{display:flex;flex-wrap:wrap;gap:2px;padding:6px 8px 0;border-bottom:1px solid var(--sztb-border);background:var(--sztb-bg);flex:0 0 auto}.sztb-tab{padding:5px 10px;border:none;border-bottom:2px solid transparent;background:transparent;color:var(--sztb-text-dim);font-size:12.5px;cursor:pointer;border-radius:6px 6px 0 0;white-space:nowrap}.sztb-tab:hover{color:var(--sztb-text);background:var(--sztb-bg-alt)}.sztb-tab[aria-selected=true]{color:var(--sztb-accent);border-bottom-color:var(--sztb-accent);font-weight:600}.sztb-tab-sep{align-self:center;flex:0 0 auto;width:1px;height:14px;margin:0 4px;background:var(--sztb-border)}.sztb-body{flex:1 1 auto;overflow:auto;padding:10px}.sztb-pane{display:none;flex-direction:column;gap:8px}.sztb-pane[data-active=true]{display:flex}.sztb-row{display:flex;align-items:flex-start;gap:8px;padding:7px 8px;border-radius:6px}.sztb-row:hover{background:var(--sztb-bg-alt)}.sztb-row input[type=checkbox]{flex:0 0 auto;margin:2px 0 0;width:15px;height:15px;accent-color:var(--sztb-accent);cursor:pointer}.sztb-row-main{flex:1 1 auto;min-width:0}.sztb-row-label{display:block;font-size:13px;cursor:pointer}.sztb-row-desc{display:block;color:var(--sztb-text-dim);font-size:12px;margin-top:1px;word-break:break-word}.sztb-risk{display:inline-block;margin-left:6px;padding:0 5px;border-radius:4px;font-size:11px;font-weight:600;vertical-align:1px}.sztb-risk[data-risk=trace]{background:#f5a62329;color:#b3730a}.sztb-risk[data-risk=irreversible]{background:#e5484d24;color:var(--sztb-danger)}.sztb-field{display:flex;flex-direction:column;gap:3px;margin-bottom:10px;padding:0 8px}.sztb-field-label{font-size:13px;color:var(--sztb-text)}.sztb-field-desc{font-size:12px;line-height:1.45;color:var(--sztb-text-dim);word-break:break-word}.sztb-input,.sztb-select{width:100%;padding:5px 8px;border:1px solid var(--sztb-border);border-radius:6px;font-size:13px;font-family:inherit;color:var(--sztb-text);background:var(--sztb-bg);box-sizing:border-box}.sztb-input:focus,.sztb-select:focus{outline:none;border-color:var(--sztb-accent)}.sztb-input::placeholder{color:var(--sztb-text-dim);opacity:.8}.sztb-select{cursor:pointer}.sztb-field-hint{font-size:12px;line-height:1.45;color:#b3730a}.sztb-field-hint[hidden]{display:none}.sztb-field[data-invalid=true] .sztb-input,.sztb-field[data-invalid=true] .sztb-select{border-color:#d9a340}.sztb-btn{padding:5px 12px;border:1px solid var(--sztb-border);border-radius:6px;background:var(--sztb-bg);color:var(--sztb-text);font-size:12.5px;font-family:inherit;cursor:pointer}.sztb-btn:hover{background:var(--sztb-bg-alt)}.sztb-btn[data-variant=primary]{background:var(--sztb-accent);border-color:var(--sztb-accent);color:#fff}.sztb-btn[data-variant=primary]:hover{background:var(--sztb-accent-hover)}.sztb-btn[data-variant=danger]{background:var(--sztb-danger);border-color:var(--sztb-danger);color:#fff}.sztb-group-title{margin:10px 0 2px;font-size:12px;font-weight:600;color:var(--sztb-text-dim)}.sztb-group-title:first-child{margin-top:0}.sztb-empty{padding:16px 8px;text-align:center;color:var(--sztb-text-dim);font-size:12.5px}.sztb-note{margin:0 0 8px;padding:7px 9px;border-left:2px solid var(--sztb-border);border-radius:0 5px 5px 0;background:var(--sztb-bg-alt);color:var(--sztb-text-dim);font-size:12px;line-height:1.6}.sztb-log{font-family:Consolas,Cascadia Mono,monospace;font-size:11.5px;line-height:1.6;white-space:pre-wrap;word-break:break-all;margin:0;flex:1 1 auto}.sztb-log-line[data-level=warn]{color:#b3730a}.sztb-log-line[data-level=error]{color:var(--sztb-danger)}.sztb-log-line[data-level=debug]{color:var(--sztb-text-dim)}.sztb-toolbar{display:flex;gap:6px;flex:0 0 auto;align-items:center}.sztb-toasts{position:fixed;z-index:2147483003;display:flex;flex-direction:column;gap:6px;align-items:flex-end;pointer-events:none}.sztb-toast{max-width:260px;padding:7px 11px;border-radius:7px;background:#1f2329f0;color:#fff;font-size:12.5px;box-shadow:0 4px 14px #0000003d;animation:sztb-toast-in .16s ease;word-break:break-word}.sztb-toast[data-kind=error]{background:var(--sztb-danger)}.sztb-toast[data-kind=warn]{background:#b3730a}.sztb-toast[data-kind=success]{background:var(--sztb-ok)}@keyframes sztb-toast-in{0%{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}.sztb-modal-mask{position:fixed;inset:0;z-index:2147483002;background:#00000059;display:flex;align-items:center;justify-content:center}.sztb-modal{width:300px;max-width:calc(100vw - 32px);background:var(--sztb-bg);border-radius:10px;box-shadow:0 10px 40px #0000004d;overflow:hidden}.sztb-modal-title{padding:12px 14px 0;font-weight:600;font-size:13.5px}.sztb-modal-title[data-danger=true]{color:var(--sztb-danger)}.sztb-modal-body{padding:8px 14px 14px;font-size:12.5px;color:var(--sztb-text-dim);white-space:pre-wrap;word-break:break-word}.sztb-modal-foot{display:flex;justify-content:flex-end;gap:8px;padding:10px 14px;background:var(--sztb-bg-alt);border-top:1px solid var(--sztb-border)}.sztb-auth-mask{z-index:2147483003;background:#00000073}.sztb-auth-box{width:360px}.sztb-resize{position:absolute;right:0;bottom:0;width:14px;height:14px;cursor:nwse-resize;background:linear-gradient(135deg,transparent 0 50%,var(--sztb-border) 50% 60%,transparent 60% 72%,var(--sztb-border) 72% 82%,transparent 82%)}" : "";
   var log24 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-05T15:18:11.242Z" : null;
-  var BUILD_NO = true ? 53 : null;
+  var BUILD_TIME = true ? "2026-10-05T17:56:37.482Z" : null;
+  var BUILD_NO = true ? 55 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();
@@ -7506,7 +7606,7 @@ ${text}
       booted = null;
     }
     const siteTabs = res.adapter !== null ? res.adapter.tabs.map((tab) => ({ siteId: res.adapter.id, tab })) : [];
-    const panel3 = createPanel(style_default, buildEntries(siteTabs), {
+    const panel3 = createPanel(baseCss, buildEntries(siteTabs), {
       siteName: res.adapter?.name ?? null
     });
     setStatusProvider(() => ({

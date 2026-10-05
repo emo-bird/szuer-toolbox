@@ -41,17 +41,12 @@ const MARK_PATH = '/home/learn/markVideoLearn';
 const SITE_FN_NAMES: readonly string[] = ['LearnMark', 'learnMark', 'markVideoLearn'];
 
 /**
- * 报文里那几个固定字段，照抄抓包。
+ * 报文里的固定字段，照抄抓包。
  *
- * `network=2` / `source=1` / `subsection_id=0` 在抓到的每一条里都一样，
- * 含义未知，原样带着。
+ * ⚠️ 这几个值站点自己也不总是相同（同一端点抓到过 `network=2`，用户样本里是
+ * `network=1`），含义未知，原样带着即可。
  */
-const FIXED_PARAMS: readonly (readonly [string, string])[] = [
-  ['hidemsg_', 'true'],
-  ['network', '2'],
-  ['source', '1'],
-  ['subsection_id', '0'],
-];
+const NETWORK = '2';
 
 /** 区间的硬边界（秒）：比这还小就是对站点不客气，比这还大就没意义了 */
 const MIN_INTERVAL_S = 5;
@@ -138,15 +133,19 @@ async function report(v: HTMLVideoElement): Promise<void> {
     return;
   }
 
+  // 字段顺序照抄站点自己的报文（`qs()` 按对象插入顺序拼串），别随手重排
   const payload: Record<string, string> = {
     chapter_id: ctx.chapterId,
     cid: ctx.cid,
+    hidemsg_: 'true',
+    network: NETWORK,
     resource_id: ctx.resourceId,
     section_id: ctx.sectionId,
+    source: '1',
+    subsection_id: '0',
     video_length: v.duration.toFixed(2),
     video_pos: v.currentTime.toFixed(2),
   };
-  for (const [k, val] of FIXED_PARAMS) payload[k] = val;
 
   // 路 1：站点自己的函数（签名未知，按最可能的形状调一次）
   const fn = findScopeFunction(v, SITE_FN_NAMES);

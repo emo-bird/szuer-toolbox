@@ -37,7 +37,15 @@
 
 import { scoped } from '../../common/core/log.ts';
 import { getValue, isEnabled } from '../../common/core/settings.ts';
-import { goNextChapter, stepForward } from './catalog.ts';
+import { read as readStore, remove as removeStore, write as writeStore } from '../../common/core/storage.ts';
+import { pageOrSelf } from '../../common/utils/page.ts';
+import {
+  collectDiag,
+  findResourceItem,
+  goNextChapter,
+  isResourceFinished,
+  stepForward,
+} from './catalog.ts';
 import { noteVideo, stopProgress } from './progress.ts';
 import { SITE_ID, TOGGLE, VALUE } from './settings.ts';
 
@@ -85,6 +93,15 @@ const announced = new WeakSet<HTMLVideoElement>();
  * 的播放器自动播起来）。
  */
 const hasStarted = new WeakSet<HTMLVideoElement>();
+
+/**
+ * 已经在元素**自身**上挂过 `ended` 监听的那些视频。
+ *
+ * document 捕获阶段本来就能收到 `ended`（见 `startVideoAssist()`），这里再挂一遍
+ * 是为了兜住「播放器不在顶层文档里」的情况（`findVideo()` 会去同源 iframe 里找）。
+ * 两边都触发也不会连点两次 —— `startAdvance()` 有「一轮只跑一次」的闸。
+ */
+const endedBound = new WeakSet<HTMLVideoElement>();
 
 /** 元素是不是真的 video（不依赖 `instanceof HTMLVideoElement`，沙箱里它可能不是同一个构造器） */
 function asVideo(el: Element | null): HTMLVideoElement | null {
@@ -232,20 +249,23 @@ function runAdvanceHop(): void {
   const step = stepForward();
   switch (step.kind) {
     case 'clicked':
+      // ⚠️ 先 stopAdvance() 再写这三个时间戳 —— `stopAdvance()` 会把 `landedAt`
+      // 清零，反过来的话 `breakStall()` 永远看不到落点，兜底就失效了。
+      stopAdvance();
       advancingUntil = Date.now() + ADVANCE_LOCK_MS;
       pendingAutoplayAt = Date.now();
       landedAt = Date.now();
-      stopAdvance();
       return;
 
     case 'quiz':
       log.info(
         `连播停在测验 ${step.taskId}${step.title === '' ? '' : `（${step.title}）`}：` +
-          '没做过的测验不会自动跳过',
+          '没做过的测验不会自动跳过，做完会自动继续',
       );
       if (isEnabled(SITE_ID, TOGGLE.AUTO_SOLVE)) {
         log.warn('「自动作答」只做了开关，功能还没实现，先停在这一题');
       }
+      setWaitingQuiz({ resourceId: step.resourceId, taskId: step.taskId });
       stopAdvance();
       return;
 
@@ -283,10 +303,63 @@ function runAdvanceHop(): void {
 function startAdvance(): void {
   if (!isEnabled(SITE_ID, TOGGLE.AUTO_NEXT)) return;
   if (Date.now() < advancingUntil) return;
+  // 已经有一轮在跑就别重开：'ended' 可能同时从 document 捕获与元素自身两条路进来
+  if (advanceDeadline !== 0) return;
 
   stopAdvance();
   advanceDeadline = Date.now() + ADVANCE_SESSION_MS;
   scheduleAdvanceHop(0);
+}
+
+// ------------------------------------------------------------ 等测验做完
+
+/**
+ * 停在测验上时记下「在等哪一道」。
+ *
+ * 存进油猴存储而不是只放内存里：做测验多半会**整页跳走**
+ * （`/exam/*` 是另一个 page 匹配），做完回到学习页时脚本是重新加载的，
+ * 内存里的标记早就没了。
+ */
+const WAITING_QUIZ_KEY = 'uooc:waitingQuiz';
+
+/** 正在等的测验；`null` = 没在等 */
+let waitingQuiz: { resourceId: string; taskId: string } | null = null;
+
+function setWaitingQuiz(q: { resourceId: string; taskId: string } | null): void {
+  waitingQuiz = q;
+  if (q === null) removeStore(WAITING_QUIZ_KEY);
+  else writeStore(WAITING_QUIZ_KEY, q);
+}
+
+/** 启动时把上次留下的标记捡回来 */
+function restoreWaitingQuiz(): void {
+  const raw = readStore<unknown>(WAITING_QUIZ_KEY, null);
+  if (typeof raw !== 'object' || raw === null) return;
+  const o = raw as Record<string, unknown>;
+  const resourceId = typeof o['resourceId'] === 'string' ? o['resourceId'] : '';
+  const taskId = typeof o['taskId'] === 'string' ? o['taskId'] : '';
+  if (resourceId === '') return;
+  waitingQuiz = { resourceId, taskId };
+  log.info(`上次停在测验 ${taskId || '(未知)'}，做完会自动继续连播`);
+}
+
+/**
+ * 每次扫描时看一眼：等的那道测验做完了没有。
+ *
+ * 做完就把它从「等待」里摘掉并继续连播。**只在开关开着时才动它** ——
+ * 用户把自动连播关了，这个标记就该原地留着，下次开开关才继续。
+ */
+function checkWaitingQuiz(): void {
+  if (waitingQuiz === null) return;
+  if (!isEnabled(SITE_ID, TOGGLE.AUTO_NEXT)) return;
+
+  const el = findResourceItem(waitingQuiz.resourceId);
+  if (el === null) return;
+  if (!isResourceFinished(el)) return;
+
+  log.info(`测验 ${waitingQuiz.taskId || '(未知)'} 已完成，继续连播`);
+  setWaitingQuiz(null);
+  startAdvance();
 }
 
 /**
@@ -365,6 +438,12 @@ function apply(v: HTMLVideoElement): void {
   }
 
   applied.set(v, state);
+
+  // 播完是连播的唯一触发点；除了 document 捕获，再在元素自己身上挂一份
+  if (!endedBound.has(v)) {
+    endedBound.add(v);
+    v.addEventListener('ended', onMediaEvent);
+  }
 
   // 连播跳过来之后，第一件事是把新片源播起来
   tryPendingAutoplay(v);
@@ -468,6 +547,7 @@ export function startVideoAssist(): () => void {
 
   const scan = (): void => {
     if (stopped) return;
+    checkWaitingQuiz();
     const v = findVideo();
     if (v !== null) apply(v);
   };
@@ -480,6 +560,7 @@ export function startVideoAssist(): () => void {
     }, RESCAN_DEBOUNCE_MS);
   };
 
+  restoreWaitingQuiz();
   scan();
 
   const observer = new MutationObserver(schedule);
@@ -493,6 +574,10 @@ export function startVideoAssist(): () => void {
   document.addEventListener('play', onMediaEvent, true);
   document.addEventListener('playing', onMediaEvent, true);
   document.addEventListener('pause', onMediaEvent, true);
+  // ⚠️ 这一条曾经漏掉：`MEDIA_EVENTS`（给卸载用的）里一直有 'ended'，
+  // 但注册时没带上它 —— 于是 `onMediaEvent` 的 `case 'ended'` 是死代码，
+  // 自动连播**一次都不会被触发**（U3 连坏两轮的真凶）。
+  document.addEventListener('ended', onMediaEvent, true);
   document.addEventListener('ratechange', onMediaEvent, true);
   document.addEventListener('volumechange', onMediaEvent, true);
 
@@ -502,9 +587,25 @@ export function startVideoAssist(): () => void {
 
   log.debug('视频助手已挂载（二倍速 / 静音 / 防失焦）');
 
+  // 手测用的诊断口。连播是「点一下 → 等页面反应 → 再看一眼」的状态机，出问题时
+  // 最缺的就是「此刻目录到底长什么样」，所以留两个 Console 函数：
+  //   __sztbUooc()     只读快照（不点任何东西，可反复调）
+  //   __sztbUoocStep() 真的往后走一步，返回判定结果
+  const pageWin = pageOrSelf() as Record<string, unknown>;
+  pageWin['__sztbUooc'] = () => ({
+    ...collectDiag(),
+    autoNext: isEnabled(SITE_ID, TOGGLE.AUTO_NEXT),
+    nextScope: getValue<string>(SITE_ID, VALUE.NEXT_SCOPE),
+    autoProgress: isEnabled(SITE_ID, TOGGLE.AUTO_PROGRESS),
+    waitingQuiz,
+  });
+  pageWin['__sztbUoocStep'] = () => stepForward();
+
   return () => {
     stopped = true;
     stopProgress();
+    delete pageWin['__sztbUooc'];
+    delete pageWin['__sztbUoocStep'];
     if (timer !== null) {
       window.clearTimeout(timer);
       timer = null;

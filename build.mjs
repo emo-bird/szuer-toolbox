@@ -43,6 +43,8 @@ const BUNDLE_MIN_FILE = join(TMP_DIR, 'bundle.min.js');
 const STDOUT_LOG = join(TMP_DIR, 'esbuild.out.log');
 const STDERR_LOG = join(TMP_DIR, 'esbuild.err.log');
 const BUILD_NO_FILE = join(OUT_DIR, '.build-no');
+const CSS_FILE = join(ROOT, 'src', 'common', 'ui', 'style.css');
+const CSS_MIN_FILE = join(TMP_DIR, 'style.min.css');
 
 // ------------------------------------------------------------------ 工具
 
@@ -154,6 +156,50 @@ function main() {
   const exe = resolveEsbuildExe();
   info(`esbuild：${relative(ROOT, exe)}`);
 
+  /**
+   * 先把 CSS 压一遍，再通过 `--define` 注入。
+   *
+   * 为什么不直接 `--loader:.css=text`：那样 CSS 只是一个普通字符串字面量，
+   * `--minify` 只做 JS 侧的去空白 / 改标识符，**字符串内容是原样照搬的** ——
+   * 于是压缩版里躺着一整份带注释和缩进的 CSS。这里让 esbuild 用 CSS 解析器
+   * 真正压一遍（去注释、去冗余空白、缩短颜色值…），再把结果当常量塞进去。
+   */
+  function minifyCss() {
+    const res = runExe(exe, [
+      relative(ROOT, CSS_FILE),
+      '--minify',
+      '--charset=utf8',
+      '--log-level=warning',
+      `--outfile=${CSS_MIN_FILE}`,
+    ]);
+    if (res.stdout.trim() !== '') dim(res.stdout.trim());
+    if (res.stderr.trim() !== '') process.stderr.write(`${res.stderr.trim()}\n`);
+    if (res.error) {
+      fail(`启动 esbuild 压缩 CSS 失败：${res.error.message}`);
+      process.exit(1);
+    }
+    if (res.status !== 0) {
+      fail(`esbuild 压缩 CSS 退出码 ${res.status}`);
+      process.exit(res.status ?? 1);
+    }
+    return readFileSync(CSS_MIN_FILE, 'utf8').replace(/\r\n?/g, '\n').trim();
+  }
+
+  const css = minifyCss();
+  const cssRawBytes = statSync(CSS_FILE).size;
+  const cssMinBytes = Buffer.byteLength(css, 'utf8');
+  dim(`CSS：${fmtSize(cssRawBytes)} → ${fmtSize(cssMinBytes)}`);
+
+  // CSS 是通过 `--define` 内联进命令行的，而 Windows 一条命令行上限 32767 字符
+  // （spawnSync 会把参数拼成一条）。样式一长就会顶到上限，届时 esbuild 只会回一句
+  // 看不懂的失败 —— 提前拦住，并给出替代做法的方向。
+  const cssArgChars = JSON.stringify(css).length;
+  if (cssArgChars > 20000) {
+    fail(`CSS 内联后 ${cssArgChars} 字符，太接近 Windows 命令行上限（32767）`);
+    fail('请拆分 src/common/ui/style.css，或改成构建期写出临时 .ts 再 import');
+    process.exit(1);
+  }
+
   const esbuildBaseArgs = [
     'src/main.ts',
     '--bundle',
@@ -163,7 +209,7 @@ function main() {
     '--charset=utf8',
     '--legal-comments=none',
     '--log-level=warning',
-    '--loader:.css=text',
+    `--define:__SZB_CSS__=${JSON.stringify(css)}`,
     `--define:__SZB_VERSION__=${JSON.stringify(version)}`,
     `--define:__SZB_BUILD_TIME__=${JSON.stringify(buildTime)}`,
     `--define:__SZB_BUILD_NO__=${JSON.stringify(buildNo)}`,

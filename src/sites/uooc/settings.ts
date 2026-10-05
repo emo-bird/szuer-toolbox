@@ -48,8 +48,13 @@ export const VALUE = {
   PROGRESS_MAX: 'progressMax',
 } as const;
 
-/** 进度上报区间的默认值（秒）。`progress.ts` 拿它当兜底，避免两处写两遍。 */
-export const PROGRESS_DEFAULT = { min: '30', max: '90' } as const;
+/**
+ * 进度上报区间的默认值（秒）。`progress.ts` 拿它当兜底，避免两处写两遍。
+ *
+ * 区间宽是刻意的：站点自己的心跳也是「一段时间一次」，固定间隔反而更像机器。
+ * ⚠️ 改这里**对已经存过值的用户无效** —— `getValue()` 只在没存过时才回退默认值。
+ */
+export const PROGRESS_DEFAULT = { min: '300', max: '600' } as const;
 
 export const UOOC_TOGGLES: readonly SiteToggleDef[] = [
   {
