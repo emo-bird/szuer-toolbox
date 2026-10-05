@@ -86,16 +86,33 @@ function renderTab(root: HTMLElement): () => void {
    */
   const AT_BOTTOM_SLACK = 8;
   let autoScroll = true;
+  /** 正在执行「程序滚动」—— 那一次 scroll 事件不能反过来把 autoScroll 关掉 */
+  let programmatic = false;
   const atBottom = (): boolean =>
     pre.scrollTop + pre.clientHeight >= pre.scrollHeight - AT_BOTTOM_SLACK;
 
   pre.addEventListener('scroll', () => {
+    if (programmatic) return;
     autoScroll = atBottom();
   });
 
-  /** 滚到底（新日志到达且用户本来就在底部时调用） */
+  /**
+   * 滚到底（新日志到达且用户本来就在底部时调用）。
+   *
+   * 两件事缺一不可：
+   *   1. 给 `scrollTop` 赋值本身会**触发一次 scroll 事件** —— 而那一刻新追加的行
+   *      往往还没完成布局，`scrollHeight` 还是旧值，`atBottom()` 于是算出 false，
+   *      把 `autoScroll` **永久**关掉。表现就是「看着在滚，滚着滚着不滚了」。
+   *      所以用 `programmatic` 把这几次程序滚动挡住。
+   *   2. 赋完值再补一帧 —— 万一这次没把新行算进 `scrollHeight`，补的那一帧能兜住。
+   */
   function scrollToBottom(): void {
+    programmatic = true;
     pre.scrollTop = pre.scrollHeight;
+    requestAnimationFrame(() => {
+      pre.scrollTop = pre.scrollHeight;
+      programmatic = false;
+    });
   }
 
   function line(entry: LogEntry): HTMLElement {

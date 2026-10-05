@@ -49,11 +49,14 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-05T17:56:37.482Z（构建号 55） */
+/* 构建信息：2026-10-05T18:38:02.877Z（构建号 57） */
 
 "use strict";
 (() => {
-  // src/common/core/log.ts
+  // dist/.tmp/src/common/ui/style.css
+  var style_default = {};
+
+  // dist/.tmp/src/common/core/log.ts
   var LEVEL_RANK = { debug: 10, info: 20, warn: 30, error: 40 };
   var CAPACITY = 500;
   var seq = 0;
@@ -142,7 +145,7 @@
     }
   }
 
-  // src/common/utils/dom.ts
+  // dist/.tmp/src/common/utils/dom.ts
   function el(tag, props = {}, ...children) {
     const node = document.createElement(tag);
     if (props.class !== void 0) {
@@ -205,7 +208,7 @@
     document.addEventListener("DOMContentLoaded", fn, { once: true });
   }
 
-  // src/common/core/storage.ts
+  // dist/.tmp/src/common/core/storage.ts
   var NS_PREFIX = "sztb:";
   function nsKey(key) {
     return key.startsWith(NS_PREFIX) ? key : NS_PREFIX + key;
@@ -295,7 +298,7 @@
     backend.delete(nsKey(key));
   }
 
-  // src/common/ui/tab-order.ts
+  // dist/.tmp/src/common/ui/tab-order.ts
   var COMMON_SITE_ID = "common";
   var DEFAULT_ORDER = 1e3;
   function planTabOrder(entries2) {
@@ -337,7 +340,7 @@
     return null;
   }
 
-  // src/common/ui/tabs.ts
+  // dist/.tmp/src/common/ui/tabs.ts
   var log = scoped("ui/tabs");
   var TabView = class {
     tabbar;
@@ -449,7 +452,7 @@
     });
   }
 
-  // src/common/ui/panel-geometry.ts
+  // dist/.tmp/src/common/ui/panel-geometry.ts
   var BALL_SIZE = 44;
   var VIEWPORT_MARGIN = 8;
   var DEFAULT_SIZE = { width: 344, height: 430 };
@@ -480,7 +483,7 @@
     };
   }
 
-  // src/common/ui/widgets/toast.ts
+  // dist/.tmp/src/common/ui/widgets/toast.ts
   var DEFAULT_DURATION = 2600;
   var ToastStack = class {
     host;
@@ -517,7 +520,7 @@
     }
   };
 
-  // src/common/ui/widgets/confirm.ts
+  // dist/.tmp/src/common/ui/widgets/confirm.ts
   var ESC_KEY = "Escape";
   function showConfirm(shadowRoot, options) {
     return new Promise((resolve2) => {
@@ -577,7 +580,7 @@
     });
   }
 
-  // src/common/ui/widgets/auth-alert.ts
+  // dist/.tmp/src/common/ui/widgets/auth-alert.ts
   var AUTH_MASK_CLASS = "sztb-auth-mask";
   var TITLE = "登录态已失效";
   var BODY = "选课站点已经把本次会话踢下线，继续抢课 / 监控不会成功。\n请刷新网页并重新登录，然后回到【任务】页点【开始抢课】继续。";
@@ -613,7 +616,7 @@
     reloadBtn.focus();
   }
 
-  // src/common/ui/panel.ts
+  // dist/.tmp/src/common/ui/panel.ts
   var log2 = scoped("ui/panel");
   var SIZE_KEY = "ui:size";
   var COLLAPSED_KEY = "ui:collapsed";
@@ -660,7 +663,7 @@
     document.addEventListener("pointerup", up, true);
     document.addEventListener("pointercancel", up, true);
   }
-  function createPanel(baseCss2, entries2, options) {
+  function createPanel(baseCss, entries2, options) {
     const host = el("div", { class: "sztb-host" });
     host.style.setProperty("position", "fixed");
     host.style.setProperty("inset", "0");
@@ -669,7 +672,7 @@
     host.style.setProperty("z-index", "2147483000");
     const shadow = host.attachShadow({ mode: "open" });
     const baseStyle = document.createElement("style");
-    baseStyle.textContent = baseCss2;
+    baseStyle.textContent = baseCss;
     shadow.appendChild(baseStyle);
     const blockKeyLeak = (ev) => {
       ev.stopPropagation();
@@ -876,7 +879,7 @@
     return api;
   }
 
-  // src/common/core/settings.ts
+  // dist/.tmp/src/common/core/settings.ts
   var toggleRegistry = /* @__PURE__ */ new Map();
   function composite(siteId, toggleId) {
     return `${siteId}\0${toggleId}`;
@@ -981,7 +984,7 @@
     remove(key);
   }
 
-  // src/common/ui/widgets/checkbox.ts
+  // dist/.tmp/src/common/ui/widgets/checkbox.ts
   var RISK_TEXT = {
     trace: "留痕",
     irreversible: "不可逆"
@@ -1046,7 +1049,7 @@ ${options.desc ?? ""}
     return el("div", { class: "sztb-row" }, input, main2);
   }
 
-  // src/common/ui/widgets/settings-form.ts
+  // dist/.tmp/src/common/ui/widgets/settings-form.ts
   function renderValueField(siteId, def) {
     const defaultText = formatValue(def.default);
     const control = def.kind === "select" ? el("select", { class: "sztb-select" }) : el("input", {
@@ -1159,7 +1162,7 @@ ${options.desc ?? ""}
     });
   }
 
-  // src/common/ui/tabs/settings.ts
+  // dist/.tmp/src/common/ui/tabs/settings.ts
   var siteNameOf = (id) => id;
   var ownsSettingsTabOf = () => false;
   function setSiteNameResolver(fn) {
@@ -1198,7 +1201,7 @@ ${options.desc ?? ""}
     }
   };
 
-  // src/common/utils/clipboard.ts
+  // dist/.tmp/src/common/utils/clipboard.ts
   var ORDER = ["gm", "exec", "modern"];
   function has(env, method) {
     if (method === "gm") return env.hasGm;
@@ -1274,17 +1277,13 @@ ${options.desc ?? ""}
     return { ok: false, method: last, detail };
   }
 
-  // src/common/ui/tabs/log.ts
+  // dist/.tmp/src/common/ui/tabs/log.ts
   var LEVELS = ["debug", "info", "warn", "error"];
   async function copyAll() {
     const text = entries().map(formatEntry).join("\n");
     await copyText(text);
   }
-  var tabCss = `
-.sztb-log-wrap { display: flex; flex-direction: column; gap: 8px; height: 100%; min-height: 0; }
-.sztb-log { overflow: auto; flex: 1 1 auto; }
-.sztb-log-empty { padding: 20px 8px; text-align: center; color: var(--sztb-text-dim); font-size: 12.5px; }
-`;
+  var tabCss = `.sztb-log-wrap{display:flex;flex-direction:column;gap:8px;height:100%;min-height:0}.sztb-log{overflow:auto;flex:1 1 auto}.sztb-log-empty{padding:20px 8px;text-align:center;color:var(--sztb-text-dim);font-size:12.5px}`;
   function renderTab2(root) {
     const levelSelect = el("select", { class: "sztb-input", style: { width: "auto" } });
     for (const level of LEVELS) {
@@ -1329,12 +1328,19 @@ ${options.desc ?? ""}
     root.appendChild(wrap);
     const AT_BOTTOM_SLACK = 8;
     let autoScroll = true;
+    let programmatic = false;
     const atBottom = () => pre.scrollTop + pre.clientHeight >= pre.scrollHeight - AT_BOTTOM_SLACK;
     pre.addEventListener("scroll", () => {
+      if (programmatic) return;
       autoScroll = atBottom();
     });
     function scrollToBottom() {
+      programmatic = true;
       pre.scrollTop = pre.scrollHeight;
+      requestAnimationFrame(() => {
+        pre.scrollTop = pre.scrollHeight;
+        programmatic = false;
+      });
     }
     function line(entry) {
       return el("div", {
@@ -1384,7 +1390,7 @@ ${options.desc ?? ""}
     }
   };
 
-  // src/common/core/limits.ts
+  // dist/.tmp/src/common/core/limits.ts
   var LIMITS = {
     /** 全局串行队列里相邻两条请求的**开始时刻**最小间隔 */
     intervalMs: { min: 0, max: 6e4, def: 500, recommended: 200 },
@@ -1410,7 +1416,7 @@ ${options.desc ?? ""}
     return value < LIMITS[key].recommended;
   }
 
-  // src/common/core/http.ts
+  // dist/.tmp/src/common/core/http.ts
   var log3 = scoped("core/http");
   var RECOMMENDED_MIN_INTERVAL_MS = LIMITS.intervalMs.recommended;
   var DEFAULT_INTERVAL_MS = LIMITS.intervalMs.def;
@@ -1570,7 +1576,7 @@ ${options.desc ?? ""}
     return sp.toString();
   }
 
-  // src/common/ui/tabs/status.ts
+  // dist/.tmp/src/common/ui/tabs/status.ts
   var provider = null;
   function setStatusProvider(fn) {
     provider = fn;
@@ -1640,7 +1646,7 @@ ${options.desc ?? ""}
     }
   };
 
-  // src/common/ui/tabs/login.ts
+  // dist/.tmp/src/common/ui/tabs/login.ts
   var providers = /* @__PURE__ */ new Map();
   var currentSite = () => null;
   function setCurrentSiteResolver(fn) {
@@ -1733,7 +1739,7 @@ ${options.desc ?? ""}
     }
   };
 
-  // src/common/utils/url.ts
+  // dist/.tmp/src/common/utils/url.ts
   function compileGlob(pattern) {
     const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
     return new RegExp(`^${escaped}$`);
@@ -1766,7 +1772,7 @@ ${options.desc ?? ""}
     return h === r || h.endsWith(`.${r}`);
   }
 
-  // src/sites/registry.ts
+  // dist/.tmp/src/sites/registry.ts
   var SUPPORTED_ROOT_DOMAINS = ["szu.edu.cn"];
   var DEBUG_HASH_FLAG = "sztb-demo";
   var adapters = [];
@@ -1821,12 +1827,9 @@ ${options.desc ?? ""}
     return matchAnyPage(url, adapter.pages);
   }
 
-  // src/sites/demo/index.ts
+  // dist/.tmp/src/sites/demo/index.ts
   var log4 = scoped("site/demo");
-  var demoCss = `
-.demo-box { display: flex; flex-direction: column; gap: 8px; }
-.demo-hint { color: var(--sztb-text-dim); font-size: 12px; }
-`;
+  var demoCss = `.demo-box{display:flex;flex-direction:column;gap:8px}.demo-hint{color:var(--sztb-text-dim);font-size:12px}`;
   function button(label, onClick, variant) {
     return el("button", {
       class: "sztb-btn",
@@ -1918,7 +1921,7 @@ ${options.desc ?? ""}
     }
   };
 
-  // src/sites/uooc/settings.ts
+  // dist/.tmp/src/sites/uooc/settings.ts
   var log5 = scoped("uooc/settings");
   var SITE_ID = "uooc";
   var TOGGLE = {
@@ -1938,11 +1941,15 @@ ${options.desc ?? ""}
   var VALUE = {
     /** 连播范围：章内 / 跨章 */
     NEXT_SCOPE: "nextScope",
+    /** 连播切到下一项之前等几秒 */
+    SWITCH_WAIT: "switchWait",
     /** 进度上报间隔下限（秒） */
     PROGRESS_MIN: "progressMin",
     /** 进度上报间隔上限（秒） */
     PROGRESS_MAX: "progressMax"
   };
+  var SWITCH_WAIT_DEFAULT = "5";
+  var SWITCH_WAIT_RANGE = { min: 0, max: 120 };
   var PROGRESS_DEFAULT = { min: "300", max: "600" };
   var UOOC_TOGGLES = [
     {
@@ -2009,6 +2016,15 @@ ${options.desc ?? ""}
     });
     registerValue({
       siteId: SITE_ID,
+      id: VALUE.SWITCH_WAIT,
+      label: "切前等待",
+      desc: "秒。一项完成后停多久再切下一项（0 = 立刻切）",
+      default: SWITCH_WAIT_DEFAULT,
+      kind: "number",
+      validate: (value) => positiveIntHint(value, SWITCH_WAIT_RANGE.min, SWITCH_WAIT_RANGE.max)
+    });
+    registerValue({
+      siteId: SITE_ID,
       id: VALUE.PROGRESS_MIN,
       label: "上报间隔下限",
       desc: "秒。和下面的上限一起决定随机区间",
@@ -2037,6 +2053,10 @@ ${options.desc ?? ""}
     if (scope !== "chapter" && scope !== "all") {
       log5.warn(`连播范围取值异常（${scope}），按「止于本章」处理`);
     }
+    const wait = getValue(SITE_ID, VALUE.SWITCH_WAIT);
+    if (positiveIntHint(wait, SWITCH_WAIT_RANGE.min, SWITCH_WAIT_RANGE.max) !== null) {
+      log5.warn(`切前等待取值异常（${wait}），按 ${SWITCH_WAIT_DEFAULT} 秒处理`);
+    }
     const min = getValue(SITE_ID, VALUE.PROGRESS_MIN);
     const max = getValue(SITE_ID, VALUE.PROGRESS_MAX);
     if (positiveIntHint(min, 5, 3600) !== null) {
@@ -2047,7 +2067,7 @@ ${options.desc ?? ""}
     }
   }
 
-  // src/sites/uooc/tabs/settings.ts
+  // dist/.tmp/src/sites/uooc/tabs/settings.ts
   var UOOC_SETTINGS_TAB_ID = settingsTabId("uooc");
   var UOOC_SETTINGS_TAB = {
     id: UOOC_SETTINGS_TAB_ID,
@@ -2058,7 +2078,7 @@ ${options.desc ?? ""}
     }
   };
 
-  // src/common/utils/page.ts
+  // dist/.tmp/src/common/utils/page.ts
   function pageWindow() {
     const g = globalThis;
     const uw = g["unsafeWindow"];
@@ -2080,9 +2100,53 @@ ${options.desc ?? ""}
     }
   }
 
-  // src/sites/uooc/catalog.ts
+  // dist/.tmp/src/common/ui/widgets/site-toast.ts
+  var HOST_ID = "sztb-site-toast-host";
+  var SITE_TOAST_CSS = `:host{all:initial}.box{position:fixed;top:12px;right:12px;z-index:2147483647;display:flex;flex-direction:column;gap:8px;max-width:340px;pointer-events:none;font:13px/1.5 -apple-system,Segoe UI,Microsoft YaHei,sans-serif}.item{padding:10px 14px;border-radius:8px;background:#1c1e24f0;color:#f5f6f8;box-shadow:0 6px 20px #00000047;word-break:break-word}.item[data-kind=warn]{background:#7a540cf2}.item[data-kind=error]{background:#8c2020f2}.item[data-kind=success]{background:#186038f2}`;
+  var hostEl = null;
+  var boxEl = null;
+  function ensureBox() {
+    if (boxEl !== null && boxEl.isConnected) return boxEl;
+    const root = document.documentElement;
+    if (root === null) return null;
+    document.getElementById(HOST_ID)?.remove();
+    const host = document.createElement("div");
+    host.id = HOST_ID;
+    const shadow = host.attachShadow({ mode: "open" });
+    const style = document.createElement("style");
+    style.textContent = SITE_TOAST_CSS;
+    const box = document.createElement("div");
+    box.className = "box";
+    shadow.append(style, box);
+    root.appendChild(host);
+    hostEl = host;
+    boxEl = box;
+    return box;
+  }
+  function dropBoxIfEmpty(box) {
+    if (box.childElementCount > 0) return;
+    hostEl?.remove();
+    hostEl = null;
+    boxEl = null;
+  }
+  function siteToast(message, kind = "info", durationMs = 6e3) {
+    const box = ensureBox();
+    if (box === null) return;
+    const node = document.createElement("div");
+    node.className = "item";
+    node.dataset["kind"] = kind;
+    node.textContent = message;
+    box.appendChild(node);
+    window.setTimeout(() => {
+      node.remove();
+      dropBoxIfEmpty(box);
+    }, Math.max(600, durationMs));
+  }
+
+  // dist/.tmp/src/sites/uooc/catalog.ts
   var log6 = scoped("uooc/catalog");
   var RESOURCE_TYPE_VIDEO = 10;
+  var RESOURCE_TYPE_FILE = 50;
   var RESOURCE_TYPE_DOC = 60;
   var RESOURCE_TYPE_QUIZ = 80;
   var RESOURCE_ITEM_SELECTOR = `[ng-click="goSource(source, 'section')"]`;
@@ -2123,6 +2187,18 @@ ${options.desc ?? ""}
     } catch {
       el2.click();
     }
+  }
+  function idOfItem(li, key) {
+    const attr2 = li.getAttribute("id");
+    if (attr2 !== null && attr2 !== "") return attr2;
+    const item = scopeOf(li)?.[key];
+    return isObject(item) ? asString(item["id"]) : "";
+  }
+  function chapterIdOf(li) {
+    return idOfItem(li, "chapterItem");
+  }
+  function sectionIdOf(li) {
+    return idOfItem(li, "sectionItem");
   }
   function angular() {
     const w = pageOrSelf();
@@ -2182,23 +2258,28 @@ ${options.desc ?? ""}
     return queryAll(SECTION_ITEM_SELECTOR, chapterLi);
   }
   function findChapterItem(chapterId) {
-    const all = chapterItems();
-    for (const li of all) {
-      if (li.getAttribute("id") === chapterId) return li;
-    }
-    for (const li of all) {
-      const item = scopeOf(li)?.["chapterItem"];
-      if (isObject(item) && asString(item["id"]) === chapterId) return li;
+    if (chapterId === "") return null;
+    for (const li of chapterItems()) {
+      if (chapterIdOf(li) === chapterId) return li;
     }
     return null;
   }
   function findSectionIndex(sections, sectionId) {
+    if (sectionId === "") return -1;
     for (let i = 0; i < sections.length; i++) {
-      if (sections[i]?.getAttribute("id") === sectionId) return i;
+      if (sectionIdOf(sections[i]) === sectionId) return i;
     }
     return -1;
   }
-  function stepForward() {
+  function labelOf(type) {
+    if (type === RESOURCE_TYPE_VIDEO) return "视频";
+    if (type === RESOURCE_TYPE_DOC) return "文档";
+    if (type === RESOURCE_TYPE_FILE) return "附件";
+    if (type === RESOURCE_TYPE_QUIZ) return "测验";
+    return `资源(type=${type})`;
+  }
+  var expandTriedFor = "";
+  function stepForward(afterId = "") {
     if (angular() === null) {
       return { kind: "stop", reason: "页面上没有 angular，读不到目录" };
     }
@@ -2229,51 +2310,55 @@ ${options.desc ?? ""}
       return { kind: "rendered" };
     }
     const secIndex = findSectionIndex(sections, parts.sectionId);
-    const secLi = secIndex >= 0 ? sections[secIndex] : void 0;
+    if (secIndex < 0) {
+      const key = `${parts.chapterId}/${parts.sectionId}`;
+      if (expandTriedFor !== key) {
+        expandTriedFor = key;
+        const expandable = queryOne(CHAPTER_TITLE_SELECTOR, chapterLi);
+        if (expandable !== null) {
+          log6.info(`连播：当前章里还看不到节 ${parts.sectionId}，先点章标题催它展开`);
+          clickElement(expandable);
+          return { kind: "rendered" };
+        }
+      }
+      return { kind: "stop", reason: `章 ${parts.chapterId} 里找不到节 ${parts.sectionId}（已尝试展开）` };
+    }
+    expandTriedFor = "";
+    const secLi = sections[secIndex];
     const all = resourceItems();
     let pool = all;
-    if (secLi !== void 0) {
-      const owned = all.filter((el2) => el2.closest(SECTION_ITEM_SELECTOR) === secLi);
-      if (owned.length > 0) pool = owned;
-    }
+    const owned = all.filter((el2) => el2.closest(SECTION_ITEM_SELECTOR) === secLi);
+    if (owned.length > 0) pool = owned;
     let cursor = -1;
-    if (parts.resourceId !== "") {
+    const anchor = afterId !== "" ? afterId : parts.resourceId;
+    if (anchor !== "") {
       for (let i = 0; i < pool.length; i++) {
         const s = readSourceOf(pool[i]);
-        if (s !== null && s.id === parts.resourceId) {
+        if (s !== null && s.id === anchor) {
           cursor = i;
           break;
         }
       }
       if (cursor < 0) {
-        log6.warn(`hash 里的资源 ${parts.resourceId} 不在已渲染的目录里，从本节开头重新找`);
+        log6.warn(`起点资源 ${anchor} 不在已渲染的目录里，从本节开头重新找`);
       }
     }
     for (let i = cursor + 1; i < pool.length; i++) {
       const el2 = pool[i];
       const src = readSourceOf(el2);
       if (src === null) continue;
-      if (src.type === RESOURCE_TYPE_VIDEO) {
-        if (src.finished || src.videoPos > 0) {
-          log6.info(`跳过已看过的视频 ${src.id}${src.title === "" ? "" : `（${src.title}）`}`);
-          continue;
-        }
-        log6.info(`连播：打开下一个视频 ${src.id}${src.title === "" ? "" : `（${src.title}）`}`);
-        clickElement(el2);
-        return { kind: "clicked", id: src.id, title: src.title };
+      if (src.finished) {
+        log6.info(`跳过已完成的${labelOf(src.type)} ${src.id}`);
+        continue;
       }
       if (src.type === RESOURCE_TYPE_QUIZ) {
-        if (src.finished) {
-          log6.info(`跳过已做过的测验 ${src.taskId}`);
-          continue;
-        }
         return { kind: "quiz", resourceId: src.id, taskId: src.taskId, title: src.title };
       }
-      const label = src.type === RESOURCE_TYPE_DOC ? "文档" : "附件";
-      log6.info(`跳过${label} ${src.id}${src.title === "" ? "" : `（${src.title}）`}`);
-    }
-    if (secLi === void 0) {
-      return { kind: "stop", reason: `章 ${parts.chapterId} 里找不到节 ${parts.sectionId}` };
+      log6.info(
+        `连播：打开${labelOf(src.type)} ${src.id}${src.title === "" ? "" : `（${src.title}）`}`
+      );
+      clickElement(el2);
+      return { kind: "clicked", id: src.id, title: src.title, type: src.type };
     }
     if (secIndex + 1 < sections.length) {
       const next = sections[secIndex + 1];
@@ -2291,7 +2376,7 @@ ${options.desc ?? ""}
     const parts = parseHash();
     if (parts === null) return false;
     const all = chapterItems();
-    const idx = all.findIndex((li) => li.getAttribute("id") === parts.chapterId);
+    const idx = all.findIndex((li) => chapterIdOf(li) === parts.chapterId);
     if (idx < 0 || idx + 1 >= all.length) return false;
     const next = all[idx + 1];
     const title = queryOne(CHAPTER_TITLE_SELECTOR, next);
@@ -2316,10 +2401,10 @@ ${options.desc ?? ""}
   function collectDiag() {
     const parts = parseHash();
     const chapters = chapterItems();
-    const chapterIds = chapters.map((li) => li.getAttribute("id") ?? "");
+    const chapterIds = chapters.map((li) => chapterIdOf(li));
     const currentChapter = parts === null ? null : findChapterItem(parts.chapterId);
     const sections = currentChapter === null ? [] : sectionItems(currentChapter);
-    const sectionIds = sections.map((li) => li.getAttribute("id") ?? "");
+    const sectionIds = sections.map((li) => sectionIdOf(li));
     const items2 = resourceItems();
     const resources = [];
     let failures = 0;
@@ -2329,7 +2414,14 @@ ${options.desc ?? ""}
         failures += 1;
         continue;
       }
-      resources.push({ id: src.id, type: src.type, finished: src.finished, videoPos: src.videoPos });
+      resources.push({
+        id: src.id,
+        type: src.type,
+        isTask: src.isTask,
+        taskId: src.taskId,
+        finished: src.finished,
+        videoPos: src.videoPos
+      });
     }
     return {
       hasAngular: angular() !== null,
@@ -2377,7 +2469,7 @@ ${options.desc ?? ""}
     return null;
   }
 
-  // src/sites/uooc/progress.ts
+  // dist/.tmp/src/sites/uooc/progress.ts
   var log7 = scoped("uooc/progress");
   var MARK_PATH = "/home/learn/markVideoLearn";
   var SITE_FN_NAMES = ["LearnMark", "learnMark", "markVideoLearn"];
@@ -2511,7 +2603,7 @@ ${options.desc ?? ""}
     lastKey = "";
   }
 
-  // src/sites/uooc/video.ts
+  // dist/.tmp/src/sites/uooc/video.ts
   var log8 = scoped("uooc/video");
   var VIDEO_ID = "player_html5_api";
   var TARGET_RATE = 2;
@@ -2522,6 +2614,7 @@ ${options.desc ?? ""}
   var FIGHT_COOLDOWN_MS = 5e3;
   var ADVANCE_LOCK_MS = 8e3;
   var PENDING_AUTOPLAY_TIMEOUT_MS = 15e3;
+  var DEFAULT_SWITCH_WAIT_S = 5;
   var applied = /* @__PURE__ */ new WeakMap();
   var announced = /* @__PURE__ */ new WeakSet();
   var hasStarted = /* @__PURE__ */ new WeakSet();
@@ -2584,6 +2677,7 @@ ${options.desc ?? ""}
   var advanceHops = 0;
   var advanceTimer = null;
   var landedAt = 0;
+  var lastClickedId = "";
   var ADVANCE_HOP_DELAY_MS = 700;
   var ADVANCE_MAX_HOPS = 40;
   var ADVANCE_SESSION_MS = 45e3;
@@ -2614,13 +2708,17 @@ ${options.desc ?? ""}
       return;
     }
     advanceHops += 1;
-    const step = stepForward();
+    const step = stepForward(lastClickedId);
     switch (step.kind) {
       case "clicked":
+        lastClickedId = step.id;
         stopAdvance();
         advancingUntil = Date.now() + ADVANCE_LOCK_MS;
         pendingAutoplayAt = Date.now();
         landedAt = Date.now();
+        if (step.type !== RESOURCE_TYPE_VIDEO) {
+          scheduleSwitch(`已打开${labelOf(step.type)}`);
+        }
         return;
       case "quiz":
         log8.info(
@@ -2629,7 +2727,11 @@ ${options.desc ?? ""}
         if (isEnabled(SITE_ID, TOGGLE.AUTO_SOLVE)) {
           log8.warn("「自动作答」只做了开关，功能还没实现，先停在这一题");
         }
-        setWaitingQuiz({ resourceId: step.resourceId, taskId: step.taskId });
+        setWaitingQuiz({
+          cid: parseHash()?.cid ?? "",
+          resourceId: step.resourceId,
+          taskId: step.taskId
+        });
         stopAdvance();
         return;
       case "rendered":
@@ -2637,7 +2739,7 @@ ${options.desc ?? ""}
         return;
       case "chapter-end":
         if (getValue(SITE_ID, VALUE.NEXT_SCOPE) !== "all") {
-          log8.info("已到本章最后一个视频（连播范围＝止于本章），停在这里");
+          log8.info("已到本章最后一个资源（连播范围＝止于本章），停在这里");
           stopAdvance();
           return;
         }
@@ -2645,7 +2747,7 @@ ${options.desc ?? ""}
           scheduleAdvanceHop(ADVANCE_HOP_DELAY_MS);
           return;
         }
-        log8.info("目录里后面没有视频了，连播结束");
+        log8.info("目录里后面没有资源了，连播结束");
         stopAdvance();
         return;
       default:
@@ -2662,6 +2764,45 @@ ${options.desc ?? ""}
     advanceDeadline = Date.now() + ADVANCE_SESSION_MS;
     scheduleAdvanceHop(0);
   }
+  function resumeAdvance() {
+    advancingUntil = 0;
+    startAdvance();
+  }
+  var switchAt = 0;
+  var switchTimer = null;
+  var SWITCH_WAIT_MAX_S = 120;
+  function switchWaitMs() {
+    const raw = Number.parseInt(String(getValue(SITE_ID, VALUE.SWITCH_WAIT) ?? ""), 10);
+    if (!Number.isFinite(raw)) return DEFAULT_SWITCH_WAIT_S * 1e3;
+    return Math.min(SWITCH_WAIT_MAX_S, Math.max(0, raw)) * 1e3;
+  }
+  function clearSwitch() {
+    if (switchTimer !== null) {
+      clearTimeout(switchTimer);
+      switchTimer = null;
+    }
+    switchAt = 0;
+  }
+  function scheduleSwitch(reason) {
+    if (!isEnabled(SITE_ID, TOGGLE.AUTO_NEXT)) return;
+    if (switchAt !== 0) return;
+    const waitMs = switchWaitMs();
+    const seconds = Math.round(waitMs / 1e3);
+    const text = seconds > 0 ? `${reason}，${seconds} 秒后切下一项` : `${reason}，切下一项`;
+    log8.info(`连播：${text}`);
+    siteToast(`连播：${text}`, "info", Math.max(2600, waitMs + 1200));
+    if (waitMs <= 0) {
+      resumeAdvance();
+      return;
+    }
+    switchAt = Date.now() + waitMs;
+    switchTimer = setTimeout(() => {
+      switchTimer = null;
+      switchAt = 0;
+      if (!isEnabled(SITE_ID, TOGGLE.AUTO_NEXT)) return;
+      resumeAdvance();
+    }, waitMs);
+  }
   var WAITING_QUIZ_KEY = "uooc:waitingQuiz";
   var waitingQuiz = null;
   function setWaitingQuiz(q) {
@@ -2673,10 +2814,17 @@ ${options.desc ?? ""}
     const raw = read(WAITING_QUIZ_KEY, null);
     if (typeof raw !== "object" || raw === null) return;
     const o = raw;
+    const cid = typeof o["cid"] === "string" ? o["cid"] : "";
     const resourceId = typeof o["resourceId"] === "string" ? o["resourceId"] : "";
     const taskId = typeof o["taskId"] === "string" ? o["taskId"] : "";
     if (resourceId === "") return;
-    waitingQuiz = { resourceId, taskId };
+    const nowCid = parseHash()?.cid ?? "";
+    if (cid !== "" && nowCid !== "" && cid !== nowCid) {
+      log8.info(`上次的测验记录属于课程 ${cid}，当前是 ${nowCid}，作废`);
+      remove(WAITING_QUIZ_KEY);
+      return;
+    }
+    waitingQuiz = { cid, resourceId, taskId };
     log8.info(`上次停在测验 ${taskId || "(未知)"}，做完会自动继续连播`);
   }
   function checkWaitingQuiz() {
@@ -2685,18 +2833,18 @@ ${options.desc ?? ""}
     const el2 = findResourceItem(waitingQuiz.resourceId);
     if (el2 === null) return;
     if (!isResourceFinished(el2)) return;
-    log8.info(`测验 ${waitingQuiz.taskId || "(未知)"} 已完成，继续连播`);
+    log8.info(`测验 ${waitingQuiz.taskId || "(未知)"} 已完成`);
     setWaitingQuiz(null);
-    startAdvance();
+    scheduleSwitch("测验已完成");
   }
   function breakStall(v) {
     if (landedAt === 0) return;
     if (Date.now() - landedAt < ADVANCE_LOCK_MS + 4e3) return;
     if (v.currentTime <= 3 || v.ended) return;
     if (!v.paused || hasStarted.has(v)) return;
-    log8.info(`落点停在 ${Math.round(v.currentTime)}s 一直没播起来，按「看过的视频」继续往后跳`);
+    log8.info(`落点停在 ${Math.round(v.currentTime)}s 一直没播起来，按「看过的视频」处理`);
     landedAt = 0;
-    startAdvance();
+    scheduleSwitch("视频已看过");
   }
   function tryPendingAutoplay(v) {
     if (pendingAutoplayAt === 0) return;
@@ -2785,7 +2933,7 @@ ${options.desc ?? ""}
         restorePlayback(v);
         return;
       case "ended":
-        startAdvance();
+        scheduleSwitch("视频已播完");
         return;
       case "ratechange":
         if (isEnabled(SITE_ID, TOGGLE.RATE_2X) && v.playbackRate !== TARGET_RATE && rateGuard()) {
@@ -2841,8 +2989,12 @@ ${options.desc ?? ""}
     document.addEventListener("ended", onMediaEvent, true);
     document.addEventListener("ratechange", onMediaEvent, true);
     document.addEventListener("volumechange", onMediaEvent, true);
-    window.addEventListener("hashchange", schedule3);
-    window.addEventListener("popstate", schedule3);
+    const onRoute = () => {
+      lastClickedId = "";
+      schedule3();
+    };
+    window.addEventListener("hashchange", onRoute);
+    window.addEventListener("popstate", onRoute);
     log8.debug("视频助手已挂载（二倍速 / 静音 / 防失焦）");
     const pageWin = pageOrSelf();
     pageWin["__sztbUooc"] = () => ({
@@ -2856,6 +3008,7 @@ ${options.desc ?? ""}
     return () => {
       stopped = true;
       stopProgress();
+      clearSwitch();
       delete pageWin["__sztbUooc"];
       delete pageWin["__sztbUoocStep"];
       if (timer4 !== null) {
@@ -2866,12 +3019,12 @@ ${options.desc ?? ""}
       document.removeEventListener("loadstart", onLoad, true);
       document.removeEventListener("loadedmetadata", onLoad, true);
       for (const type of MEDIA_EVENTS) document.removeEventListener(type, onMediaEvent, true);
-      window.removeEventListener("hashchange", schedule3);
-      window.removeEventListener("popstate", schedule3);
+      window.removeEventListener("hashchange", onRoute);
+      window.removeEventListener("popstate", onRoute);
     };
   }
 
-  // src/sites/uooc/index.ts
+  // dist/.tmp/src/sites/uooc/index.ts
   var log9 = scoped("site/uooc");
   var HOSTS = ["uooc.net.cn", "*.uooc.net.cn"];
   var PAGES = ["/home/learn/index*", "/home/learn/new/*", "/exam/*"];
@@ -2906,7 +3059,7 @@ ${options.desc ?? ""}
     }
   };
 
-  // src/sites/bkxk/settings.ts
+  // dist/.tmp/src/sites/bkxk/settings.ts
   var log10 = scoped("bkxk/settings");
   var SITE_ID2 = "bkxk";
   var TOGGLE2 = {
@@ -3057,7 +3210,7 @@ ${options.desc ?? ""}
     setIntervalMs(ms);
   }
 
-  // src/sites/bkxk/session.ts
+  // dist/.tmp/src/sites/bkxk/session.ts
   var log11 = scoped("bkxk/session");
   var DEFAULT_CAMPUS = "01";
   var EMPTY_SESSION = {
@@ -3137,7 +3290,7 @@ ${options.desc ?? ""}
     return `已登录（学号 ****${tail}，批次 ${s.batchCode ?? "未知"}，校区 ${s.campus}）`;
   }
 
-  // src/common/custom/courses.ts
+  // dist/.tmp/src/common/custom/courses.ts
   var CUSTOM_COURSES_KEY = "custom:courses";
   var LEGACY_SITE_CUSTOM_KEY = "bkxk:customCourses";
   var CUSTOM_COLORS = [
@@ -3229,7 +3382,7 @@ ${options.desc ?? ""}
     write(CUSTOM_COURSES_KEY, courses);
   }
 
-  // src/sites/bkxk/legacy.ts
+  // dist/.tmp/src/sites/bkxk/legacy.ts
   var log12 = scoped("bkxk/legacy");
   var LEGACY_SETTINGS_KEY = "szubkxk.settings.v2";
   var LEGACY_STORE_PREFIX = "szubkxk.v2.";
@@ -3430,7 +3583,7 @@ ${options.desc ?? ""}
     return lines;
   }
 
-  // src/sites/bkxk/time.ts
+  // dist/.tmp/src/sites/bkxk/time.ts
   var WEEKDAY = {
     一: 1,
     二: 2,
@@ -3563,7 +3716,7 @@ ${options.desc ?? ""}
     return n;
   }
 
-  // src/sites/bkxk/custom.ts
+  // dist/.tmp/src/sites/bkxk/custom.ts
   function withSegments(courses) {
     return courses.map((c) => ({ ...c, segs: parsePlace(c.place) }));
   }
@@ -3586,7 +3739,7 @@ ${options.desc ?? ""}
     return n;
   }
 
-  // src/sites/bkxk/tt-mark.ts
+  // dist/.tmp/src/sites/bkxk/tt-mark.ts
   var TT_TAG_CLASS = "sztb-bkxk-tt-tag";
   var TT_MARK_ATTR = "data-sztb-tt";
   var TT_TAG_TEXT = "自定义";
@@ -3599,7 +3752,7 @@ ${options.desc ?? ""}
     return `${escapeText(name)}${TT_TAG_HTML}`;
   }
 
-  // src/sites/bkxk/page-realm.ts
+  // dist/.tmp/src/sites/bkxk/page-realm.ts
   function pageRealm() {
     if (typeof unsafeWindow !== "undefined") return unsafeWindow;
     return globalThis;
@@ -3610,7 +3763,7 @@ ${options.desc ?? ""}
     return realm;
   }
 
-  // src/sites/bkxk/hijack.ts
+  // dist/.tmp/src/sites/bkxk/hijack.ts
   var log13 = scoped("bkxk/hijack");
   var CUSTOM_ID_PREFIX = "szu-custom-";
   var LIST_RE = /elective\/(?:programCourse|unProgramCourse|publicCourse|recommendedCourse|queryCourse|course|minorCourse|retakeCourse|sportCourse)\.do/i;
@@ -3837,233 +3990,11 @@ ${options.desc ?? ""}
     return xhr || fetch2;
   }
 
-  // src/sites/bkxk/list-style.ts
+  // dist/.tmp/src/sites/bkxk/list-style.ts
   var LIST_STYLE_ID = "sztb-bkxk-list-style";
-  var LIST_CSS = `
-/* ---- 我们自己的注入块（列表行与卡片共用，v0.17 起整体压缩高度） ---- */
+  var LIST_CSS = `.sztb-bkxk-block{display:block;margin:0 0 1px;padding:1px 5px;border-left:2px solid #2a6df4;border-radius:3px;background:#2a6df40f;font-size:12px;line-height:1.35}.sztb-bkxk-id{display:block;font-family:ui-monospace,Consolas,Courier New,monospace;font-size:11px;line-height:1.4;color:#1b4fd8;white-space:nowrap;cursor:pointer;user-select:all}.sztb-bkxk-id:hover{text-decoration:underline}.sztb-bkxk-ops{display:flex;flex-wrap:nowrap;gap:4px;margin-top:1px;white-space:nowrap}.sztb-bkxk-btn{flex:0 0 auto;padding:0 6px;border:1px solid #c9d4e6;border-radius:3px;background:#fff;color:#333;font-size:11px;line-height:1.5;white-space:nowrap;cursor:pointer}.sztb-bkxk-btn:hover{border-color:#2a6df4;color:#2a6df4}.sztb-bkxk-btn-on{border-color:#2a6df4;background:#2a6df4;color:#fff}.sztb-bkxk-btn-on:hover{color:#fff}.sztb-bkxk-col{flex:1 1 auto;min-width:150px;box-sizing:border-box}.sztb-bkxk-head{font-weight:700;background-image:none!important;cursor:default}.sztb-bkxk-head:before,.sztb-bkxk-head:after{content:none!important;display:none!important}.cv-body:has(>.cv-row>.sztb-bkxk-col)>.cv-row{display:flex;align-items:center}.cv-body:has(>.cv-row>.sztb-bkxk-col)>.cv-row>div{float:none;flex:0 1 auto;min-width:0}.cv-head:has(>.sztb-bkxk-col){display:flex;align-items:center}.cv-head:has(>.sztb-bkxk-col)>*{float:none;flex:0 1 auto}.cv-head:has(>.sztb-bkxk-col)>.sztb-bkxk-col{flex:1 1 auto}.cv-course-card:has(>.cv-info>.sztb-bkxk-block){height:auto!important;min-height:210px;padding:12px 14px!important;box-sizing:border-box}.cv-info:has(>.sztb-bkxk-block){padding:2px 0!important}.cv-info:has(>.sztb-bkxk-block)>*{margin-top:0!important;margin-bottom:0!important}.cv-info:has(>.sztb-bkxk-block)>h5{line-height:1.3!important}.cv-info:has(>.sztb-bkxk-block)>h5>div,.cv-info:has(>.sztb-bkxk-block)>div.cv-caption-text,.cv-info:has(>.sztb-bkxk-block)>div.cv-caption-red{line-height:1.3!important}.cv-info:has(>.sztb-bkxk-block)>div.cv-operate{margin-top:2px!important;margin-bottom:2px!important}.cv-info>.sztb-bkxk-block{margin-top:0;margin-bottom:2px}.cv-info:has(>.sztb-bkxk-block)>h5{display:flex!important;align-items:center;gap:4px}.cv-info:has(>.sztb-bkxk-block)>h5>.cv-info-title{float:none!important;flex:0 1 auto;min-width:0}.cv-info:has(>.sztb-bkxk-block)>h5>.cv-one,.cv-info:has(>.sztb-bkxk-block)>h5>.cv-delete-volunteer,.cv-info:has(>.sztb-bkxk-block)>h5>.collection-img{flex:0 0 auto}.cv-info:has(>.sztb-bkxk-block)>h5>.collection-img{display:block;cursor:pointer}.cv-info:has(>.sztb-bkxk-block)>div.cv-caption-text:empty{height:0!important;min-height:0!important;padding:0!important;margin:0!important}`;
 
-.sztb-bkxk-block {
-  display: block;
-  margin: 0 0 1px;
-  padding: 1px 5px;
-  border-left: 2px solid #2a6df4;
-  border-radius: 3px;
-  background: rgba(42, 109, 244, 0.06);
-  font-size: 12px;
-  line-height: 1.35;
-}
-
-.sztb-bkxk-id {
-  display: block;
-  font-family: ui-monospace, Consolas, "Courier New", monospace;
-  font-size: 11px;
-  line-height: 1.4;
-  color: #1b4fd8;
-  white-space: nowrap;
-  cursor: pointer;
-  /* 一整块可选中：复制失败时用户可以手动拖选，不用一个字符一个字符点 */
-  user-select: all;
-}
-
-.sztb-bkxk-id:hover {
-  text-decoration: underline;
-}
-
-/* 两个按钮**必须在同一行**：列表页这一列只有 150px 上下，
-   一旦允许换行就折成两行、把整行行高顶上去（v0.17 手测 #52 的反馈） */
-.sztb-bkxk-ops {
-  display: flex;
-  flex-wrap: nowrap;
-  gap: 4px;
-  margin-top: 1px;
-  white-space: nowrap;
-}
-
-.sztb-bkxk-btn {
-  flex: 0 0 auto;
-  padding: 0 6px;
-  border: 1px solid #c9d4e6;
-  border-radius: 3px;
-  background: #fff;
-  color: #333;
-  font-size: 11px;
-  line-height: 1.5;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.sztb-bkxk-btn:hover {
-  border-color: #2a6df4;
-  color: #2a6df4;
-}
-
-/* 已入队 / 已监控 */
-.sztb-bkxk-btn-on {
-  border-color: #2a6df4;
-  background: #2a6df4;
-  color: #fff;
-}
-
-.sztb-bkxk-btn-on:hover {
-  color: #fff;
-}
-
-/* 新加的那一列：占满剩余宽度，最小宽度兜住「ID 一行 + 两个按钮一行」 */
-.sztb-bkxk-col {
-  flex: 1 1 auto;
-  min-width: 150px;
-  box-sizing: border-box;
-}
-
-.sztb-bkxk-head {
-  font-weight: bold;
-  /* 站点给表头单元格挂的排序箭头（伪元素或背景图）会连我们这份一起命中 ——
-     我们的表头不是可排序列，v0.17 手测 #53 要求清掉（用户拍板保留「抢课模块」文字） */
-  background-image: none !important;
-  cursor: default;
-}
-
-.sztb-bkxk-head::before,
-.sztb-bkxk-head::after {
-  content: none !important;
-  display: none !important;
-}
-
-/* ---- 只在被我们加过列的容器上改布局 ---- */
-
-.cv-body:has(> .cv-row > .sztb-bkxk-col) > .cv-row {
-  display: flex;
-  align-items: center;
-}
-
-.cv-body:has(> .cv-row > .sztb-bkxk-col) > .cv-row > div {
-  float: none;
-  flex: 0 1 auto;
-  min-width: 0;
-}
-
-.cv-head:has(> .sztb-bkxk-col) {
-  display: flex;
-  align-items: center;
-}
-
-.cv-head:has(> .sztb-bkxk-col) > * {
-  float: none;
-  flex: 0 1 auto;
-}
-
-.cv-head:has(> .sztb-bkxk-col) > .sztb-bkxk-col {
-  flex: 1 1 auto;
-}
-
-/* ---- 卡片页：卡片高度改为「按内容自适应」+ 缩小卡片内外边距（v0.17 手测 #54/#55，
-        v0.18 按 v5 采样定稿）----
-
-   **为什么必须让高度自适应**：站点给 .cv-course-card 写死了 210px 高（v5 采样实测 13 张卡
-   的计算高度全是 210px，overflow 是 visible），而卡片里的 .cv-info 实际有 234–254px 高
-   —— 各卡内容本来就不一样（有的多一行 .cv-caption-text / .cv-caption-red）。
-   固定高度装不下，内容就从卡片下沿漏出去；也是因为这个写死的高度，我们压 h5 的行高
-   在屏幕上一屏卡片数量毫无变化（用户手测「行高没有减少」的真正原因）。
-   所以这里对含我们块的卡片改 height: auto（!important 压得住站点的行内 style），
-   min-height 保留站点原值，以免内容少的卡变得比站点风格还矮。
-
-   严格限制在「含我们注入块的那张卡」上：没有注入的卡片一律不动。
-   注入块是 .cv-info 的第一个子元素，所以锚点用 :has(> .cv-info > .sztb-bkxk-block)。 */
-
-.cv-course-card:has(> .cv-info > .sztb-bkxk-block) {
-  height: auto !important;
-  min-height: 210px;
-  /* 站点是 16px。v0.18 先压到 8px 10px，手测反馈「过于不美观」⇒ v0.19 恢复一点点到 12px 14px：
-     既比站点原样紧，又不至于内容贴边。想再松/再紧就改这一行。 */
-  padding: 12px 14px !important;
-  box-sizing: border-box;
-}
-
-.cv-info:has(> .sztb-bkxk-block) {
-  padding: 2px 0 !important;
-}
-
-/* 卡片内容区里的每一层：上下外边距一律清零（站点给这些 div 挂了 margin-top: 4px）。
-   这里用通配而不是逐个列举，是因为站点各卡的元素数量不同 ——
-   列举漏掉的那一层就是「部分卡片还是溢出」的原因（v5 采样里那三个 20/16/32px 的 div）。 */
-.cv-info:has(> .sztb-bkxk-block) > * {
-  margin-top: 0 !important;
-  margin-bottom: 0 !important;
-}
-
-.cv-info:has(> .sztb-bkxk-block) > h5 {
-  line-height: 1.3 !important;
-}
-
-.cv-info:has(> .sztb-bkxk-block) > h5 > div,
-.cv-info:has(> .sztb-bkxk-block) > div.cv-caption-text,
-.cv-info:has(> .sztb-bkxk-block) > div.cv-caption-red {
-  line-height: 1.3 !important;
-}
-
-.cv-info:has(> .sztb-bkxk-block) > div.cv-operate {
-  margin-top: 2px !important;
-  margin-bottom: 2px !important;
-}
-
-/* 卡片里我们的块：ID 与按钮保持两行（卡片只有 ~212px 宽，硬挤一行会把 ID 截断），
-   但纵向间距再收一点。站点给 .cv-info 的子元素挂了 margin-top，这里要显式压掉。 */
-.cv-info > .sztb-bkxk-block {
-  margin-top: 0;
-  margin-bottom: 2px;
-}
-
-/* ---- 站点节点的重新摆位（v0.20）----
-
-   list.ts 会把站点自己的两个节点挪位置（见那边 relocateInUnit 的注释）：
-     · 退选按钮 button.cv-delete-volunteer → 挪进 h5、「已选」标签旁边
-     · 收藏星标 img.collection-img → 挪到课名（span.cv-info-title）前面
-   搬完剩下的宽度问题由这里的样式解决。 */
-
-/* h5 原来是「float:left 的课名 + inline-block 的标签」。
-   课名浮动后不占文档流宽度，剩下的空间不够再塞一个退选按钮（h5 宽 216px，
-   课名 136 + 已选 41 + 间隙 4 = 177，只剩 39px，而退选按钮要 41px）。
-   改成 flex 之后三个元素一起参与排布，课名按内容自适应宽度，标签靠右。 */
-.cv-info:has(> .sztb-bkxk-block) > h5 {
-  display: flex !important;
-  align-items: center;
-  gap: 4px;
-}
-
-/* 课名：取消浮动、按内容宽度占位（min-width: 0 允许它在极窄时收缩，不撑破卡片） */
-.cv-info:has(> .sztb-bkxk-block) > h5 > .cv-info-title {
-  float: none !important;
-  flex: 0 1 auto;
-  min-width: 0;
-}
-
-/* h5 里的三个标签（星标 / 已选 / 退选）：不缩放、不换行，各自的 margin 由站点给 */
-.cv-info:has(> .sztb-bkxk-block) > h5 > .cv-one,
-.cv-info:has(> .sztb-bkxk-block) > h5 > .cv-delete-volunteer,
-.cv-info:has(> .sztb-bkxk-block) > h5 > .collection-img {
-  flex: 0 0 auto;
-}
-
-/* 星标搬进 h5 后，原本由它那层 div 提供的 20px 行高没了 —— 星标自己带
-   vertical-align: middle 是给行内流用的，flex 下不生效，靠 align-items: center 对齐。
-   站点给它的 inline style 里有 width/height: 20px，保留。 */
-.cv-info:has(> .sztb-bkxk-block) > h5 > .collection-img {
-  display: block;
-  cursor: pointer;
-}
-
-/* 退选按钮搬走以后，站点那个只装它一个的 div.cv-caption-text 会变成空 div。
-   站点在未选课时这个 div 本来就高 0，所以**不需要额外规则** —— 这里只兜一层保险：
-   万一站点给空 div 补了伪元素或背景，也不让它冒出行高。 */
-.cv-info:has(> .sztb-bkxk-block) > div.cv-caption-text:empty {
-  height: 0 !important;
-  min-height: 0 !important;
-  padding: 0 !important;
-  margin: 0 !important;
-}
-`;
-
-  // src/sites/bkxk/context.ts
+  // dist/.tmp/src/sites/bkxk/context.ts
   function bkxkContext() {
     const s = readSession();
     const stored = getValue(SITE_ID2, VALUE2.BATCH_CODE);
@@ -4080,7 +4011,7 @@ ${options.desc ?? ""}
     return typeof location === "undefined" ? "" : location.origin;
   }
 
-  // src/sites/bkxk/api.ts
+  // dist/.tmp/src/sites/bkxk/api.ts
   var log14 = scoped("bkxk/api");
   var BASE_PATH = "/xsxkapp/sys/xsxkapp/";
   var EP = {
@@ -4303,7 +4234,7 @@ ${text}
     return { status: raw.status, text: raw.text, cls, raw };
   }
 
-  // src/sites/bkxk/courses.ts
+  // dist/.tmp/src/sites/bkxk/courses.ts
   var log15 = scoped("bkxk/courses");
   function asRecord4(value) {
     if (value === null || typeof value !== "object" || Array.isArray(value)) return {};
@@ -4472,7 +4403,7 @@ ${text}
     };
   }
 
-  // src/sites/bkxk/list-model.ts
+  // dist/.tmp/src/sites/bkxk/list-model.ts
   var TC_ID_RE = /^\d{15,24}$/;
   function isTcId(value) {
     return typeof value === "string" && TC_ID_RE.test(value);
@@ -4684,7 +4615,7 @@ ${text}
     return best;
   }
 
-  // src/sites/bkxk/monitor-model.ts
+  // dist/.tmp/src/sites/bkxk/monitor-model.ts
   var MONITOR_MODE = {
     /** 逐个教学班查 `capacity.do` */
     SINGLE: "single",
@@ -4826,7 +4757,7 @@ ${text}
     return rows.map((r) => `${nameOf2(r.teachingClassID)} ${remainText(r.remain)}`).join("；");
   }
 
-  // src/sites/bkxk/monitor.ts
+  // dist/.tmp/src/sites/bkxk/monitor.ts
   var log16 = scoped("bkxk/monitor");
   var panel = null;
   function bindMonitorPanel(p) {
@@ -5139,7 +5070,7 @@ ${text}
     }
   }
 
-  // src/sites/bkxk/tasks-model.ts
+  // dist/.tmp/src/sites/bkxk/tasks-model.ts
   var TASK_STATUS = {
     /** 等待尝试（也是每轮跑完/刷新后的落点） */
     PENDING: "pending",
@@ -5331,7 +5262,7 @@ ${text}
     return "默认";
   }
 
-  // src/sites/bkxk/tasks.ts
+  // dist/.tmp/src/sites/bkxk/tasks.ts
   var log17 = scoped("bkxk/tasks");
   var panel2 = null;
   function bindTaskPanel(p) {
@@ -5523,7 +5454,7 @@ ${text}
     }
   }
 
-  // src/sites/bkxk/list.ts
+  // dist/.tmp/src/sites/bkxk/list.ts
   var log18 = scoped("site/bkxk/list");
   var LIST_PAGE_MARK = "grablessons.do";
   var RESCAN_DELAY_MS = 120;
@@ -5880,26 +5811,11 @@ ${text}
     };
   }
 
-  // src/sites/bkxk/timetable-style.ts
+  // dist/.tmp/src/sites/bkxk/timetable-style.ts
   var TT_STYLE_ID = "sztb-bkxk-tt-style";
-  var TT_CSS = `
-/* ---- 站点画的卡片里、我们塞进去的「自定义」标签 ---- */
+  var TT_CSS = `.sztb-bkxk-tt-tag{display:inline-block;font-size:11px;line-height:1.3;padding:0 3px;border-radius:2px;background:#047adc;color:#fff;margin-left:3px;vertical-align:middle}`;
 
-.sztb-bkxk-tt-tag {
-  display: inline-block;
-  font-size: 11px;
-  line-height: 1.3;
-  padding: 0 3px;
-  border-radius: 2px;
-  background: #047adc;
-  color: #fff;
-  margin-left: 3px;
-  /* 站点的卡片文字可能被设成块级/绝对定位，这里把小标签按行内块摆稳 */
-  vertical-align: middle;
-}
-`;
-
-  // src/sites/bkxk/timetable-model.ts
+  // dist/.tmp/src/sites/bkxk/timetable-model.ts
   var SITE_TABLE_ID = "myCourseTable";
   var SITE_TABLE_SELECTOR = ".cv-my-course";
   var SITE_CARD_CLASS = "cv-course-card-single";
@@ -5909,7 +5825,7 @@ ${text}
     return input.hijackOn && input.tried < input.maxTries && input.enabledCourses > 0 && input.siteCards > 0 && input.tags === 0;
   }
 
-  // src/sites/bkxk/timetable.ts
+  // dist/.tmp/src/sites/bkxk/timetable.ts
   var log19 = scoped("site/bkxk/timetable");
   var TT_PAGE_MARK = "curriculum.do";
   var MAX_TRIES = 20;
@@ -6034,146 +5950,10 @@ ${text}
     };
   }
 
-  // src/sites/bkxk/tabs/tasks-style.ts
-  var TASKS_TAB_CSS = `
-.sztb-bkxk-tk-item {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 6px 8px;
-  border-radius: 6px;
-}
+  // dist/.tmp/src/sites/bkxk/tabs/tasks-style.ts
+  var TASKS_TAB_CSS = `.sztb-bkxk-tk-item{display:flex;flex-direction:column;gap:4px;padding:6px 8px;border-radius:6px}.sztb-bkxk-tk-item:hover{background:var(--sztb-bg-alt)}.sztb-bkxk-tk-top{display:flex;align-items:flex-start;gap:6px}.sztb-bkxk-tk-main{flex:1 1 auto;min-width:0}.sztb-bkxk-tk-name{font-size:13px;word-break:break-word}.sztb-bkxk-tk-meta{display:block;margin-top:1px;font-size:12px;line-height:1.45;color:var(--sztb-text-dim);word-break:break-word}.sztb-bkxk-tk-item[data-off=true] .sztb-bkxk-tk-name{color:var(--sztb-text-dim);text-decoration:line-through}.sztb-bkxk-tk-badge{flex:0 0 auto;padding:1px 6px;border:1px solid var(--sztb-border);border-radius:9px;font-size:11px;white-space:nowrap;color:var(--sztb-text-dim)}.sztb-bkxk-tk-badge[data-state=ok]{color:var(--sztb-ok);border-color:var(--sztb-ok)}.sztb-bkxk-tk-badge[data-state=bad]{color:var(--sztb-danger);border-color:var(--sztb-danger)}.sztb-bkxk-tk-badge[data-state=run]{color:var(--sztb-accent);border-color:var(--sztb-accent)}.sztb-bkxk-tk-ops{display:flex;align-items:center;gap:4px;flex-wrap:wrap;justify-content:flex-end}.sztb-btn.sztb-bkxk-tk-tiny{padding:1px 7px;font-size:11.5px}.sztb-bkxk-tk-prio-label{font-size:11.5px;color:var(--sztb-text-dim)}.sztb-bkxk-tk-prio{min-width:20px;text-align:center;font-size:12px;color:var(--sztb-text-dim)}.sztb-select.sztb-bkxk-tk-mode{width:auto;padding:2px 4px;font-size:11.5px}.sztb-bkxk-tk-item input[type=checkbox]{flex:0 0 auto;margin:0;width:15px;height:15px;accent-color:var(--sztb-accent);cursor:pointer}.sztb-bkxk-tk-warn{border-left-color:var(--sztb-danger);color:var(--sztb-danger)}.sztb-bkxk-tk-ok{color:var(--sztb-ok)}.sztb-bkxk-tk-now{margin:0 0 6px;padding:6px 8px;border-left:2px solid var(--sztb-accent);border-radius:0 5px 5px 0;background:var(--sztb-bg-alt);font-size:12px;line-height:1.6}.sztb-bkxk-tk-now[hidden]{display:none}`;
 
-.sztb-bkxk-tk-item:hover {
-  background: var(--sztb-bg-alt);
-}
-
-.sztb-bkxk-tk-top {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-}
-
-.sztb-bkxk-tk-main {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.sztb-bkxk-tk-name {
-  font-size: 13px;
-  word-break: break-word;
-}
-
-.sztb-bkxk-tk-meta {
-  display: block;
-  margin-top: 1px;
-  font-size: 12px;
-  line-height: 1.45;
-  color: var(--sztb-text-dim);
-  word-break: break-word;
-}
-
-/* 未勾选的任务：名字划掉，一眼看出它这轮不参与 */
-.sztb-bkxk-tk-item[data-off="true"] .sztb-bkxk-tk-name {
-  color: var(--sztb-text-dim);
-  text-decoration: line-through;
-}
-
-.sztb-bkxk-tk-badge {
-  flex: 0 0 auto;
-  padding: 1px 6px;
-  border: 1px solid var(--sztb-border);
-  border-radius: 9px;
-  font-size: 11px;
-  white-space: nowrap;
-  color: var(--sztb-text-dim);
-}
-
-.sztb-bkxk-tk-badge[data-state="ok"] {
-  color: var(--sztb-ok);
-  border-color: var(--sztb-ok);
-}
-
-.sztb-bkxk-tk-badge[data-state="bad"] {
-  color: var(--sztb-danger);
-  border-color: var(--sztb-danger);
-}
-
-.sztb-bkxk-tk-badge[data-state="run"] {
-  color: var(--sztb-accent);
-  border-color: var(--sztb-accent);
-}
-
-.sztb-bkxk-tk-ops {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-
-/* 很小的按钮：优先级加减、删除。两个类名压住公共 .sztb-btn 的内边距 */
-.sztb-btn.sztb-bkxk-tk-tiny {
-  padding: 1px 7px;
-  font-size: 11.5px;
-}
-
-/* 步进器左边那个短标签：告诉人这一串是干什么的 */
-.sztb-bkxk-tk-prio-label {
-  font-size: 11.5px;
-  color: var(--sztb-text-dim);
-}
-
-.sztb-bkxk-tk-prio {
-  min-width: 20px;
-  text-align: center;
-  font-size: 12px;
-  color: var(--sztb-text-dim);
-}
-
-/* 策略下拉很窄，压掉公共 .sztb-select 的 width:100% */
-.sztb-select.sztb-bkxk-tk-mode {
-  width: auto;
-  padding: 2px 4px;
-  font-size: 11.5px;
-}
-
-/* 公共样式里勾选框只被 .sztb-row 管，这里的行不是 .sztb-row */
-.sztb-bkxk-tk-item input[type="checkbox"] {
-  flex: 0 0 auto;
-  margin: 0;
-  width: 15px;
-  height: 15px;
-  accent-color: var(--sztb-accent);
-  cursor: pointer;
-}
-
-/* 失败原因 / 登录态失效：红色左边线，与「自定义课程」的警示条同款 */
-.sztb-bkxk-tk-warn {
-  border-left-color: var(--sztb-danger);
-  color: var(--sztb-danger);
-}
-
-.sztb-bkxk-tk-ok {
-  color: var(--sztb-ok);
-}
-
-.sztb-bkxk-tk-now {
-  margin: 0 0 6px;
-  padding: 6px 8px;
-  border-left: 2px solid var(--sztb-accent);
-  border-radius: 0 5px 5px 0;
-  background: var(--sztb-bg-alt);
-  font-size: 12px;
-  line-height: 1.6;
-}
-
-.sztb-bkxk-tk-now[hidden] {
-  display: none;
-}
-`;
-
-  // src/sites/bkxk/tabs/tasks.ts
+  // dist/.tmp/src/sites/bkxk/tabs/tasks.ts
   var log20 = scoped("bkxk/tasks-tab");
   var BKXK_TASKS_TAB_ID = "bkxk:tasks";
   var MODE_ORDER = [RETRY_MODE.SMART, RETRY_MODE.NEVER, RETRY_MODE.ALWAYS];
@@ -6431,128 +6211,10 @@ ${text}
     };
   }
 
-  // src/sites/bkxk/tabs/monitor-style.ts
-  var MONITOR_TAB_CSS = `
-.sztb-bkxk-mo-item {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 6px 8px;
-  border-radius: 6px;
-}
+  // dist/.tmp/src/sites/bkxk/tabs/monitor-style.ts
+  var MONITOR_TAB_CSS = `.sztb-bkxk-mo-item{display:flex;flex-direction:column;gap:4px;padding:6px 8px;border-radius:6px}.sztb-bkxk-mo-item:hover{background:var(--sztb-bg-alt)}.sztb-bkxk-mo-top{display:flex;align-items:flex-start;gap:6px}.sztb-bkxk-mo-main{flex:1 1 auto;min-width:0}.sztb-bkxk-mo-name{font-size:13px;word-break:break-word}.sztb-bkxk-mo-meta{display:block;margin-top:1px;font-size:12px;line-height:1.45;color:var(--sztb-text-dim);word-break:break-word}.sztb-bkxk-mo-badge{flex:0 0 auto;padding:1px 6px;border:1px solid var(--sztb-border);border-radius:9px;font-size:11px;white-space:nowrap;color:var(--sztb-text-dim)}.sztb-bkxk-mo-badge[data-state=has]{color:var(--sztb-ok);border-color:var(--sztb-ok);font-weight:600}.sztb-bkxk-mo-badge[data-state=none]{color:var(--sztb-text-dim)}.sztb-bkxk-mo-ops{display:flex;align-items:center;gap:4px;flex-wrap:wrap;justify-content:flex-end}.sztb-btn.sztb-bkxk-mo-tiny{padding:1px 7px;font-size:11.5px}.sztb-select.sztb-bkxk-mo-mode{width:auto;min-width:96px;font-size:12px}.sztb-bkxk-mo-row{display:flex;align-items:center;gap:6px;margin:0 0 6px;padding:0 8px;font-size:12px;color:var(--sztb-text-dim)}.sztb-bkxk-mo-row>span{flex:0 0 auto;min-width:62px}.sztb-bkxk-mo-warn{border-left-color:var(--sztb-danger);color:var(--sztb-danger)}.sztb-bkxk-mo-hit{color:var(--sztb-ok);font-weight:600}.sztb-bkxk-mo-now{margin:0 0 6px;padding:6px 8px;border-left:2px solid var(--sztb-accent);border-radius:0 5px 5px 0;background:var(--sztb-bg-alt);font-size:12px;line-height:1.6}.sztb-bkxk-mo-now[hidden]{display:none}`;
 
-.sztb-bkxk-mo-item:hover {
-  background: var(--sztb-bg-alt);
-}
-
-.sztb-bkxk-mo-top {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-}
-
-.sztb-bkxk-mo-main {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.sztb-bkxk-mo-name {
-  font-size: 13px;
-  word-break: break-word;
-}
-
-.sztb-bkxk-mo-meta {
-  display: block;
-  margin-top: 1px;
-  font-size: 12px;
-  line-height: 1.45;
-  color: var(--sztb-text-dim);
-  word-break: break-word;
-}
-
-/* 余量徽标：有货 / 没货 / 查不到，三种颜色 */
-.sztb-bkxk-mo-badge {
-  flex: 0 0 auto;
-  padding: 1px 6px;
-  border: 1px solid var(--sztb-border);
-  border-radius: 9px;
-  font-size: 11px;
-  white-space: nowrap;
-  color: var(--sztb-text-dim);
-}
-
-.sztb-bkxk-mo-badge[data-state="has"] {
-  color: var(--sztb-ok);
-  border-color: var(--sztb-ok);
-  font-weight: 600;
-}
-
-.sztb-bkxk-mo-badge[data-state="none"] {
-  color: var(--sztb-text-dim);
-}
-
-.sztb-bkxk-mo-ops {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-
-.sztb-btn.sztb-bkxk-mo-tiny {
-  padding: 1px 7px;
-  font-size: 11.5px;
-}
-
-/* 模式与类别的两个下拉：窄一点，跟同行标签并排 */
-.sztb-select.sztb-bkxk-mo-mode {
-  width: auto;
-  min-width: 96px;
-  font-size: 12px;
-}
-
-.sztb-bkxk-mo-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 0 0 6px;
-  padding: 0 8px;
-  font-size: 12px;
-  color: var(--sztb-text-dim);
-}
-
-.sztb-bkxk-mo-row > span {
-  flex: 0 0 auto;
-  min-width: 62px;
-}
-
-/* 警示条：红色左边线（写开关未开 / 登录态失效） */
-.sztb-bkxk-mo-warn {
-  border-left-color: var(--sztb-danger);
-  color: var(--sztb-danger);
-}
-
-.sztb-bkxk-mo-hit {
-  color: var(--sztb-ok);
-  font-weight: 600;
-}
-
-.sztb-bkxk-mo-now {
-  margin: 0 0 6px;
-  padding: 6px 8px;
-  border-left: 2px solid var(--sztb-accent);
-  border-radius: 0 5px 5px 0;
-  background: var(--sztb-bg-alt);
-  font-size: 12px;
-  line-height: 1.6;
-}
-
-.sztb-bkxk-mo-now[hidden] {
-  display: none;
-}
-`;
-
-  // src/sites/bkxk/tabs/monitor.ts
+  // dist/.tmp/src/sites/bkxk/tabs/monitor.ts
   var log21 = scoped("bkxk/monitor-tab");
   var BKXK_MONITOR_TAB_ID = "bkxk:monitor";
   var TICK_MS = 1e3;
@@ -6807,7 +6469,7 @@ ${text}
     };
   }
 
-  // src/sites/bkxk/custom-form.ts
+  // dist/.tmp/src/sites/bkxk/custom-form.ts
   var DRAFT_LIMITS = {
     WEEK_MIN: 1,
     WEEK_MAX: 52,
@@ -6925,131 +6587,10 @@ ${text}
     return parsed.map((s) => s.raw).join(",");
   }
 
-  // src/sites/bkxk/tabs/custom-style.ts
-  var CUSTOM_TAB_CSS = `
-.sztb-bkxk-seg {
-  border: 1px solid var(--sztb-border);
-  border-radius: 6px;
-  padding: 6px 8px 8px;
-  margin-bottom: 6px;
-}
+  // dist/.tmp/src/sites/bkxk/tabs/custom-style.ts
+  var CUSTOM_TAB_CSS = `.sztb-bkxk-seg{border:1px solid var(--sztb-border);border-radius:6px;padding:6px 8px 8px;margin-bottom:6px}.sztb-bkxk-seghead{display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;font-size:12px;color:var(--sztb-text-dim)}.sztb-bkxk-grid{display:grid;grid-template-columns:auto 1fr;gap:5px 8px;align-items:center}.sztb-bkxk-grid>.sztb-bkxk-key{font-size:12px;color:var(--sztb-text-dim);white-space:nowrap}.sztb-bkxk-line{display:flex;align-items:center;gap:4px;flex-wrap:wrap}.sztb-input.sztb-bkxk-num{width:48px;text-align:center}.sztb-select.sztb-bkxk-parity{width:auto}.sztb-bkxk-amp{font-size:12px;color:var(--sztb-text-dim)}.sztb-bkxk-item{display:flex;align-items:center;gap:6px;padding:6px 8px;border-radius:6px}.sztb-bkxk-item:hover{background:var(--sztb-bg-alt)}.sztb-bkxk-color{flex:0 0 auto;width:4px;height:30px;border-radius:2px;border:1px solid var(--sztb-border)}.sztb-bkxk-itemmain{flex:1 1 auto;min-width:0}.sztb-bkxk-name{display:block;font-size:13px}.sztb-bkxk-meta{display:block;margin-top:1px;font-size:12px;line-height:1.45;color:var(--sztb-text-dim);word-break:break-word}.sztb-bkxk-item[data-off=true] .sztb-bkxk-name{color:var(--sztb-text-dim);text-decoration:line-through}.sztb-bkxk-ops{flex:0 0 auto;display:flex;gap:4px}.sztb-bkxk-item input[type=checkbox]{flex:0 0 auto;margin:0;width:15px;height:15px;accent-color:var(--sztb-accent);cursor:pointer}.sztb-bkxk-warn{border-left-color:var(--sztb-danger);color:var(--sztb-danger)}.sztb-bkxk-bad{color:var(--sztb-danger)}`;
 
-.sztb-bkxk-seghead {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 4px;
-  font-size: 12px;
-  color: var(--sztb-text-dim);
-}
-
-.sztb-bkxk-grid {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 5px 8px;
-  align-items: center;
-}
-
-.sztb-bkxk-grid > .sztb-bkxk-key {
-  font-size: 12px;
-  color: var(--sztb-text-dim);
-  white-space: nowrap;
-}
-
-.sztb-bkxk-line {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex-wrap: wrap;
-}
-
-/* 数字框很窄，得压掉公共 .sztb-input 的 width:100%（两个类名提高特异性） */
-.sztb-input.sztb-bkxk-num {
-  width: 48px;
-  text-align: center;
-}
-
-.sztb-select.sztb-bkxk-parity {
-  width: auto;
-}
-
-.sztb-bkxk-amp {
-  font-size: 12px;
-  color: var(--sztb-text-dim);
-}
-
-.sztb-bkxk-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
-  border-radius: 6px;
-}
-
-.sztb-bkxk-item:hover {
-  background: var(--sztb-bg-alt);
-}
-
-.sztb-bkxk-color {
-  flex: 0 0 auto;
-  width: 4px;
-  height: 30px;
-  border-radius: 2px;
-  border: 1px solid var(--sztb-border);
-}
-
-.sztb-bkxk-itemmain {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.sztb-bkxk-name {
-  display: block;
-  font-size: 13px;
-}
-
-.sztb-bkxk-meta {
-  display: block;
-  margin-top: 1px;
-  font-size: 12px;
-  line-height: 1.45;
-  color: var(--sztb-text-dim);
-  word-break: break-word;
-}
-
-.sztb-bkxk-item[data-off="true"] .sztb-bkxk-name {
-  color: var(--sztb-text-dim);
-  text-decoration: line-through;
-}
-
-.sztb-bkxk-ops {
-  flex: 0 0 auto;
-  display: flex;
-  gap: 4px;
-}
-
-/* 公共样式里勾选框只被 .sztb-row input[type=checkbox] 管，这里的行不是 .sztb-row */
-.sztb-bkxk-item input[type="checkbox"] {
-  flex: 0 0 auto;
-  margin: 0;
-  width: 15px;
-  height: 15px;
-  accent-color: var(--sztb-accent);
-  cursor: pointer;
-}
-
-/* 「自定义课程之间有几处冲突」的警示条：红色左边线 */
-.sztb-bkxk-warn {
-  border-left-color: var(--sztb-danger);
-  color: var(--sztb-danger);
-}
-
-.sztb-bkxk-bad {
-  color: var(--sztb-danger);
-}
-`;
-
-  // src/sites/bkxk/tabs/custom.ts
+  // dist/.tmp/src/sites/bkxk/tabs/custom.ts
   var log22 = scoped("bkxk/custom-tab");
   var BKXK_CUSTOM_TAB_ID = "bkxk:custom";
   var PARITY_OPTIONS = [
@@ -7495,7 +7036,7 @@ ${text}
     applyGate();
   }
 
-  // src/sites/bkxk/tabs/settings.ts
+  // dist/.tmp/src/sites/bkxk/tabs/settings.ts
   var BKXK_SETTINGS_TAB_ID = settingsTabId("bkxk");
   var BKXK_SETTINGS_TAB = {
     id: BKXK_SETTINGS_TAB_ID,
@@ -7512,7 +7053,7 @@ ${text}
     }
   };
 
-  // src/sites/bkxk/index.ts
+  // dist/.tmp/src/sites/bkxk/index.ts
   var log23 = scoped("site/bkxk");
   var HOSTS2 = ["bkxk.szu.edu.cn"];
   var PAGES2 = ["*default/grablessons.do*", "*default/curriculum.do*"];
@@ -7565,7 +7106,7 @@ ${text}
     }
   };
 
-  // src/sites/index.ts
+  // dist/.tmp/src/sites/index.ts
   function registerSites() {
     registerAdapter(demoAdapter);
     registerAdapter(uoocAdapter);
@@ -7577,12 +7118,11 @@ ${text}
     }
   }
 
-  // src/main.ts
-  var baseCss = true ? ":host,.sztb-root{--sztb-accent: #1e6fff;--sztb-accent-hover: #175be0;--sztb-bg: #ffffff;--sztb-bg-alt: #f5f6f8;--sztb-border: #e3e5e9;--sztb-text: #1f2329;--sztb-text-dim: #8a9099;--sztb-danger: #e5484d;--sztb-warn: #f5a623;--sztb-ok: #30a46c;all:initial;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Microsoft YaHei,sans-serif;font-size:13px;line-height:1.5;color:var(--sztb-text);box-sizing:border-box}.sztb-root *,.sztb-root *:before,.sztb-root *:after{box-sizing:border-box}.sztb-ball{position:fixed;z-index:2147483000;width:44px;height:44px;border-radius:50%;background:var(--sztb-accent);color:#fff;display:none;align-items:center;justify-content:center;font-size:15px;font-weight:600;cursor:grab;user-select:none;box-shadow:0 4px 16px #00000038;transition:transform .15s ease,background .15s ease}.sztb-root[data-collapsed=true] .sztb-ball{display:flex}.sztb-ball:hover{background:var(--sztb-accent-hover);transform:scale(1.06)}.sztb-ball:active{cursor:grabbing}.sztb-panel{position:fixed;z-index:2147483001;display:flex;flex-direction:column;background:var(--sztb-bg);border:1px solid var(--sztb-border);border-radius:10px;box-shadow:0 8px 32px #0000002e;overflow:hidden;min-width:260px;min-height:180px}.sztb-root[data-collapsed=true] .sztb-panel{display:none}.sztb-head{display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--sztb-bg-alt);border-bottom:1px solid var(--sztb-border);cursor:move;user-select:none;flex:0 0 auto}.sztb-title{flex:1 1 auto;font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.sztb-site{color:var(--sztb-text-dim);font-weight:400}.sztb-iconbtn{flex:0 0 auto;width:22px;height:22px;padding:0;border:none;border-radius:5px;background:transparent;color:var(--sztb-text-dim);font-size:14px;line-height:1;cursor:pointer}.sztb-iconbtn:hover{background:#00000012;color:var(--sztb-text)}.sztb-tabbar{display:flex;flex-wrap:wrap;gap:2px;padding:6px 8px 0;border-bottom:1px solid var(--sztb-border);background:var(--sztb-bg);flex:0 0 auto}.sztb-tab{padding:5px 10px;border:none;border-bottom:2px solid transparent;background:transparent;color:var(--sztb-text-dim);font-size:12.5px;cursor:pointer;border-radius:6px 6px 0 0;white-space:nowrap}.sztb-tab:hover{color:var(--sztb-text);background:var(--sztb-bg-alt)}.sztb-tab[aria-selected=true]{color:var(--sztb-accent);border-bottom-color:var(--sztb-accent);font-weight:600}.sztb-tab-sep{align-self:center;flex:0 0 auto;width:1px;height:14px;margin:0 4px;background:var(--sztb-border)}.sztb-body{flex:1 1 auto;overflow:auto;padding:10px}.sztb-pane{display:none;flex-direction:column;gap:8px}.sztb-pane[data-active=true]{display:flex}.sztb-row{display:flex;align-items:flex-start;gap:8px;padding:7px 8px;border-radius:6px}.sztb-row:hover{background:var(--sztb-bg-alt)}.sztb-row input[type=checkbox]{flex:0 0 auto;margin:2px 0 0;width:15px;height:15px;accent-color:var(--sztb-accent);cursor:pointer}.sztb-row-main{flex:1 1 auto;min-width:0}.sztb-row-label{display:block;font-size:13px;cursor:pointer}.sztb-row-desc{display:block;color:var(--sztb-text-dim);font-size:12px;margin-top:1px;word-break:break-word}.sztb-risk{display:inline-block;margin-left:6px;padding:0 5px;border-radius:4px;font-size:11px;font-weight:600;vertical-align:1px}.sztb-risk[data-risk=trace]{background:#f5a62329;color:#b3730a}.sztb-risk[data-risk=irreversible]{background:#e5484d24;color:var(--sztb-danger)}.sztb-field{display:flex;flex-direction:column;gap:3px;margin-bottom:10px;padding:0 8px}.sztb-field-label{font-size:13px;color:var(--sztb-text)}.sztb-field-desc{font-size:12px;line-height:1.45;color:var(--sztb-text-dim);word-break:break-word}.sztb-input,.sztb-select{width:100%;padding:5px 8px;border:1px solid var(--sztb-border);border-radius:6px;font-size:13px;font-family:inherit;color:var(--sztb-text);background:var(--sztb-bg);box-sizing:border-box}.sztb-input:focus,.sztb-select:focus{outline:none;border-color:var(--sztb-accent)}.sztb-input::placeholder{color:var(--sztb-text-dim);opacity:.8}.sztb-select{cursor:pointer}.sztb-field-hint{font-size:12px;line-height:1.45;color:#b3730a}.sztb-field-hint[hidden]{display:none}.sztb-field[data-invalid=true] .sztb-input,.sztb-field[data-invalid=true] .sztb-select{border-color:#d9a340}.sztb-btn{padding:5px 12px;border:1px solid var(--sztb-border);border-radius:6px;background:var(--sztb-bg);color:var(--sztb-text);font-size:12.5px;font-family:inherit;cursor:pointer}.sztb-btn:hover{background:var(--sztb-bg-alt)}.sztb-btn[data-variant=primary]{background:var(--sztb-accent);border-color:var(--sztb-accent);color:#fff}.sztb-btn[data-variant=primary]:hover{background:var(--sztb-accent-hover)}.sztb-btn[data-variant=danger]{background:var(--sztb-danger);border-color:var(--sztb-danger);color:#fff}.sztb-group-title{margin:10px 0 2px;font-size:12px;font-weight:600;color:var(--sztb-text-dim)}.sztb-group-title:first-child{margin-top:0}.sztb-empty{padding:16px 8px;text-align:center;color:var(--sztb-text-dim);font-size:12.5px}.sztb-note{margin:0 0 8px;padding:7px 9px;border-left:2px solid var(--sztb-border);border-radius:0 5px 5px 0;background:var(--sztb-bg-alt);color:var(--sztb-text-dim);font-size:12px;line-height:1.6}.sztb-log{font-family:Consolas,Cascadia Mono,monospace;font-size:11.5px;line-height:1.6;white-space:pre-wrap;word-break:break-all;margin:0;flex:1 1 auto}.sztb-log-line[data-level=warn]{color:#b3730a}.sztb-log-line[data-level=error]{color:var(--sztb-danger)}.sztb-log-line[data-level=debug]{color:var(--sztb-text-dim)}.sztb-toolbar{display:flex;gap:6px;flex:0 0 auto;align-items:center}.sztb-toasts{position:fixed;z-index:2147483003;display:flex;flex-direction:column;gap:6px;align-items:flex-end;pointer-events:none}.sztb-toast{max-width:260px;padding:7px 11px;border-radius:7px;background:#1f2329f0;color:#fff;font-size:12.5px;box-shadow:0 4px 14px #0000003d;animation:sztb-toast-in .16s ease;word-break:break-word}.sztb-toast[data-kind=error]{background:var(--sztb-danger)}.sztb-toast[data-kind=warn]{background:#b3730a}.sztb-toast[data-kind=success]{background:var(--sztb-ok)}@keyframes sztb-toast-in{0%{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}.sztb-modal-mask{position:fixed;inset:0;z-index:2147483002;background:#00000059;display:flex;align-items:center;justify-content:center}.sztb-modal{width:300px;max-width:calc(100vw - 32px);background:var(--sztb-bg);border-radius:10px;box-shadow:0 10px 40px #0000004d;overflow:hidden}.sztb-modal-title{padding:12px 14px 0;font-weight:600;font-size:13.5px}.sztb-modal-title[data-danger=true]{color:var(--sztb-danger)}.sztb-modal-body{padding:8px 14px 14px;font-size:12.5px;color:var(--sztb-text-dim);white-space:pre-wrap;word-break:break-word}.sztb-modal-foot{display:flex;justify-content:flex-end;gap:8px;padding:10px 14px;background:var(--sztb-bg-alt);border-top:1px solid var(--sztb-border)}.sztb-auth-mask{z-index:2147483003;background:#00000073}.sztb-auth-box{width:360px}.sztb-resize{position:absolute;right:0;bottom:0;width:14px;height:14px;cursor:nwse-resize;background:linear-gradient(135deg,transparent 0 50%,var(--sztb-border) 50% 60%,transparent 60% 72%,var(--sztb-border) 72% 82%,transparent 82%)}" : "";
+  // dist/.tmp/src/main.ts
   var log24 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-05T17:56:37.482Z" : null;
-  var BUILD_NO = true ? 55 : null;
+  var BUILD_TIME = true ? "2026-10-05T18:38:02.877Z" : null;
+  var BUILD_NO = true ? 57 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();
@@ -7606,7 +7146,7 @@ ${text}
       booted = null;
     }
     const siteTabs = res.adapter !== null ? res.adapter.tabs.map((tab) => ({ siteId: res.adapter.id, tab })) : [];
-    const panel3 = createPanel(baseCss, buildEntries(siteTabs), {
+    const panel3 = createPanel(style_default, buildEntries(siteTabs), {
       siteName: res.adapter?.name ?? null
     });
     setStatusProvider(() => ({

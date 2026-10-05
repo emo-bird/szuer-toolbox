@@ -29,9 +29,19 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdirSync, existsSync, openSync, closeSync, statSync, rmSync } from 'node:fs';
+import {
+  readFileSync,
+  writeFileSync,
+  mkdirSync,
+  existsSync,
+  openSync,
+  closeSync,
+  statSync,
+  rmSync,
+  readdirSync,
+} from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, join, relative } from 'node:path';
+import { dirname, join, relative, extname } from 'node:path';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const OUT_DIR = join(ROOT, 'dist');
@@ -43,8 +53,7 @@ const BUNDLE_MIN_FILE = join(TMP_DIR, 'bundle.min.js');
 const STDOUT_LOG = join(TMP_DIR, 'esbuild.out.log');
 const STDERR_LOG = join(TMP_DIR, 'esbuild.err.log');
 const BUILD_NO_FILE = join(OUT_DIR, '.build-no');
-const CSS_FILE = join(ROOT, 'src', 'common', 'ui', 'style.css');
-const CSS_MIN_FILE = join(TMP_DIR, 'style.min.css');
+const SRC_DIR = join(ROOT, 'src');
 
 // ------------------------------------------------------------------ 工具
 
@@ -156,23 +165,34 @@ function main() {
   const exe = resolveEsbuildExe();
   info(`esbuild：${relative(ROOT, exe)}`);
 
-  /**
-   * 先把 CSS 压一遍，再通过 `--define` 注入。
-   *
-   * 为什么不直接 `--loader:.css=text`：那样 CSS 只是一个普通字符串字面量，
-   * `--minify` 只做 JS 侧的去空白 / 改标识符，**字符串内容是原样照搬的** ——
-   * 于是压缩版里躺着一整份带注释和缩进的 CSS。这里让 esbuild 用 CSS 解析器
-   * 真正压一遍（去注释、去冗余空白、缩短颜色值…），再把结果当常量塞进去。
-   */
-  function minifyCss() {
+  // ------------------------------------------------------------- CSS 压缩
+  //
+  // 为什么要绕这一圈：`--loader:.css=text` 只是把 CSS 变成**普通字符串字面量**，
+  // 而 esbuild 的 `--minify` 只做 JS 侧的空白与标识符压缩，**字符串内容是原样照搬的**。
+  // 本项目里还有大量 CSS 写死在 `.ts` 的模板串里（`LIST_CSS` / `tabCss` / `demoCss` …），
+  // 一条都压不到 —— 于是压缩版产物里躺着一份带注释和缩进的 CSS。
+  //
+  // 做法：把 `src/` 整份复制到临时目录，在**副本**上把每段 CSS 用 esbuild 的 CSS
+  // 解析器真压一遍，再从副本打包。为什么用副本而不是就地改源码：就地改要么污染工作区，
+  // 要么得靠 try/finally 兜底，进程被打断就把仓库搞脏了。副本随 TMP_DIR 一起删。
+  //
+  // ⚠️ 副本只是给打包器的进料口，**源码一个字节都不动**；报错里的路径会是
+  // `dist/.tmp/src/...`，不是 `src/...`。
+  const CSS_TEMPLATE_RE =
+    /((?:export\s+)?const\s+[A-Za-z0-9_$]*(?:_CSS|Css)\s*=\s*)`([^`$]*)`/g;
+
+  /** 调 esbuild 把一段 CSS 压掉（走临时文件，因为沙箱里不能给子进程喂管道） */
+  function minifyCssText(text) {
+    const inFile = join(TMP_DIR, 'cssin.css');
+    const outFile = join(TMP_DIR, 'cssout.css');
+    writeFileSync(inFile, text, 'utf8');
     const res = runExe(exe, [
-      relative(ROOT, CSS_FILE),
+      relative(ROOT, inFile),
       '--minify',
       '--charset=utf8',
       '--log-level=warning',
-      `--outfile=${CSS_MIN_FILE}`,
+      `--outfile=${outFile}`,
     ]);
-    if (res.stdout.trim() !== '') dim(res.stdout.trim());
     if (res.stderr.trim() !== '') process.stderr.write(`${res.stderr.trim()}\n`);
     if (res.error) {
       fail(`启动 esbuild 压缩 CSS 失败：${res.error.message}`);
@@ -182,26 +202,71 @@ function main() {
       fail(`esbuild 压缩 CSS 退出码 ${res.status}`);
       process.exit(res.status ?? 1);
     }
-    return readFileSync(CSS_MIN_FILE, 'utf8').replace(/\r\n?/g, '\n').trim();
+    return readFileSync(outFile, 'utf8').replace(/\r\n?/g, '\n').trim();
   }
 
-  const css = minifyCss();
-  const cssRawBytes = statSync(CSS_FILE).size;
-  const cssMinBytes = Buffer.byteLength(css, 'utf8');
-  dim(`CSS：${fmtSize(cssRawBytes)} → ${fmtSize(cssMinBytes)}`);
+  function copyDir(from, to) {
+    mkdirSync(to, { recursive: true });
+    for (const entry of readdirSync(from, { withFileTypes: true })) {
+      const src = join(from, entry.name);
+      const dst = join(to, entry.name);
+      if (entry.isDirectory()) copyDir(src, dst);
+      else writeFileSync(dst, readFileSync(src));
+    }
+  }
 
-  // CSS 是通过 `--define` 内联进命令行的，而 Windows 一条命令行上限 32767 字符
-  // （spawnSync 会把参数拼成一条）。样式一长就会顶到上限，届时 esbuild 只会回一句
-  // 看不懂的失败 —— 提前拦住，并给出替代做法的方向。
-  const cssArgChars = JSON.stringify(css).length;
-  if (cssArgChars > 20000) {
-    fail(`CSS 内联后 ${cssArgChars} 字符，太接近 Windows 命令行上限（32767）`);
-    fail('请拆分 src/common/ui/style.css，或改成构建期写出临时 .ts 再 import');
-    process.exit(1);
+  /** 复制一份 src，把副本里所有 CSS 压掉，返回副本入口的绝对路径 */
+  function prepareCssOverlay() {
+    const overlay = join(TMP_DIR, 'src');
+    rmSync(overlay, { recursive: true, force: true });
+    copyDir(SRC_DIR, overlay);
+
+    let tsHits = 0;
+    let cssFiles = 0;
+    let rawBytes = 0;
+    let minBytes = 0;
+
+    const walk = (dir) => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) {
+          walk(full);
+          continue;
+        }
+        const ext = extname(entry.name);
+        if (ext === '.css') {
+          const raw = readFileSync(full, 'utf8');
+          const min = minifyCssText(raw);
+          writeFileSync(full, min, 'utf8');
+          rawBytes += Buffer.byteLength(raw, 'utf8');
+          minBytes += Buffer.byteLength(min, 'utf8');
+          cssFiles += 1;
+        } else if (ext === '.ts') {
+          const raw = readFileSync(full, 'utf8');
+          const out = raw.replace(CSS_TEMPLATE_RE, (whole, head, body) => {
+            // 只认「模板里真的有花括号」的，免得误伤同名的普通字符串常量
+            if (!body.includes('{')) return whole;
+            const min = minifyCssText(body);
+            rawBytes += Buffer.byteLength(body, 'utf8');
+            minBytes += Buffer.byteLength(min, 'utf8');
+            tsHits += 1;
+            return `${head}\`${min}\``;
+          });
+          if (out !== raw) writeFileSync(full, out, 'utf8');
+        }
+      }
+    };
+    walk(overlay);
+
+    dim(
+      `CSS：${fmtSize(rawBytes)} → ${fmtSize(minBytes)}` +
+        `（${cssFiles} 个 .css + ${tsHits} 段 .ts 内联）`,
+    );
+    return join(overlay, 'main.ts');
   }
 
   const esbuildBaseArgs = [
-    'src/main.ts',
+    relative(ROOT, prepareCssOverlay()),
     '--bundle',
     '--format=iife',
     '--target=es2022',
@@ -209,7 +274,6 @@ function main() {
     '--charset=utf8',
     '--legal-comments=none',
     '--log-level=warning',
-    `--define:__SZB_CSS__=${JSON.stringify(css)}`,
     `--define:__SZB_VERSION__=${JSON.stringify(version)}`,
     `--define:__SZB_BUILD_TIME__=${JSON.stringify(buildTime)}`,
     `--define:__SZB_BUILD_NO__=${JSON.stringify(buildNo)}`,

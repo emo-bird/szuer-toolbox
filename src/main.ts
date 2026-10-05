@@ -21,9 +21,10 @@
  * 而悬浮窗必须等 body 存在。**不要把两件事塞进同一个时机。**
  */
 
-// CSS 由构建期注入（build.mjs 先用 esbuild 压一遍再 `--define` 进来），
-// 这样压缩版产物里的样式也是压过的。见 `src/types/globals.d.ts` 的 `__SZB_CSS__`。
-const baseCss = typeof __SZB_CSS__ === 'string' ? __SZB_CSS__ : '';
+// CSS 走 esbuild 的 `--loader:.css=text` 打进包里；压缩由 `build.mjs` 在
+// 打包**之前**对一份 src 副本做完（`--minify` 压不到字符串内容，见 build.mjs 的
+// `prepareCssOverlay()`），所以这里拿到的已经是压过的文本。
+import baseCss from './common/ui/style.css';
 
 import { scoped } from './common/core/log.ts';
 import { whenDomReady } from './common/utils/dom.ts';

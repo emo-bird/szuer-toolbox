@@ -39,11 +39,15 @@ import { scoped } from '../../common/core/log.ts';
 import { getValue, isEnabled } from '../../common/core/settings.ts';
 import { read as readStore, remove as removeStore, write as writeStore } from '../../common/core/storage.ts';
 import { pageOrSelf } from '../../common/utils/page.ts';
+import { siteToast } from '../../common/ui/widgets/site-toast.ts';
 import {
+  RESOURCE_TYPE_VIDEO,
   collectDiag,
   findResourceItem,
   goNextChapter,
   isResourceFinished,
+  labelOf,
+  parseHash,
   stepForward,
 } from './catalog.ts';
 import { noteVideo, stopProgress } from './progress.ts';
@@ -74,6 +78,14 @@ const ADVANCE_LOCK_MS = 8000;
 
 /** 连播跳过去之后，等待新片源 ready 的最长时间；超时就放弃这次自动播放 */
 const PENDING_AUTOPLAY_TIMEOUT_MS = 15000;
+
+/**
+ * 「这一项好了，等几秒再切下一项」的默认秒数。
+ *
+ * 用户要的就是这个节奏：右上角提醒一声，留 5 秒给人看清楚切到哪了。
+ * 可在设置里改（`VALUE.SWITCH_WAIT`）。
+ */
+const DEFAULT_SWITCH_WAIT_S = 5;
 
 /** 我们对每个 video 元素做过什么 —— 关开关时只回退**我们改过**的那部分 */
 interface Applied {
@@ -203,6 +215,15 @@ let advanceTimer: ReturnType<typeof setTimeout> | null = null;
 /** 落在一个新视频上的时间戳；0 = 没有落点 */
 let landedAt = 0;
 
+/**
+ * 最近一次真的点开的资源 id。
+ *
+ * 传给 `stepForward()` 当起点，防的是「点了资源项但 hash 没换」时每轮都重新
+ * 扫到同一个资源、再点一次的死循环。页面自己换了 hash 就把它清掉（那时以
+ * hash 为准更准 —— 用户可能手动点了别处）。
+ */
+let lastClickedId = '';
+
 const ADVANCE_HOP_DELAY_MS = 700;
 const ADVANCE_MAX_HOPS = 40;
 const ADVANCE_SESSION_MS = 45000;
@@ -246,15 +267,22 @@ function runAdvanceHop(): void {
   }
   advanceHops += 1;
 
-  const step = stepForward();
+  const step = stepForward(lastClickedId);
   switch (step.kind) {
     case 'clicked':
       // ⚠️ 先 stopAdvance() 再写这三个时间戳 —— `stopAdvance()` 会把 `landedAt`
       // 清零，反过来的话 `breakStall()` 永远看不到落点，兜底就失效了。
+      lastClickedId = step.id;
       stopAdvance();
       advancingUntil = Date.now() + ADVANCE_LOCK_MS;
       pendingAutoplayAt = Date.now();
       landedAt = Date.now();
+      // 视频交给它自己播完（`ended` 会来触发切换）；
+      // 文档 / 附件没有「播完」这回事，按「打开看一眼就算过」处理 ——
+      // 用户明确说了文档不必等完成判定（m00553 答复 3）。
+      if (step.type !== RESOURCE_TYPE_VIDEO) {
+        scheduleSwitch(`已打开${labelOf(step.type)}`);
+      }
       return;
 
     case 'quiz':
@@ -265,7 +293,11 @@ function runAdvanceHop(): void {
       if (isEnabled(SITE_ID, TOGGLE.AUTO_SOLVE)) {
         log.warn('「自动作答」只做了开关，功能还没实现，先停在这一题');
       }
-      setWaitingQuiz({ resourceId: step.resourceId, taskId: step.taskId });
+      setWaitingQuiz({
+        cid: parseHash()?.cid ?? '',
+        resourceId: step.resourceId,
+        taskId: step.taskId,
+      });
       stopAdvance();
       return;
 
@@ -275,7 +307,7 @@ function runAdvanceHop(): void {
 
     case 'chapter-end':
       if (getValue<string>(SITE_ID, VALUE.NEXT_SCOPE) !== 'all') {
-        log.info('已到本章最后一个视频（连播范围＝止于本章），停在这里');
+        log.info('已到本章最后一个资源（连播范围＝止于本章），停在这里');
         stopAdvance();
         return;
       }
@@ -283,7 +315,7 @@ function runAdvanceHop(): void {
         scheduleAdvanceHop(ADVANCE_HOP_DELAY_MS);
         return;
       }
-      log.info('目录里后面没有视频了，连播结束');
+      log.info('目录里后面没有资源了，连播结束');
       stopAdvance();
       return;
 
@@ -311,6 +343,73 @@ function startAdvance(): void {
   scheduleAdvanceHop(0);
 }
 
+/**
+ * 从「等切换」回到「走一步」。
+ *
+ * 必须先把 `advancingUntil` 清零：它是给「同一次点击被 `ended` 重复触发」兜底的
+ * 8 秒锁，而等切换本身就要等好几秒 —— 不清掉的话定时器到点时锁还没过期，
+ * `startAdvance()` 会一声不吭地 return，表现就是「提醒弹了、但永远不切」。
+ */
+function resumeAdvance(): void {
+  advancingUntil = 0;
+  startAdvance();
+}
+
+// ------------------------------------------------ 「这一项好了，等一下再切」
+
+/** 到点该切下一项的时间戳；0 = 没在等 */
+let switchAt = 0;
+
+/** 等切换用的定时器 */
+let switchTimer: ReturnType<typeof setTimeout> | null = null;
+
+const SWITCH_WAIT_MAX_S = 120;
+
+/** 设置里的等待秒数（越界就夹回合法区间） */
+function switchWaitMs(): number {
+  const raw = Number.parseInt(String(getValue<string>(SITE_ID, VALUE.SWITCH_WAIT) ?? ''), 10);
+  if (!Number.isFinite(raw)) return DEFAULT_SWITCH_WAIT_S * 1000;
+  return Math.min(SWITCH_WAIT_MAX_S, Math.max(0, raw)) * 1000;
+}
+
+function clearSwitch(): void {
+  if (switchTimer !== null) {
+    clearTimeout(switchTimer);
+    switchTimer = null;
+  }
+  switchAt = 0;
+}
+
+/**
+ * 当前这一项「不用再管了」——右上角提醒一声，等 N 秒再切下一项。
+ *
+ * 这是每一项的唯一出口：视频播完、文档/附件打开、测验做完都走这里。
+ * 重复调用只认第一次（`switchAt !== 0` 直接返回），免得同一次完成被
+ * `ended` + 元素监听两条路各提醒一遍。
+ */
+function scheduleSwitch(reason: string): void {
+  if (!isEnabled(SITE_ID, TOGGLE.AUTO_NEXT)) return;
+  if (switchAt !== 0) return;
+
+  const waitMs = switchWaitMs();
+  const seconds = Math.round(waitMs / 1000);
+  const text = seconds > 0 ? `${reason}，${seconds} 秒后切下一项` : `${reason}，切下一项`;
+  log.info(`连播：${text}`);
+  siteToast(`连播：${text}`, 'info', Math.max(2600, waitMs + 1200));
+
+  if (waitMs <= 0) {
+    resumeAdvance();
+    return;
+  }
+  switchAt = Date.now() + waitMs;
+  switchTimer = setTimeout(() => {
+    switchTimer = null;
+    switchAt = 0;
+    if (!isEnabled(SITE_ID, TOGGLE.AUTO_NEXT)) return;
+    resumeAdvance();
+  }, waitMs);
+}
+
 // ------------------------------------------------------------ 等测验做完
 
 /**
@@ -323,9 +422,16 @@ function startAdvance(): void {
 const WAITING_QUIZ_KEY = 'uooc:waitingQuiz';
 
 /** 正在等的测验；`null` = 没在等 */
-let waitingQuiz: { resourceId: string; taskId: string } | null = null;
+let waitingQuiz: WaitingQuiz | null = null;
 
-function setWaitingQuiz(q: { resourceId: string; taskId: string } | null): void {
+interface WaitingQuiz {
+  /** 所属课程 id —— 换课程时必须作废，否则会拿着旧 id 去新课程里瞎判 */
+  cid: string;
+  resourceId: string;
+  taskId: string;
+}
+
+function setWaitingQuiz(q: WaitingQuiz | null): void {
   waitingQuiz = q;
   if (q === null) removeStore(WAITING_QUIZ_KEY);
   else writeStore(WAITING_QUIZ_KEY, q);
@@ -336,17 +442,26 @@ function restoreWaitingQuiz(): void {
   const raw = readStore<unknown>(WAITING_QUIZ_KEY, null);
   if (typeof raw !== 'object' || raw === null) return;
   const o = raw as Record<string, unknown>;
+  const cid = typeof o['cid'] === 'string' ? o['cid'] : '';
   const resourceId = typeof o['resourceId'] === 'string' ? o['resourceId'] : '';
   const taskId = typeof o['taskId'] === 'string' ? o['taskId'] : '';
   if (resourceId === '') return;
-  waitingQuiz = { resourceId, taskId };
+
+  const nowCid = parseHash()?.cid ?? '';
+  if (cid !== '' && nowCid !== '' && cid !== nowCid) {
+    log.info(`上次的测验记录属于课程 ${cid}，当前是 ${nowCid}，作废`);
+    removeStore(WAITING_QUIZ_KEY);
+    return;
+  }
+  waitingQuiz = { cid, resourceId, taskId };
   log.info(`上次停在测验 ${taskId || '(未知)'}，做完会自动继续连播`);
 }
 
 /**
  * 每次扫描时看一眼：等的那道测验做完了没有。
  *
- * 做完就把它从「等待」里摘掉并继续连播。**只在开关开着时才动它** ——
+ * 做完就把它从「等待」里摘掉，然后走**和别的资源一样的出口** ——
+ * 右上角提醒 + 等 N 秒再切下一项。**只在开关开着时才动它** ——
  * 用户把自动连播关了，这个标记就该原地留着，下次开开关才继续。
  */
 function checkWaitingQuiz(): void {
@@ -357,9 +472,9 @@ function checkWaitingQuiz(): void {
   if (el === null) return;
   if (!isResourceFinished(el)) return;
 
-  log.info(`测验 ${waitingQuiz.taskId || '(未知)'} 已完成，继续连播`);
+  log.info(`测验 ${waitingQuiz.taskId || '(未知)'} 已完成`);
   setWaitingQuiz(null);
-  startAdvance();
+  scheduleSwitch('测验已完成');
 }
 
 /**
@@ -375,9 +490,9 @@ function breakStall(v: HTMLVideoElement): void {
   if (v.currentTime <= 3 || v.ended) return;
   if (!v.paused || hasStarted.has(v)) return;
 
-  log.info(`落点停在 ${Math.round(v.currentTime)}s 一直没播起来，按「看过的视频」继续往后跳`);
+  log.info(`落点停在 ${Math.round(v.currentTime)}s 一直没播起来，按「看过的视频」处理`);
   landedAt = 0;
-  startAdvance();
+  scheduleSwitch('视频已看过');
 }
 
 /** 跳转后兑现「自动播放下一集」；超时或还没 ready 时什么都不做 */
@@ -502,7 +617,8 @@ function onMediaEvent(ev: Event): void {
       return;
 
     case 'ended':
-      startAdvance();
+      // 视频播完：提醒一声、等几秒再切下一项（不再立刻跳）
+      scheduleSwitch('视频已播完');
       return;
 
     case 'ratechange':
@@ -582,8 +698,13 @@ export function startVideoAssist(): () => void {
   document.addEventListener('volumechange', onMediaEvent, true);
 
   // 站内 hash 路由换集不会重载页面
-  window.addEventListener('hashchange', schedule);
-  window.addEventListener('popstate', schedule);
+  // 页面自己换了 hash ⇒ 起点改以 hash 为准，把「上一次点开的资源」清掉
+  const onRoute = (): void => {
+    lastClickedId = '';
+    schedule();
+  };
+  window.addEventListener('hashchange', onRoute);
+  window.addEventListener('popstate', onRoute);
 
   log.debug('视频助手已挂载（二倍速 / 静音 / 防失焦）');
 
@@ -604,6 +725,7 @@ export function startVideoAssist(): () => void {
   return () => {
     stopped = true;
     stopProgress();
+    clearSwitch();
     delete pageWin['__sztbUooc'];
     delete pageWin['__sztbUoocStep'];
     if (timer !== null) {
@@ -614,7 +736,7 @@ export function startVideoAssist(): () => void {
     document.removeEventListener('loadstart', onLoad, true);
     document.removeEventListener('loadedmetadata', onLoad, true);
     for (const type of MEDIA_EVENTS) document.removeEventListener(type, onMediaEvent, true);
-    window.removeEventListener('hashchange', schedule);
-    window.removeEventListener('popstate', schedule);
+    window.removeEventListener('hashchange', onRoute);
+    window.removeEventListener('popstate', onRoute);
   };
 }

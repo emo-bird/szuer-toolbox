@@ -126,6 +126,32 @@ function clickElement(el: HTMLElement): void {
   }
 }
 
+/**
+ * 取章 `li` / 节 `li` 的业务 id。
+ *
+ * **不能用 `getAttribute('id')` 就完事**：新版学习页的这两层 `li` 上 `id` 属性
+ * **是空的**（实测 7 个章、12 个节全是 `id=""`），只有 Angular scope 上的
+ * `chapterItem.id` / `sectionItem.id` 才有值。旧版则是反过来 —— 属性上有，
+ * 所以先读属性、属性为空再读 scope，两版都能对上。
+ *
+ * 踩过的坑：v1 只比对属性 → 新版 `findSectionIndex()` 永远返回 -1，
+ * 于是连播报「章 X 里找不到节 Y」；`goNextChapter()` 也永远返回 false，跨章必挂。
+ */
+function idOfItem(li: HTMLElement, key: 'chapterItem' | 'sectionItem'): string {
+  const attr = li.getAttribute('id');
+  if (attr !== null && attr !== '') return attr;
+  const item = scopeOf(li)?.[key];
+  return isObject(item) ? asString(item['id']) : '';
+}
+
+function chapterIdOf(li: HTMLElement): string {
+  return idOfItem(li, 'chapterItem');
+}
+
+function sectionIdOf(li: HTMLElement): string {
+  return idOfItem(li, 'sectionItem');
+}
+
 // --------------------------------------------------------------- Angular
 
 interface Scope {
@@ -254,20 +280,17 @@ function sectionItems(chapterLi: ParentNode): HTMLElement[] {
  * 但为了不依赖这个约定，取不到时退回读 `scope.chapterItem.id`。
  */
 function findChapterItem(chapterId: string): HTMLElement | null {
-  const all = chapterItems();
-  for (const li of all) {
-    if (li.getAttribute('id') === chapterId) return li;
-  }
-  for (const li of all) {
-    const item = scopeOf(li)?.['chapterItem'];
-    if (isObject(item) && asString(item['id']) === chapterId) return li;
+  if (chapterId === '') return null;
+  for (const li of chapterItems()) {
+    if (chapterIdOf(li) === chapterId) return li;
   }
   return null;
 }
 
 function findSectionIndex(sections: readonly HTMLElement[], sectionId: string): number {
+  if (sectionId === '') return -1;
   for (let i = 0; i < sections.length; i++) {
-    if (sections[i]?.getAttribute('id') === sectionId) return i;
+    if (sectionIdOf(sections[i]!) === sectionId) return i;
   }
   return -1;
 }
@@ -275,8 +298,8 @@ function findSectionIndex(sections: readonly HTMLElement[], sectionId: string): 
 // ------------------------------------------------------------- 推进一步
 
 export type AdvanceStep =
-  /** 已经点开了下一个视频；调用方负责兑现自动播放 */
-  | { kind: 'clicked'; id: string; title: string }
+  /** 已经点开了下一个资源（视频 / 文档 / 附件）；调用方按 `type` 决定怎么收尾 */
+  | { kind: 'clicked'; id: string; title: string; type: number }
   /** 撞上一道**没做过**的测验，停下来（要不要作答由调用方决定） */
   | { kind: 'quiz'; resourceId: string; taskId: string; title: string }
   /** 点了节 / 章标题，页面正在按需渲染；调用方稍后再走一步 */
@@ -286,13 +309,31 @@ export type AdvanceStep =
   /** 走不下去了（读不到目录 / hash 对不上 / 页面异常） */
   | { kind: 'stop'; reason: string };
 
+/** 类型的中文名（只用于日志，两版的 DOM 文案不一样，不能拿 DOM 文本当类型） */
+export function labelOf(type: number): string {
+  if (type === RESOURCE_TYPE_VIDEO) return '视频';
+  if (type === RESOURCE_TYPE_DOC) return '文档';
+  if (type === RESOURCE_TYPE_FILE) return '附件';
+  if (type === RESOURCE_TYPE_QUIZ) return '测验';
+  return `资源(type=${type})`;
+}
+
+/**
+ * 「已经点过章标题催渲染」的那个节。
+ *
+ * 当前章的节是按需渲染的：切章之后、或刚做完测验跳回来时，目标节的 `li` 可能
+ * 还没进 DOM。这时点一次章标题催一下即可，但**同一个节只催一次** —— 否则
+ * `rendered` → 再走一步 → 还是找不到 → 再点，会空转到跳步上限。
+ */
+let expandTriedFor = '';
+
 /**
  * 相对**当前 hash 所处的位置**往后走一步。
  *
  * 只走一步就返回，调用方按返回的 `kind` 决定「等一下再来」还是「收工」。
  * 这样即使站点是异步渲染的（点完节标题要等一个请求才出资源），也不会读空。
  */
-export function stepForward(): AdvanceStep {
+export function stepForward(afterId = ''): AdvanceStep {
   if (angular() === null) {
     return { kind: 'stop', reason: '页面上没有 angular，读不到目录' };
   }
@@ -329,28 +370,47 @@ export function stepForward(): AdvanceStep {
   }
 
   const secIndex = findSectionIndex(sections, parts.sectionId);
-  const secLi = secIndex >= 0 ? sections[secIndex] : undefined;
+  if (secIndex < 0) {
+    // 当前章的节是**按需渲染**的（切章之后、刚做完测验跳回来时都可能还没进 DOM）。
+    // 先点一次章标题催它渲染，下一次再来看；同一个节只催一次，免得空转。
+    const key = `${parts.chapterId}/${parts.sectionId}`;
+    if (expandTriedFor !== key) {
+      expandTriedFor = key;
+      const expandable = queryOne(CHAPTER_TITLE_SELECTOR, chapterLi);
+      if (expandable !== null) {
+        log.info(`连播：当前章里还看不到节 ${parts.sectionId}，先点章标题催它展开`);
+        clickElement(expandable);
+        return { kind: 'rendered' };
+      }
+    }
+    return { kind: 'stop', reason: `章 ${parts.chapterId} 里找不到节 ${parts.sectionId}（已尝试展开）` };
+  }
+  expandTriedFor = '';
+  const secLi = sections[secIndex]!;
 
   // 资源池：优先取「归属当前节」的那些；归属判不出来时退回全页（旧版只渲染当前节，
   // 全页就是本节）。两者都按文档顺序，也就是站点的资源顺序。
   const all = resourceItems();
   let pool = all;
-  if (secLi !== undefined) {
-    const owned = all.filter((el) => el.closest(SECTION_ITEM_SELECTOR) === secLi);
-    if (owned.length > 0) pool = owned;
-  }
+  const owned = all.filter((el) => el.closest(SECTION_ITEM_SELECTOR) === secLi);
+  if (owned.length > 0) pool = owned;
 
   let cursor = -1;
-  if (parts.resourceId !== '') {
+  // 起点的选择：**优先用「上一次真的点开的那个资源」**。
+  // 因为这里要防一种死循环 —— 如果站点点了资源项却没换 hash（或者换得慢），
+  // 只按 hash 定位的话每一轮都会重新扫到同一个资源、再点一次，
+  // 一路空转到跳步上限。`afterId` 由调用方在每次成功点击后带上。
+  const anchor = afterId !== '' ? afterId : parts.resourceId;
+  if (anchor !== '') {
     for (let i = 0; i < pool.length; i++) {
       const s = readSourceOf(pool[i]!);
-      if (s !== null && s.id === parts.resourceId) {
+      if (s !== null && s.id === anchor) {
         cursor = i;
         break;
       }
     }
     if (cursor < 0) {
-      log.warn(`hash 里的资源 ${parts.resourceId} 不在已渲染的目录里，从本节开头重新找`);
+      log.warn(`起点资源 ${anchor} 不在已渲染的目录里，从本节开头重新找`);
     }
   }
 
@@ -359,30 +419,24 @@ export function stepForward(): AdvanceStep {
     const src = readSourceOf(el);
     if (src === null) continue;
 
-    if (src.type === RESOURCE_TYPE_VIDEO) {
-      if (src.finished || src.videoPos > 0) {
-        log.info(`跳过已看过的视频 ${src.id}${src.title === '' ? '' : `（${src.title}）`}`);
-        continue;
-      }
-      log.info(`连播：打开下一个视频 ${src.id}${src.title === '' ? '' : `（${src.title}）`}`);
-      clickElement(el);
-      return { kind: 'clicked', id: src.id, title: src.title };
+    // 站点已经标完成的，不必再点开 —— 这是唯一还会「跳过」的情况
+    if (src.finished) {
+      log.info(`跳过已完成的${labelOf(src.type)} ${src.id}`);
+      continue;
     }
 
+    // 没做过的测验不点进去（自动作答还没实现，点进去等于把人推进卷子），
+    // 交给调用方停下来等 —— 做完由 [`checkWaitingQuiz`] 接着往下走
     if (src.type === RESOURCE_TYPE_QUIZ) {
-      if (src.finished) {
-        log.info(`跳过已做过的测验 ${src.taskId}`);
-        continue;
-      }
       return { kind: 'quiz', resourceId: src.id, taskId: src.taskId, title: src.title };
     }
 
-    const label = src.type === RESOURCE_TYPE_DOC ? '文档' : '附件';
-    log.info(`跳过${label} ${src.id}${src.title === '' ? '' : `（${src.title}）`}`);
-  }
-
-  if (secLi === undefined) {
-    return { kind: 'stop', reason: `章 ${parts.chapterId} 里找不到节 ${parts.sectionId}` };
+    // 其余（视频 / 文档 / 附件）一律点开，点开之后由调用方按 type 决定怎么收尾
+    log.info(
+      `连播：打开${labelOf(src.type)} ${src.id}${src.title === '' ? '' : `（${src.title}）`}`,
+    );
+    clickElement(el);
+    return { kind: 'clicked', id: src.id, title: src.title, type: src.type };
   }
 
   // 本节走到头 → 点下一个节（它的资源要等站点渲染出来，所以只走一步）
@@ -410,7 +464,7 @@ export function goNextChapter(): boolean {
   const parts = parseHash();
   if (parts === null) return false;
   const all = chapterItems();
-  const idx = all.findIndex((li) => li.getAttribute('id') === parts.chapterId);
+  const idx = all.findIndex((li) => chapterIdOf(li) === parts.chapterId);
   if (idx < 0 || idx + 1 >= all.length) return false;
   const next = all[idx + 1]!;
   const title = queryOne(CHAPTER_TITLE_SELECTOR, next);
@@ -465,17 +519,25 @@ export interface UoocDiag {
   currentChapterFound: boolean;
   sectionIds: string[];
   currentSectionFound: boolean;
-  resources: { id: string; type: number; finished: boolean; videoPos: number }[];
+  resources: {
+    id: string;
+    type: number;
+    /** 站点数据层的「任务点」标记 —— 新版页面上看不到任何 UI 标注，只能从数据层看 */
+    isTask: boolean;
+    taskId: string;
+    finished: boolean;
+    videoPos: number;
+  }[];
   resourceReadFailures: number;
 }
 
 export function collectDiag(): UoocDiag {
   const parts = parseHash();
   const chapters = chapterItems();
-  const chapterIds = chapters.map((li) => li.getAttribute('id') ?? '');
+  const chapterIds = chapters.map((li) => chapterIdOf(li));
   const currentChapter = parts === null ? null : findChapterItem(parts.chapterId);
   const sections = currentChapter === null ? [] : sectionItems(currentChapter);
-  const sectionIds = sections.map((li) => li.getAttribute('id') ?? '');
+  const sectionIds = sections.map((li) => sectionIdOf(li));
   const items = resourceItems();
 
   const resources: UoocDiag['resources'] = [];
@@ -486,7 +548,14 @@ export function collectDiag(): UoocDiag {
       failures += 1;
       continue;
     }
-    resources.push({ id: src.id, type: src.type, finished: src.finished, videoPos: src.videoPos });
+    resources.push({
+      id: src.id,
+      type: src.type,
+      isTask: src.isTask,
+      taskId: src.taskId,
+      finished: src.finished,
+      videoPos: src.videoPos,
+    });
   }
 
   return {

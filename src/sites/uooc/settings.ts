@@ -42,11 +42,24 @@ export const TOGGLE = {
 export const VALUE = {
   /** 连播范围：章内 / 跨章 */
   NEXT_SCOPE: 'nextScope',
+  /** 连播切到下一项之前等几秒 */
+  SWITCH_WAIT: 'switchWait',
   /** 进度上报间隔下限（秒） */
   PROGRESS_MIN: 'progressMin',
   /** 进度上报间隔上限（秒） */
   PROGRESS_MAX: 'progressMax',
 } as const;
+
+/**
+ * 连播切换前的默认等待秒数。
+ *
+ * 这是用户定的节奏：一项完成 → 右上角提醒 → 停 5 秒 → 切下一项。
+ * 那 5 秒是给人看清「刚才是哪一项、接下来去哪一项」的，不要偷偷改小。
+ */
+export const SWITCH_WAIT_DEFAULT = '5';
+
+/** 切换等待的合法区间（秒）；0 = 不等待，立刻切 */
+export const SWITCH_WAIT_RANGE = { min: 0, max: 120 } as const;
 
 /**
  * 进度上报区间的默认值（秒）。`progress.ts` 拿它当兜底，避免两处写两遍。
@@ -127,6 +140,16 @@ export function registerUoocSettings(): void {
 
   registerValue<string>({
     siteId: SITE_ID,
+    id: VALUE.SWITCH_WAIT,
+    label: '切前等待',
+    desc: '秒。一项完成后停多久再切下一项（0 = 立刻切）',
+    default: SWITCH_WAIT_DEFAULT,
+    kind: 'number',
+    validate: (value) => positiveIntHint(value, SWITCH_WAIT_RANGE.min, SWITCH_WAIT_RANGE.max),
+  });
+
+  registerValue<string>({
+    siteId: SITE_ID,
     id: VALUE.PROGRESS_MIN,
     label: '上报间隔下限',
     desc: '秒。和下面的上限一起决定随机区间',
@@ -164,6 +187,11 @@ export function applyUoocSettings(): void {
   const scope = getStoredValue<string>(SITE_ID, VALUE.NEXT_SCOPE);
   if (scope !== 'chapter' && scope !== 'all') {
     log.warn(`连播范围取值异常（${scope}），按「止于本章」处理`);
+  }
+
+  const wait = getStoredValue<string>(SITE_ID, VALUE.SWITCH_WAIT);
+  if (positiveIntHint(wait, SWITCH_WAIT_RANGE.min, SWITCH_WAIT_RANGE.max) !== null) {
+    log.warn(`切前等待取值异常（${wait}），按 ${SWITCH_WAIT_DEFAULT} 秒处理`);
   }
 
   const min = getStoredValue<string>(SITE_ID, VALUE.PROGRESS_MIN);
