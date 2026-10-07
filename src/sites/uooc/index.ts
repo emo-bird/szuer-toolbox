@@ -12,10 +12,12 @@
  */
 
 import { scoped } from '../../common/core/log.ts';
+import { isEnabled } from '../../common/core/settings.ts';
 import type { SiteAdapter } from '../types.ts';
+import { autoAnswerExamPage } from './ai/index.ts';
 import { startAutoplay } from './autoplay.ts';
 import { installUoocIntercept } from './intercept.ts';
-import { SITE_ID, UOOC_TOGGLES, applyUoocSettings, registerUoocSettings } from './settings.ts';
+import { SITE_ID, TOGGLE, UOOC_TOGGLES, applyUoocSettings, registerUoocSettings } from './settings.ts';
 import { UOOC_AI_TAB } from './tabs/ai.ts';
 import { UOOC_AUTOPLAY_TAB } from './tabs/autoplay.ts';
 import { UOOC_VIDEO_TAB } from './tabs/video.ts';
@@ -51,6 +53,15 @@ const PAGES: readonly string[] = ['/home/learn/index*', '/home/learn/new/*', '/e
 /** 视频助手只在学习页有意义（测验页没有播放器，挂着只是白跑观察器） */
 const LEARN_PATH_PREFIX = '/home/learn/';
 
+/**
+ * 答题页前缀。
+ *
+ * 答题页上**没有 SPA**（`/exam/paper?cid=&tid=` 是整页跳转过来的），所以这里
+ * 既不起连播也不起视频助手，只把「自动作答」这一步接上 —— 连播那边整页跳过来
+ * 就断了，接力全靠 `ai/handoff.ts` 那条交接条。
+ */
+const EXAM_PATH_PREFIX = '/exam/';
+
 export const uoocAdapter: SiteAdapter = {
   id: SITE_ID,
   name: 'UOOC 优课联盟',
@@ -85,11 +96,23 @@ export const uoocAdapter: SiteAdapter = {
     applyUoocSettings();
 
     const onLearnPage = location.pathname.startsWith(LEARN_PATH_PREFIX);
+    const onExamPage = location.pathname.startsWith(EXAM_PATH_PREFIX);
     let autoplayMounted = false;
     if (onLearnPage) {
       startVideoAssist();
       startAutoplay({ toast: (message, kind) => ctx.panel.toast(message, kind) });
       autoplayMounted = true;
+    } else if (onExamPage) {
+      // 用户 m04227 选的是「只要 URL 带 tid 且 AI 开着就自动」⇒ 这里不做任何
+      // 「是不是从连播跳过来的」判断，触发条件就是这一个开关。
+      // 安全阀在 autoAnswerExamPage 里：没有【提交】按钮的卷子（已交过的复习页）
+      // 一律不填不动。
+      if (isEnabled(SITE_ID, TOGGLE.AI_ANSWER)) {
+        log.info('答题页：AI 作答开着，交给 ai/index.ts 自动接管');
+        void autoAnswerExamPage(ctx.panel);
+      } else {
+        log.debug('答题页，但「AI 作答」开关没开，不自动作答');
+      }
     } else {
       log.debug(`非学习页（${location.pathname}），本次不启动视频助手与连播`);
     }

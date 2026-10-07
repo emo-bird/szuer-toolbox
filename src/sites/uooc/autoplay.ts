@@ -40,6 +40,7 @@ import {
   classifySource,
   courseIdFromLocation,
   currentChainFromHash,
+  examUrl,
   findLeafIndex,
   flattenLeaves,
   parseCatalogTree,
@@ -47,6 +48,7 @@ import {
   sourceHash,
   unitLearnUrl,
 } from './catalog.ts';
+import { saveHandoff } from './ai/handoff.ts';
 import {
   peekCatalog,
   peekUnitLearn,
@@ -430,7 +432,22 @@ export function startAutoplay(host: AutoplayHost): () => void {
         return;
       }
       if (isEnabled(SITE_ID, TOGGLE.AI_ANSWER)) {
-        pause(`遇到未完成的测验「${src.title}」，但 AI 答题还没实现`);
+        if (src.taskId === null) {
+          // 没有 task_id 就拼不出答题页地址，只能交给用户
+          log.warn(`测验没有 task_id，进不去答题页：${src.title}`);
+          pause(`测验「${src.title}」没有 task_id，进不去答题页，请手动完成`);
+          return;
+        }
+        // ⚠️ 答题页**不在 SPA 里**，是整页跳转（`/exam/paper?cid=&tid=`）⇒ 这里用
+        //    `location.href` 而不是 `navigateTo()`（那个只改 hash）。
+        //    页面一卸载，本循环就没了；答完要靠答题页那边接力（见 ai/handoff.ts）。
+        //    用户 m04227 拍板：整页换成答题页，答完再换成课程页。
+        saveHandoff(String(src.taskId));
+        announce('打开', src);
+        log.info(`AI 作答：整页前往答题页 tid=${src.taskId}（${src.title}）`);
+        location.href = examUrl(cid, src.taskId);
+        // 不 schedule：页面马上卸载。万一是被 beforeunload 拦住了，
+        // 连播会停在这一项（停着比乱走安全，用户看一眼就知道跳转没成功）。
         return;
       }
       if (isEnabled(SITE_ID, TOGGLE.SKIP_QUIZ)) {

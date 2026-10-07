@@ -25,6 +25,8 @@
 // @grant        GM_setClipboard
 // @grant        GM_registerMenuCommand
 // @grant        GM_openInTab
+// @grant        GM_xmlhttpRequest
+// @connect      *
 // @run-at       document-start
 // @noframes
 // ==/UserScript==
@@ -50,7 +52,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-07T15:53:24.019Z（构建号 76） */
+/* 构建信息：2026-10-07T16:18:34.766Z（构建号 77） */
 
 "use strict";
 (() => {
@@ -1570,10 +1572,42 @@ ${options.desc ?? ""}
     const text = await res.text();
     return { status: res.status, statusText: res.statusText, text, finalUrl: res.url };
   }
+  function resolveGm() {
+    const g = globalThis;
+    const fn = g["GM_xmlhttpRequest"];
+    return typeof fn === "function" ? fn : null;
+  }
+  function viaGm(req, body) {
+    const gm = resolveGm();
+    if (gm === null) {
+      return Promise.reject(new Error("GM_xmlhttpRequest 不可用：油猴清单里缺少 @grant GM_xmlhttpRequest"));
+    }
+    return new Promise((resolve2, reject) => {
+      const handle = gm({
+        method: req.method ?? "GET",
+        url: req.url,
+        ...req.headers !== void 0 ? { headers: req.headers } : {},
+        ...body !== void 0 ? { data: body } : {},
+        ...req.timeoutMs !== void 0 ? { timeout: req.timeoutMs } : {},
+        onload: (r) => {
+          resolve2({
+            status: r.status,
+            statusText: r.statusText,
+            text: r.responseText ?? "",
+            finalUrl: r.finalUrl ?? req.url
+          });
+        },
+        onerror: () => reject(new Error("GM_xmlhttpRequest 网络错误")),
+        ontimeout: () => reject(new Error("GM_xmlhttpRequest 超时"))
+      });
+      if (handle === void 0) log3.debug("GM_xmlhttpRequest 未返回句柄，abort 不可用");
+    });
+  }
   async function request(req) {
     const body = toBody(req.data);
     const started = Date.now();
-    const raw = await enqueue(() => viaFetch(req, body), req.priority);
+    const send = req.channel === "gm" ? () => viaGm(req, body) : () => viaFetch(req, body);
+    const raw = await enqueue(send, req.priority);
     const elapsedMs = Date.now() - started;
     let json = null;
     if (req.responseType === "json") {
@@ -1584,8 +1618,9 @@ ${options.desc ?? ""}
         throw new HttpError("响应不是合法 JSON", raw.status, raw.text);
       }
     }
+    const via = req.channel === "gm" ? " [gm]" : "";
     log3.debug(
-      `${req.method ?? "GET"} ${safePath(req.url)} → ${raw.status} (${elapsedMs}ms, ${raw.text.length}B)`
+      `${req.method ?? "GET"}${via} ${safePath(req.url)} → ${raw.status} (${elapsedMs}ms, ${raw.text.length}B)`
     );
     return { ...raw, elapsedMs, json };
   }
@@ -1596,6 +1631,14 @@ ${options.desc ?? ""}
     } catch {
       return url.split("?")[0] ?? url;
     }
+  }
+  function qs(params) {
+    const sp = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) {
+      if (v === void 0 || v === null) continue;
+      sp.set(k, String(v));
+    }
+    return sp.toString();
   }
 
   // src/common/ui/tabs/status.ts
@@ -1947,6 +1990,936 @@ ${options.desc ?? ""}
     }
   };
 
+  // src/sites/uooc/ai/fill.ts
+  function isVisible(el2) {
+    const he = el2;
+    if (typeof he.getBoundingClientRect !== "function") return true;
+    const r = he.getBoundingClientRect();
+    if (r.width > 0 && r.height > 0) return true;
+    return he.offsetParent !== null;
+  }
+  function clickOption(input) {
+    const attempts = [
+      input,
+      input.closest("label"),
+      input.parentElement?.querySelector(".ti-a-i") ?? null,
+      input.parentElement
+    ];
+    for (const el2 of attempts) {
+      if (el2 === null) continue;
+      if (el2 !== input && !isVisible(el2)) continue;
+      try {
+        el2.click();
+        return true;
+      } catch {
+      }
+    }
+    try {
+      input.click();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  function collectRoots(top = document) {
+    const roots = [top];
+    const frames = top.querySelectorAll("iframe, frame");
+    for (const f of frames) {
+      const el2 = f;
+      try {
+        const doc = el2.contentDocument;
+        if (doc !== null && doc !== void 0) roots.push(doc);
+      } catch {
+      }
+    }
+    return roots;
+  }
+  function inputsFor(roots, qid) {
+    const out = [];
+    for (const doc of roots) {
+      let list;
+      try {
+        list = doc.querySelectorAll(`input[name="${CSS.escape(qid)}"]`);
+      } catch {
+        list = doc.querySelectorAll(`input[name="${qid}"]`);
+      }
+      for (const el2 of list) {
+        if (el2 instanceof HTMLInputElement) out.push(el2);
+      }
+    }
+    return out;
+  }
+  function fillAnswers(targets) {
+    const filled = [];
+    const missing = [];
+    const failed = [];
+    const roots = collectRoots();
+    for (const t of targets) {
+      if (t.letters.length === 0) {
+        missing.push(t.qid);
+        continue;
+      }
+      const inputs = inputsFor(roots, t.qid);
+      if (inputs.length === 0) {
+        missing.push(t.qid);
+        continue;
+      }
+      let allOk = true;
+      for (const letter of t.letters) {
+        const target = inputs.find((el2) => (el2.value ?? "").toUpperCase() === letter);
+        if (target === void 0) {
+          allOk = false;
+          continue;
+        }
+        if (target.checked) continue;
+        if (!clickOption(target)) allOk = false;
+      }
+      const okNow = t.letters.every((letter) => {
+        const el2 = inputs.find((i) => (i.value ?? "").toUpperCase() === letter);
+        return el2 !== void 0 && el2.checked;
+      });
+      if (okNow) filled.push(t.qid);
+      else if (allOk) failed.push(t.qid);
+      else failed.push(t.qid);
+    }
+    return { filled, missing, failed };
+  }
+  var SUBMIT_SELECTORS = [
+    "button.btn.btn-danger",
+    'div.btn.btn-warning[ng-click*="commitTask"]'
+  ];
+  function findSubmitButton(top = document) {
+    for (const selector of SUBMIT_SELECTORS) {
+      for (const doc of collectRoots(top)) {
+        const el2 = doc.querySelector(selector);
+        if (el2 instanceof HTMLElement) return el2;
+      }
+    }
+    return null;
+  }
+  function countOptionInputs(top = document) {
+    let n = 0;
+    for (const doc of collectRoots(top)) {
+      try {
+        n += doc.querySelectorAll('input[type="radio"], input[type="checkbox"]').length;
+      } catch {
+      }
+    }
+    return n;
+  }
+  function waitForOptionInputs(timeoutMs = 2e4, intervalMs2 = 300) {
+    return new Promise((resolve2) => {
+      const deadline = Date.now() + timeoutMs;
+      const tick = () => {
+        if (countOptionInputs() > 0) {
+          resolve2(true);
+          return;
+        }
+        if (Date.now() >= deadline) {
+          resolve2(false);
+          return;
+        }
+        window.setTimeout(tick, intervalMs2);
+      };
+      tick();
+    });
+  }
+  function isAnswerBoxVisible(top = document) {
+    for (const doc of collectRoots(top)) {
+      const el2 = doc.querySelector("div.answerBox");
+      if (el2 !== null && isVisible(el2)) return true;
+    }
+    return false;
+  }
+
+  // src/sites/uooc/ai/handoff.ts
+  var KEY = "uooc.ai.handoff";
+  var HANDOFF_TTL_MS = 30 * 60 * 1e3;
+  function isHandoff(v) {
+    if (v === null || typeof v !== "object") return false;
+    const o = v;
+    return typeof o["courseUrl"] === "string" && typeof o["tid"] === "string" && typeof o["at"] === "number";
+  }
+  function saveHandoff(tid, courseUrl = location.href) {
+    const record = { courseUrl, tid, at: Date.now() };
+    write(KEY, record);
+  }
+  function consumeHandoff(tid, now = Date.now()) {
+    const raw = read(KEY, null);
+    if (raw === null || raw === void 0) return null;
+    remove(KEY);
+    if (!isHandoff(raw)) return null;
+    if (raw.tid !== tid) return null;
+    if (now - raw.at > HANDOFF_TTL_MS) return null;
+    return raw;
+  }
+
+  // src/sites/uooc/ai/llm.ts
+  function chatUrl(baseUrl) {
+    const base = baseUrl.trim().replace(/\/+$/, "");
+    if (base === "") return "";
+    if (/\/chat\/completions$/.test(base)) return base;
+    return `${base}/chat/completions`;
+  }
+  function extractContent(json) {
+    if (json === null || typeof json !== "object") return null;
+    const choices = json["choices"];
+    if (!Array.isArray(choices) || choices.length === 0) return null;
+    const first = choices[0];
+    const message = first?.["message"] ?? null;
+    const content = message?.["content"];
+    if (typeof content === "string") return content;
+    return null;
+  }
+  async function chat(cfg, prompt) {
+    const url = chatUrl(cfg.baseUrl);
+    if (url === "") throw new Error("未配置大模型接口地址");
+    const headers2 = { "Content-Type": "application/json" };
+    if (cfg.apiKey.trim() !== "") headers2["Authorization"] = `Bearer ${cfg.apiKey.trim()}`;
+    const res = await request({
+      url,
+      method: "POST",
+      channel: "gm",
+      headers: headers2,
+      data: {
+        model: cfg.model,
+        messages: [{ role: "user", content: prompt }]
+      },
+      responseType: "text",
+      timeoutMs: cfg.timeoutMs,
+      priority: PRIORITY.HIGH
+    });
+    if (res.status < 200 || res.status >= 300) {
+      throw new Error(`模型接口返回 ${res.status}：${res.text.slice(0, 200)}`);
+    }
+    let json = null;
+    try {
+      json = JSON.parse(res.text);
+    } catch {
+      throw new Error(`模型接口返回的不是 JSON（前 200 字）：${res.text.slice(0, 200)}`);
+    }
+    const content = extractContent(json);
+    if (content === null) throw new Error(`模型响应里没有 choices[0].message.content`);
+    return content;
+  }
+  async function testConnection(cfg) {
+    try {
+      const content = await chat(cfg, "只回复两个字：收到");
+      return { ok: true, detail: `连接正常，模型回复：${content.trim().slice(0, 40)}`, content };
+    } catch (err) {
+      return { ok: false, detail: err instanceof Error ? err.message : String(err), content: "" };
+    }
+  }
+
+  // src/sites/uooc/ai/paper.ts
+  function isAnswerable(kind) {
+    return kind === "single" || kind === "multi" || kind === "judge";
+  }
+  function kindOf(typeText, type) {
+    const t = typeText.trim();
+    if (t.includes("多选")) return "multi";
+    if (t.includes("单选")) return "single";
+    if (t.includes("判断")) return "judge";
+    if (t.includes("填空")) return "blank";
+    switch (type) {
+      case "10":
+        return "single";
+      case "11":
+        return "multi";
+      case "20":
+        return "judge";
+      case "30":
+        return "blank";
+      default:
+        return "other";
+    }
+  }
+  function toOptions(raw) {
+    if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return [];
+    const out = [];
+    for (const [key, value] of Object.entries(raw)) {
+      if (!/^[A-Za-z]$/.test(key)) continue;
+      out.push({ key: key.toUpperCase(), text: String(value ?? "").trim() });
+    }
+    return out.sort((a, b) => a.key.localeCompare(b.key));
+  }
+  function asString(v) {
+    return v === null || v === void 0 ? "" : String(v);
+  }
+  function toExamQuestion(raw) {
+    if (raw === null || typeof raw !== "object") return null;
+    const o = raw;
+    const id = asString(o["id"]).trim();
+    if (id === "") return null;
+    const typeText = asString(o["type_text"]);
+    return {
+      id,
+      kind: kindOf(typeText, asString(o["type"])),
+      typeText,
+      stem: asString(o["question"]),
+      options: toOptions(o["options"]),
+      score: asString(o["score"])
+    };
+  }
+  async function fetchPaper(tid) {
+    const res = await request({
+      url: `${location.origin}/exam/getTaskPaper?${qs({ tid })}`,
+      responseType: "json",
+      priority: PRIORITY.HIGH,
+      timeoutMs: 2e4
+    });
+    const body = res.json;
+    const data = body?.["data"] ?? null;
+    const list = Array.isArray(data?.["questions"]) ? data["questions"] : null;
+    if (list === null) throw new Error("getTaskPaper 响应里没有 questions");
+    const questions = [];
+    for (const item of list) {
+      const q = toExamQuestion(item);
+      if (q !== null) questions.push(q);
+    }
+    const paper = data?.["paper"] ?? null;
+    return { questions, courseTitle: asString(paper?.["course_title"]) };
+  }
+
+  // src/sites/uooc/ai/parse.ts
+  var MAX_SAMPLES = 4;
+  function toHalfWidth(s) {
+    return s.replace(
+      /[\uFF21-\uFF3A\uFF41-\uFF5A]/g,
+      (c) => String.fromCharCode(c.charCodeAt(0) - 65248)
+    );
+  }
+  function normalizeChoice(raw) {
+    const s = toHalfWidth(raw).replace(/[，、；;/\s]+/g, ",").replace(/[.。]+$/g, "").trim();
+    if (s === "") return null;
+    const judge = judgeToLetter(s);
+    if (judge !== null) return judge;
+    const letters = s.split(",").filter((p) => p !== "");
+    if (letters.length === 0) return null;
+    for (const p of letters) {
+      if (!/^[A-Za-z]$/.test(p)) return null;
+    }
+    const uniq = [...new Set(letters.map((p) => p.toUpperCase()))].sort();
+    return uniq.join(",");
+  }
+  function judgeToLetter(s) {
+    const t = s.replace(/\s+/g, "");
+    if (/^(正确|对|是|√|✓|T|TRUE)$/i.test(t)) return "A";
+    if (/^(错误|错|否|×|✗|X|F|FALSE)$/i.test(t)) return "B";
+    return null;
+  }
+  function normalizeAnswer(raw, kind) {
+    if (kind === "blank" || kind === "other") {
+      const t = raw.trim();
+      return t === "" ? null : t;
+    }
+    return normalizeChoice(raw);
+  }
+  var INLINE_RE = /(?:^|[\s（(])(\d+)\s*[.、．:：)）]\s*([A-Za-z](?:\s*[,，]\s*[A-Za-z])*)/g;
+  function scanInline(text) {
+    const found = /* @__PURE__ */ new Map();
+    for (const m of text.matchAll(INLINE_RE)) {
+      const n = Number(m[1]);
+      if (!Number.isInteger(n) || n <= 0) continue;
+      if (!found.has(n)) found.set(n, (m[2] ?? "").trim());
+    }
+    return found;
+  }
+  function parseAnswerLines(text) {
+    const out = /* @__PURE__ */ new Map();
+    const body = stripFence(text);
+    for (const line of body.split(/\r?\n/)) {
+      const inline = scanInline(line);
+      if (inline.size >= 2) {
+        for (const [n2, ans2] of inline) if (!out.has(n2)) out.set(n2, ans2);
+        continue;
+      }
+      const m = /^\s*(\d+)\s*[.、．:：)）]\s*(.+?)\s*$/.exec(line);
+      if (m === null) continue;
+      const n = Number(m[1]);
+      const ans = (m[2] ?? "").trim();
+      if (!Number.isInteger(n) || n <= 0 || ans === "") continue;
+      if (!out.has(n)) out.set(n, ans);
+    }
+    if (out.size > 0) return out;
+    for (const [n, ans] of scanInline(body)) if (!out.has(n)) out.set(n, ans);
+    return out;
+  }
+  function stripFence(text) {
+    return text.replace(/^\s*```[a-zA-Z]*\s*$/gm, "").replace(/```/g, "");
+  }
+  function parseAnswers(text, kinds) {
+    const lines = parseAnswerLines(text);
+    return kinds.map((kind, i) => {
+      const raw = lines.get(i + 1);
+      if (raw === void 0) return null;
+      return normalizeAnswer(raw, kind);
+    });
+  }
+  function majority(samples) {
+    if (samples.length === 0) return { decided: false, answer: "" };
+    const counts = /* @__PURE__ */ new Map();
+    for (const s of samples) counts.set(s, (counts.get(s) ?? 0) + 1);
+    for (const s of samples) {
+      if ((counts.get(s) ?? 0) >= 2) return { decided: true, answer: s };
+    }
+    if (samples.length >= MAX_SAMPLES) {
+      return { decided: true, answer: samples[samples.length - 1] ?? "" };
+    }
+    return { decided: false, answer: "" };
+  }
+
+  // src/sites/uooc/ai/prompts.ts
+  var SHARED_INSTRUCTION = [
+    "请回答下列题目。要求：",
+    "1. 只输出答案行，每题一行，格式为「题号. 答案」，题号从 1 开始。",
+    "2. 单选题只写一个字母，如 A。",
+    "3. 多选题写多个字母，用英文逗号分隔，按字母升序，如 A,C。",
+    "4. 判断题写 A（正确）或 B（错误）。",
+    "5. 填空题写答案原文，不要写字母；一道题有多个空时，按空序用竖线 | 分隔。",
+    "6. 不要输出解释、标题、空行、代码块或任何多余字符。",
+    ""
+  ].join("\n");
+  var TEMPLATES = [
+    {
+      id: "direct",
+      label: "直答",
+      body: "你是一名严谨的答题助手。直接依据题干与选项作答。\n不需要展示推理过程。"
+    },
+    {
+      id: "reason",
+      label: "先推理",
+      body: "你是一名严谨的答题助手。作答前请在心里逐步推理，确认无误后给出答案。\n不要把你的推理过程写出来。"
+    },
+    {
+      id: "expert",
+      label: "学科专家",
+      body: "你是这门课程的资深教师，熟悉该学科的标准答案口径。\n请以专业判断作答，不要受选项表述顺序影响。"
+    },
+    {
+      id: "eliminate",
+      label: "排除法",
+      body: "你是一名严谨的答题助手。先用排除法剔除明显错误的选项，\n再从剩下的选项里确定最终答案。不要输出排除过程。"
+    },
+    {
+      id: "double-check",
+      label: "自检复核",
+      body: "你是一名严谨的答题助手。先在心里给出初步答案，再默读一遍题目复核；\n如果发现错误就改正。最终只输出复核后的答案。"
+    }
+  ];
+  function renderOptions(q) {
+    if (q.options.length === 0) return "";
+    return q.options.map((o) => `${o.key}. ${o.text}`).join("  ");
+  }
+  function buildPrompt(questions, template) {
+    const lines = [template.body, "", SHARED_INSTRUCTION, "题目："];
+    questions.forEach((q, i) => {
+      const tag = q.typeText === "" ? "" : `[${q.typeText}] `;
+      lines.push(`${i + 1}. ${tag}${q.stem}`);
+      const opts = renderOptions(q);
+      if (opts !== "") lines.push(`   ${opts}`);
+    });
+    return lines.join("\n");
+  }
+
+  // src/sites/uooc/ai/runner.ts
+  function shuffledTemplates() {
+    const out = [...TEMPLATES];
+    for (let i = out.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const a = out[i];
+      const b = out[j];
+      if (a === void 0 || b === void 0) continue;
+      out[i] = b;
+      out[j] = a;
+    }
+    return out;
+  }
+  async function answerOne(question, cfg, hook = {}) {
+    const pool = shuffledTemplates();
+    const samples = [];
+    const decided = [];
+    let requests = 0;
+    let lastError = "";
+    const max = Math.min(MAX_SAMPLES, pool.length);
+    for (let round2 = 0; round2 < max; round2 += 1) {
+      const template = pool.pop();
+      if (template === void 0) break;
+      requests += 1;
+      let text = "";
+      try {
+        text = await chat(cfg, buildPrompt([question], template));
+      } catch (err) {
+        lastError = err instanceof Error ? err.message : String(err);
+        hook.onWarn?.(`第 ${requests} 次请求失败（模板 ${template.label}）：${lastError}`);
+        samples.push(null);
+        continue;
+      }
+      const parsed = parseAnswers(text, [question.kind])[0] ?? null;
+      samples.push(parsed);
+      hook.onDebug?.(
+        `模板「${template.label}」→ ${parsed === null ? "解析不出答案" : parsed}（原始回答：${text.trim().slice(0, 60)}）`
+      );
+      if (parsed === null) continue;
+      decided.push(parsed);
+      const verdict = majority(decided);
+      if (verdict.decided) {
+        return { qid: question.id, answer: verdict.answer, requests, samples, error: lastError };
+      }
+    }
+    return { qid: question.id, answer: "", requests, samples, error: lastError };
+  }
+  async function runPool(items2, limit, worker) {
+    const out = new Array(items2.length);
+    const size = Math.min(8, Math.max(1, Math.floor(limit)));
+    let cursor = 0;
+    async function pump() {
+      for (; ; ) {
+        const i = cursor;
+        cursor += 1;
+        if (i >= items2.length) return;
+        const item = items2[i];
+        if (item === void 0) return;
+        out[i] = await worker(item, i);
+      }
+    }
+    const lanes = [];
+    for (let i = 0; i < size; i += 1) lanes.push(pump());
+    await Promise.all(lanes);
+    return out;
+  }
+  async function answerQuestions(questions, opts) {
+    const total = questions.length;
+    return runPool(questions, opts.concurrency ?? 1, async (q, index) => {
+      const outcome = await answerOne(q, opts.cfg, {
+        ...opts.onDebug !== void 0 ? { onDebug: opts.onDebug } : {},
+        ...opts.onWarn !== void 0 ? { onWarn: opts.onWarn } : {}
+      });
+      opts.onProgress?.({ index, total, question: q, outcome });
+      return outcome;
+    });
+  }
+
+  // src/sites/uooc/settings.ts
+  var log5 = scoped("uooc/settings");
+  var SITE_ID = "uooc";
+  var GROUP = {
+    /** 播放器行为（U1/U2/U4） */
+    VIDEO: "视频",
+    /** 连播行为（U3） */
+    AUTOPLAY: "连播",
+    /** AI 作答（U6–U9） */
+    AI: "AI 作答"
+  };
+  var TOGGLE = {
+    /** 🟢 二倍速播放（U1） */
+    RATE_2X: "rate-2x",
+    /** 🟢 静音播放（U2） */
+    MUTE: "mute",
+    /** 🟢 防失焦暂停（U4） */
+    KEEP_PLAYING: "keep-playing",
+    /** 🟠 自动连播（U3） */
+    AUTO_NEXT: "auto-next",
+    /** 🟢 附件只路过，不打开文件（仍导航到该小节）—— 用户 m01816 需求 2 */
+    SKIP_ATTACHMENT: "skip-attachment",
+    /** 🟢 文本不停留：导航过去后不等待，直接下一项 */
+    SKIP_TEXT: "skip-text",
+    /** 🟢 讨论不停留、不暂停（需求细则 A.3「跳过讨论」，默认开） */
+    SKIP_DISCUSSION: "skip-discussion",
+    /** 🟠 测验不自动进入：连播走到测验就停下等用户 */
+    SKIP_QUIZ: "skip-quiz",
+    /** 🟠 AI 答题（U6–U9）—— 未实现，先占位 */
+    AI_ANSWER: "ai-answer"
+  };
+  var VALUE = {
+    /** 跳到下一项**之后**等多久再处理它（ms） */
+    WAIT_BEFORE_MS: "wait-before-ms",
+    /** 一项处理完、跳下一项**之前**停留多久（ms） */
+    HOLD_AFTER_MS: "hold-after-ms",
+    /** 大模型接口根地址（OpenAI Chat Completions 兼容），如 `https://api.openai.com/v1` */
+    AI_BASE_URL: "ai-base-url",
+    /** 大模型 API Key */
+    AI_API_KEY: "ai-api-key",
+    /** 模型名，如 `gpt-4o-mini` */
+    AI_MODEL: "ai-model",
+    /** 单次请求超时（ms） */
+    AI_TIMEOUT_MS: "ai-timeout-ms",
+    /** 同时答几道题（1~8） */
+    AI_CONCURRENCY: "ai-concurrency"
+  };
+  var UOOC_TOGGLES = [
+    {
+      id: TOGGLE.RATE_2X,
+      label: "二倍速",
+      desc: "锁在 2 倍速，在播放器里改回去会被扳回",
+      risk: "safe",
+      default: true,
+      group: GROUP.VIDEO
+    },
+    {
+      id: TOGGLE.MUTE,
+      label: "静音",
+      desc: "锁在静音，取消会被扳回",
+      risk: "safe",
+      default: true,
+      group: GROUP.VIDEO
+    },
+    {
+      id: TOGGLE.KEEP_PLAYING,
+      label: "防暂停",
+      desc: "暂停会被立刻恢复（含你自己按的暂停）",
+      risk: "safe",
+      default: true,
+      group: GROUP.VIDEO
+    },
+    {
+      id: TOGGLE.AUTO_NEXT,
+      label: "自动连播",
+      desc: "播完自动打开目录里的下一个视频",
+      risk: "trace",
+      default: false,
+      group: GROUP.AUTOPLAY
+    },
+    {
+      id: TOGGLE.SKIP_ATTACHMENT,
+      label: "跳过附件",
+      desc: "不打开附件文件（仍导航到该小节）。打开时会尝试在后台标签页里打开",
+      risk: "safe",
+      default: true,
+      group: GROUP.AUTOPLAY
+    },
+    {
+      id: TOGGLE.SKIP_TEXT,
+      label: "跳过文本",
+      desc: "文本不停留：导航过去后不等待，直接下一项",
+      risk: "safe",
+      default: false,
+      group: GROUP.AUTOPLAY
+    },
+    {
+      id: TOGGLE.SKIP_DISCUSSION,
+      label: "跳过讨论",
+      desc: "连播遇到讨论不提醒、不暂停，等一会儿直接继续",
+      risk: "safe",
+      default: true,
+      group: GROUP.AUTOPLAY
+    },
+    {
+      id: TOGGLE.SKIP_QUIZ,
+      label: "跳过测验",
+      desc: "不自动进入测验：连播走到测验就停下等你（AI 作答是另一个开关）",
+      risk: "trace",
+      default: false,
+      group: GROUP.AUTOPLAY
+    },
+    {
+      id: TOGGLE.AI_ANSWER,
+      label: "AI 答题",
+      desc: "连播遇到未完成的测验就整页跳到答题页，脚本拉题问模型并回填；提交前会弹确认框，人机验证码要你手动点一下",
+      risk: "trace",
+      default: false,
+      group: GROUP.AI
+    }
+  ];
+  function registerUoocSettings() {
+    registerValue({
+      siteId: SITE_ID,
+      id: VALUE.WAIT_BEFORE_MS,
+      label: "跳转后等待(ms)",
+      desc: "导航到某一项之后先等这么久，再开始处理它（给页面加载与视频缓冲留时间）",
+      default: "5000",
+      kind: "number",
+      group: GROUP.AUTOPLAY
+    });
+    registerValue({
+      siteId: SITE_ID,
+      id: VALUE.HOLD_AFTER_MS,
+      label: "播完后停留(ms)",
+      desc: "一项处理完、跳下一项之前停留的时间（0 = 立刻跳）",
+      default: "3000",
+      kind: "number",
+      group: GROUP.AUTOPLAY
+    });
+    registerValue({
+      siteId: SITE_ID,
+      id: VALUE.AI_BASE_URL,
+      label: "接口地址",
+      desc: "OpenAI Chat Completions 兼容的根地址，会自动补 /chat/completions。例：https://api.openai.com/v1",
+      default: "",
+      kind: "url",
+      group: GROUP.AI
+    });
+    registerValue({
+      siteId: SITE_ID,
+      id: VALUE.AI_API_KEY,
+      label: "API Key",
+      desc: "只存在你本机的油猴存储里。本地部署（ollama 等）不需要填",
+      default: "",
+      kind: "password",
+      group: GROUP.AI
+    });
+    registerValue({
+      siteId: SITE_ID,
+      id: VALUE.AI_MODEL,
+      label: "模型名",
+      desc: "填服务商文档里那个精确的模型 id，例：gpt-4o-mini",
+      default: "",
+      kind: "text",
+      group: GROUP.AI
+    });
+    registerValue({
+      siteId: SITE_ID,
+      id: VALUE.AI_TIMEOUT_MS,
+      label: "超时(ms)",
+      desc: "单次请求的最长等待时间；推理型模型要调大",
+      default: "60000",
+      kind: "number",
+      group: GROUP.AI
+    });
+    registerValue({
+      siteId: SITE_ID,
+      id: VALUE.AI_CONCURRENCY,
+      label: "并发数",
+      desc: "同时答几道题（1~8）。默认 1 最稳；调高容易撞到服务商的速率限制（表现为「这道题没答出来」）",
+      default: "1",
+      kind: "number",
+      group: GROUP.AI
+    });
+  }
+  function readMs(id, fallbackMs) {
+    const raw = getValue(SITE_ID, id);
+    const num3 = Number(raw);
+    if (!Number.isFinite(num3) || num3 < 0) {
+      log5.warn(`${id} 取值异常（${String(raw)}），按 ${fallbackMs}ms 处理`);
+      return fallbackMs;
+    }
+    return num3;
+  }
+  function waitBeforeMs() {
+    return readMs(VALUE.WAIT_BEFORE_MS, 5e3);
+  }
+  function holdAfterMs() {
+    return readMs(VALUE.HOLD_AFTER_MS, 3e3);
+  }
+  function readText(id) {
+    return getValue(SITE_ID, id).trim();
+  }
+  function aiConfig() {
+    const baseUrl = readText(VALUE.AI_BASE_URL);
+    const model = readText(VALUE.AI_MODEL);
+    if (baseUrl === "" || model === "") return null;
+    return {
+      baseUrl,
+      model,
+      apiKey: readText(VALUE.AI_API_KEY),
+      timeoutMs: readMs(VALUE.AI_TIMEOUT_MS, 6e4)
+    };
+  }
+  function aiConcurrency() {
+    const n = Math.floor(readMs(VALUE.AI_CONCURRENCY, 1));
+    return Math.min(8, Math.max(1, n));
+  }
+  function applyUoocSettings() {
+    waitBeforeMs();
+    holdAfterMs();
+    aiConcurrency();
+    log5.info(`AI 作答配置：${aiConfig() === null ? "未配置（AI 答题用不了）" : "已配置"}`);
+  }
+
+  // src/sites/uooc/ai/index.ts
+  var log6 = scoped("uooc/ai");
+  function lettersOf(answer) {
+    return answer.split(",").map((s) => s.trim().toUpperCase()).filter((s) => s !== "");
+  }
+  function tidFromLocation(href = location.href) {
+    try {
+      const u = new URL(href);
+      const tid = u.searchParams.get("tid");
+      if (tid !== null && tid !== "") return tid;
+      const m = /\/exam\/(\d{6,})/.exec(u.pathname);
+      return m?.[1] ?? null;
+    } catch {
+      return null;
+    }
+  }
+  function summarizeFailures(outcomes) {
+    const bad = outcomes.filter((o) => o.answer === "");
+    if (bad.length === 0) return "";
+    const reasons = /* @__PURE__ */ new Set();
+    for (const o of bad) {
+      if (o.error !== "") reasons.add(o.error);
+    }
+    const head = `有 ${bad.length} 道题没答出来`;
+    if (reasons.size === 0) return `${head}（模型没给出能识别的答案格式）`;
+    return `${head}：${[...reasons].join("；").slice(0, 200)}`;
+  }
+  async function runQuizAnswer(tid, host) {
+    const cfg = aiConfig();
+    if (cfg === null) {
+      const msg = "AI 作答未配置：请到【AI 作答】标签页填接口地址与模型名";
+      log6.error(msg);
+      host.toast(msg, "error");
+      host.activateTab("uooc:ai");
+      return null;
+    }
+    log6.info(`开始 AI 作答：tid=${tid}，接口=${chatUrl(cfg.baseUrl)}，模型=${cfg.model}`);
+    let paper;
+    try {
+      paper = await fetchPaper(tid);
+    } catch (err) {
+      const msg = `拉题失败：${err instanceof Error ? err.message : String(err)}`;
+      log6.error(msg);
+      host.toast(msg, "error");
+      return null;
+    }
+    const answerable = paper.questions.filter((q) => isAnswerable(q.kind));
+    const skipped = paper.questions.length - answerable.length;
+    log6.info(
+      `拿到 ${paper.questions.length} 道题（可自动作答 ${answerable.length} 道，跳过 ${skipped} 道填空/主观题）`
+    );
+    if (answerable.length === 0) {
+      host.toast("这份卷子没有可自动作答的题目", "warn");
+      return null;
+    }
+    const concurrency = aiConcurrency();
+    log6.info(`开始问模型（并发 ${concurrency}）…`);
+    const outcomes = await answerQuestions(answerable, {
+      cfg,
+      concurrency,
+      onDebug: (m) => log6.debug(m),
+      onWarn: (m) => log6.warn(m),
+      onProgress: (ev) => {
+        const { question, outcome } = ev;
+        log6.info(
+          `[${ev.index + 1}/${ev.total}] ${question.typeText} ${question.id} → ${outcome.answer === "" ? "未答出" : outcome.answer}（${outcome.requests} 次请求）`
+        );
+      }
+    });
+    const targets = [];
+    for (let i = 0; i < outcomes.length; i += 1) {
+      const o = outcomes[i];
+      const q = answerable[i];
+      if (o === void 0 || q === void 0 || o.answer === "") continue;
+      targets.push({ qid: q.id, kind: q.kind, letters: lettersOf(o.answer) });
+    }
+    const report = fillAnswers(targets);
+    log6.info(
+      `回填结果：成功 ${report.filled.length} 题，页面没找到 ${report.missing.length} 题，点不动 ${report.failed.length} 题`
+    );
+    const failure = summarizeFailures(outcomes);
+    const bodyLines = [
+      `卷面 ${paper.questions.length} 道题：模型作答 ${targets.length} 道，已填入页面 ${report.filled.length} 道。`
+    ];
+    if (skipped > 0) bodyLines.push(`跳过 ${skipped} 道（填空/主观题暂不支持自动作答）。`);
+    if (report.missing.length > 0) bodyLines.push(`有 ${report.missing.length} 道在页面上没找到对应选项，未填入。`);
+    if (failure !== "") bodyLines.push(failure);
+    bodyLines.push("");
+    bodyLines.push("点【开始提交】后脚本会点站点的提交按钮，接着会弹人机验证码，需要你手动点一下。");
+    const confirmed = await host.confirm({
+      title: "答案已填好，确认提交？",
+      body: bodyLines.join("\n"),
+      danger: true,
+      confirmText: "开始提交（会弹验证码）",
+      cancelText: "再等等"
+    });
+    if (!confirmed) {
+      log6.info("用户选择「再等等」，不提交。答案已填在页面上，你可以自己改");
+      return {
+        total: paper.questions.length,
+        answerable: answerable.length,
+        answered: targets.length,
+        filled: report.filled.length,
+        submitted: false
+      };
+    }
+    const btn = findSubmitButton();
+    if (btn === null) {
+      const msg = "页面上找不到【提交】按钮，请自己点一下（答案已经填好了）";
+      log6.error(msg);
+      host.toast(msg, "warn");
+    } else {
+      log6.info("已合成点击站点【提交】，接下来请手动完成人机验证码");
+      host.toast("已点提交，请完成人机验证码", "info");
+      btn.click();
+    }
+    return {
+      total: paper.questions.length,
+      answerable: answerable.length,
+      answered: targets.length,
+      filled: report.filled.length,
+      submitted: btn !== null
+    };
+  }
+  var SUBMIT_WAIT_MS = 5 * 60 * 1e3;
+  function waitForSubmitted(timeoutMs = SUBMIT_WAIT_MS, intervalMs2 = 1e3) {
+    return new Promise((resolve2) => {
+      const deadline = Date.now() + timeoutMs;
+      const tick = () => {
+        if (!location.pathname.startsWith("/exam/")) {
+          resolve2("left");
+          return;
+        }
+        if (findSubmitButton() === null && isAnswerBoxVisible()) {
+          resolve2("done");
+          return;
+        }
+        if (Date.now() >= deadline) {
+          resolve2("timeout");
+          return;
+        }
+        window.setTimeout(tick, intervalMs2);
+      };
+      tick();
+    });
+  }
+  async function autoAnswerExamPage(host, tidArg) {
+    const tid = tidArg ?? tidFromLocation();
+    if (tid === null) {
+      log6.warn("答题页地址里找不到 tid，不做自动作答");
+      return null;
+    }
+    const handoff = consumeHandoff(tid);
+    log6.info(
+      `答题页自动作答：tid=${tid}` + (handoff === null ? "（没有交接条，答完留在本页）" : `，答完回课程页 ${handoff.courseUrl}`)
+    );
+    if (!await waitForOptionInputs()) {
+      const msg = "答题页等了 20 秒还没渲染出选项，放弃自动作答（题型结构可能变了）";
+      log6.error(msg);
+      host.toast(msg, "warn");
+      return { tid, quiz: null, returned: false };
+    }
+    if (findSubmitButton() === null) {
+      const msg = "页面上没有【提交】按钮：这份卷子可能已经交过了，不做自动作答";
+      log6.warn(msg);
+      host.toast(msg, "warn");
+      return { tid, quiz: null, returned: false };
+    }
+    let quiz;
+    try {
+      quiz = await runQuizAnswer(tid, host);
+    } catch (err) {
+      const msg = `自动作答意外出错：${err instanceof Error ? err.message : String(err)}`;
+      log6.error(msg);
+      host.toast(msg, "error");
+      return { tid, quiz: null, returned: false };
+    }
+    if (quiz === null || !quiz.submitted) {
+      return { tid, quiz, returned: false };
+    }
+    if (handoff === null) return { tid, quiz, returned: false };
+    const signal = await waitForSubmitted();
+    if (signal !== "done") {
+      log6.warn(
+        signal === "left" ? "站点自己已经把页面跳走了，脚本不再插手" : `等了 ${SUBMIT_WAIT_MS / 6e4} 分钟没看出「已交卷」，不自动跳回课程页；交完卷自己回课程页即可`
+      );
+      return { tid, quiz, returned: false };
+    }
+    log6.info(`已交卷，把当前页换回课程页继续连播：${handoff.courseUrl}`);
+    host.toast("已交卷，正在回到课程页继续连播", "success");
+    location.href = handoff.courseUrl;
+    return { tid, quiz, returned: true };
+  }
+
   // src/common/utils/page.ts
   function pageWindow() {
     const g = globalThis;
@@ -2093,6 +3066,9 @@ ${options.desc ?? ""}
     if (c.length === 1) return `#/${cid}/${c[0]}`;
     return `#/${cid}`;
   }
+  function examUrl(cid, taskId) {
+    return `/exam/paper?cid=${encodeURIComponent(cid)}&tid=${taskId}`;
+  }
   function currentChainFromHash(hash) {
     const parts = hash.replace(/^#\/?/, "").split("/").filter((s) => s.length > 0);
     if (parts.length < 2) return null;
@@ -2126,7 +3102,7 @@ ${options.desc ?? ""}
   }
 
   // src/sites/uooc/intercept.ts
-  var log5 = scoped("uooc/intercept");
+  var log7 = scoped("uooc/intercept");
   function matchLearnApi(rawUrl) {
     const path = rawUrl.split("#")[0] ?? "";
     if (path.includes("/home/learn/getCatalogList")) {
@@ -2204,14 +3180,14 @@ ${options.desc ?? ""}
     try {
       body = JSON.parse(text);
     } catch {
-      log5.warn("截获到的响应不是 JSON，已忽略", rawUrl);
+      log7.warn("截获到的响应不是 JSON，已忽略", rawUrl);
       return;
     }
     if (api.kind === "catalog") {
-      log5.debug("截获 getCatalogList", api.cid);
+      log7.debug("截获 getCatalogList", api.cid);
       primeCatalog(api.cid, body);
     } else {
-      log5.debug("截获 getUnitLearn", api.catalogId);
+      log7.debug("截获 getUnitLearn", api.catalogId);
       primeUnitLearn(api.catalogId, body);
     }
   }
@@ -2244,7 +3220,7 @@ ${options.desc ?? ""}
       return origSend.apply(this, args);
     };
     Object.defineProperty(proto, XHR_MARK, { value: true, enumerable: false, configurable: true });
-    log5.debug("XMLHttpRequest 只读嗅探已装");
+    log7.debug("XMLHttpRequest 只读嗅探已装");
     return true;
   }
   var FETCH_MARK = "__szuUoocFetchInstalled";
@@ -2272,7 +3248,7 @@ ${options.desc ?? ""}
     };
     realm["fetch"] = patched;
     Object.defineProperty(realm, FETCH_MARK, { value: true, enumerable: false, configurable: true });
-    log5.debug("fetch 只读嗅探已装");
+    log7.debug("fetch 只读嗅探已装");
     return true;
   }
   function installUoocIntercept(realm = pageOrSelf()) {
@@ -2281,159 +3257,8 @@ ${options.desc ?? ""}
     return a || b;
   }
 
-  // src/sites/uooc/settings.ts
-  var log6 = scoped("uooc/settings");
-  var SITE_ID = "uooc";
-  var GROUP = {
-    /** 播放器行为（U1/U2/U4） */
-    VIDEO: "视频",
-    /** 连播行为（U3） */
-    AUTOPLAY: "连播",
-    /** AI 作答（U6–U9） */
-    AI: "AI 作答"
-  };
-  var TOGGLE = {
-    /** 🟢 二倍速播放（U1） */
-    RATE_2X: "rate-2x",
-    /** 🟢 静音播放（U2） */
-    MUTE: "mute",
-    /** 🟢 防失焦暂停（U4） */
-    KEEP_PLAYING: "keep-playing",
-    /** 🟠 自动连播（U3） */
-    AUTO_NEXT: "auto-next",
-    /** 🟢 附件只路过，不打开文件（仍导航到该小节）—— 用户 m01816 需求 2 */
-    SKIP_ATTACHMENT: "skip-attachment",
-    /** 🟢 文本不停留：导航过去后不等待，直接下一项 */
-    SKIP_TEXT: "skip-text",
-    /** 🟢 讨论不停留、不暂停（需求细则 A.3「跳过讨论」，默认开） */
-    SKIP_DISCUSSION: "skip-discussion",
-    /** 🟠 测验不自动进入：连播走到测验就停下等用户 */
-    SKIP_QUIZ: "skip-quiz",
-    /** 🟠 AI 答题（U6–U9）—— 未实现，先占位 */
-    AI_ANSWER: "ai-answer"
-  };
-  var VALUE = {
-    /** 跳到下一项**之后**等多久再处理它（ms） */
-    WAIT_BEFORE_MS: "wait-before-ms",
-    /** 一项处理完、跳下一项**之前**停留多久（ms） */
-    HOLD_AFTER_MS: "hold-after-ms"
-  };
-  var UOOC_TOGGLES = [
-    {
-      id: TOGGLE.RATE_2X,
-      label: "二倍速",
-      desc: "锁在 2 倍速，在播放器里改回去会被扳回",
-      risk: "safe",
-      default: true,
-      group: GROUP.VIDEO
-    },
-    {
-      id: TOGGLE.MUTE,
-      label: "静音",
-      desc: "锁在静音，取消会被扳回",
-      risk: "safe",
-      default: true,
-      group: GROUP.VIDEO
-    },
-    {
-      id: TOGGLE.KEEP_PLAYING,
-      label: "防暂停",
-      desc: "暂停会被立刻恢复（含你自己按的暂停）",
-      risk: "safe",
-      default: true,
-      group: GROUP.VIDEO
-    },
-    {
-      id: TOGGLE.AUTO_NEXT,
-      label: "自动连播",
-      desc: "播完自动打开目录里的下一个视频",
-      risk: "trace",
-      default: false,
-      group: GROUP.AUTOPLAY
-    },
-    {
-      id: TOGGLE.SKIP_ATTACHMENT,
-      label: "跳过附件",
-      desc: "不打开附件文件（仍导航到该小节）。打开时会尝试在后台标签页里打开",
-      risk: "safe",
-      default: true,
-      group: GROUP.AUTOPLAY
-    },
-    {
-      id: TOGGLE.SKIP_TEXT,
-      label: "跳过文本",
-      desc: "文本不停留：导航过去后不等待，直接下一项",
-      risk: "safe",
-      default: false,
-      group: GROUP.AUTOPLAY
-    },
-    {
-      id: TOGGLE.SKIP_DISCUSSION,
-      label: "跳过讨论",
-      desc: "连播遇到讨论不提醒、不暂停，等一会儿直接继续",
-      risk: "safe",
-      default: true,
-      group: GROUP.AUTOPLAY
-    },
-    {
-      id: TOGGLE.SKIP_QUIZ,
-      label: "跳过测验",
-      desc: "不自动进入测验：连播走到测验就停下等你（AI 作答是另一个开关）",
-      risk: "trace",
-      default: false,
-      group: GROUP.AUTOPLAY
-    },
-    {
-      id: TOGGLE.AI_ANSWER,
-      label: "AI 答题",
-      desc: "测验未完成时由脚本作答（尚未实现，开了也没用）",
-      risk: "trace",
-      default: false,
-      group: GROUP.AI
-    }
-  ];
-  function registerUoocSettings() {
-    registerValue({
-      siteId: SITE_ID,
-      id: VALUE.WAIT_BEFORE_MS,
-      label: "跳转后等待(ms)",
-      desc: "导航到某一项之后先等这么久，再开始处理它（给页面加载与视频缓冲留时间）",
-      default: "5000",
-      kind: "number",
-      group: GROUP.AUTOPLAY
-    });
-    registerValue({
-      siteId: SITE_ID,
-      id: VALUE.HOLD_AFTER_MS,
-      label: "播完后停留(ms)",
-      desc: "一项处理完、跳下一项之前停留的时间（0 = 立刻跳）",
-      default: "3000",
-      kind: "number",
-      group: GROUP.AUTOPLAY
-    });
-  }
-  function readMs(id, fallbackMs) {
-    const raw = getValue(SITE_ID, id);
-    const num3 = Number(raw);
-    if (!Number.isFinite(num3) || num3 < 0) {
-      log6.warn(`${id} 取值异常（${String(raw)}），按 ${fallbackMs}ms 处理`);
-      return fallbackMs;
-    }
-    return num3;
-  }
-  function waitBeforeMs() {
-    return readMs(VALUE.WAIT_BEFORE_MS, 5e3);
-  }
-  function holdAfterMs() {
-    return readMs(VALUE.HOLD_AFTER_MS, 3e3);
-  }
-  function applyUoocSettings() {
-    waitBeforeMs();
-    holdAfterMs();
-  }
-
   // src/sites/uooc/autoplay.ts
-  var log7 = scoped("uooc/autoplay");
+  var log8 = scoped("uooc/autoplay");
   var FALLBACK_AFTER_LOAD_MS = 2e3;
   var CATALOG_HARD_TIMEOUT_MS = 3e4;
   var UNIT_INTERCEPT_TIMEOUT_MS = 3e3;
@@ -2463,7 +3288,7 @@ ${options.desc ?? ""}
       a.remove();
       return true;
     } catch (err) {
-      log7.warn(`合成 Ctrl+左键失败：${String(err)}`);
+      log8.warn(`合成 Ctrl+左键失败：${String(err)}`);
       return false;
     }
   }
@@ -2481,14 +3306,14 @@ ${options.desc ?? ""}
       });
       return true;
     } catch (err) {
-      log7.warn(`GM_openInTab 不可用：${String(err)}`);
+      log8.warn(`GM_openInTab 不可用：${String(err)}`);
       return false;
     }
   }
   function scheduleGmFallback(url) {
     window.setTimeout(() => {
       if (openViaGm(url)) {
-        log7.debug("已用 GM_openInTab 兜底（看到两个标签页 = Ctrl+左键生效了）");
+        log8.debug("已用 GM_openInTab 兜底（看到两个标签页 = Ctrl+左键生效了）");
       }
     }, CTRL_CLICK_FALLBACK_MS);
   }
@@ -2521,7 +3346,7 @@ ${options.desc ?? ""}
       if (primed !== null) return parseUnitSources(primed);
       const captured = await waitUnitLearn(key, UNIT_INTERCEPT_TIMEOUT_MS);
       if (captured !== null) return parseUnitSources(captured);
-      log7.debug(`未截获 getUnitLearn（${key}），主动补发`);
+      log8.debug(`未截获 getUnitLearn（${key}），主动补发`);
       try {
         const res = await request({
           url: unitLearnUrl(cid, leaf),
@@ -2532,9 +3357,9 @@ ${options.desc ?? ""}
           primeUnitLearn(key, res.json);
           return parseUnitSources(res.json);
         }
-        log7.warn(`补发 getUnitLearn 失败（${key}）：HTTP ${res.status}`);
+        log8.warn(`补发 getUnitLearn 失败（${key}）：HTTP ${res.status}`);
       } catch (err) {
-        log7.warn(`补发 getUnitLearn 异常（${key}）：${String(err)}`);
+        log8.warn(`补发 getUnitLearn 异常（${key}）：${String(err)}`);
       }
       return [];
     }
@@ -2561,7 +3386,7 @@ ${options.desc ?? ""}
         const arm = () => {
           armTimer = window.setTimeout(() => {
             void (async () => {
-              log7.debug(`页面已 load 且站点仍未发 getCatalogList（${cid}），主动补发`);
+              log8.debug(`页面已 load 且站点仍未发 getCatalogList（${cid}），主动补发`);
               try {
                 const res = await request({
                   url: catalogListUrl(cid),
@@ -2573,9 +3398,9 @@ ${options.desc ?? ""}
                   done(res.json);
                   return;
                 }
-                log7.warn(`补发 getCatalogList 失败：HTTP ${res.status}`);
+                log8.warn(`补发 getCatalogList 失败：HTTP ${res.status}`);
               } catch (err) {
-                log7.warn(`补发 getCatalogList 异常：${String(err)}`);
+                log8.warn(`补发 getCatalogList 异常：${String(err)}`);
               }
             })();
           }, FALLBACK_AFTER_LOAD_MS);
@@ -2601,14 +3426,14 @@ ${options.desc ?? ""}
     function finish2(reason) {
       phase = "idle";
       clearTimers();
-      log7.info(`连播结束：${reason}`);
+      log8.info(`连播结束：${reason}`);
       host.toast(`连播结束：${reason}`, "info");
     }
     function pause(reason) {
       paused = true;
       phase = "idle";
       clearTimers();
-      log7.info(`连播暂停：${reason}`);
+      log8.info(`连播暂停：${reason}`);
       host.toast(`连播已暂停：${reason}（${AUTOPLAY_HANDLE_KEY}.resume() 可恢复）`, "warn");
     }
     function next() {
@@ -2630,7 +3455,7 @@ ${options.desc ?? ""}
         return;
       }
       phase = "delay";
-      log7.debug(`播完，停留 ${ms}ms 后继续`);
+      log8.debug(`播完，停留 ${ms}ms 后继续`);
       delayTimer = window.setTimeout(() => {
         delayTimer = null;
         phase = "idle";
@@ -2640,7 +3465,7 @@ ${options.desc ?? ""}
     function scheduleDelay() {
       const ms = waitBeforeMs();
       phase = "delay";
-      log7.debug(`等待 ${ms}ms 后继续`);
+      log8.debug(`等待 ${ms}ms 后继续`);
       delayTimer = window.setTimeout(() => {
         delayTimer = null;
         phase = "idle";
@@ -2649,7 +3474,7 @@ ${options.desc ?? ""}
     }
     function navigateTo(hash) {
       if (location.hash === hash) return;
-      log7.debug(`跳转 ${hash}`);
+      log8.debug(`跳转 ${hash}`);
       location.hash = hash;
     }
     function announce(action, src) {
@@ -2659,16 +3484,24 @@ ${options.desc ?? ""}
       const kind = classifySource(src.type);
       if (kind === "quiz") {
         if (src.finished) {
-          log7.debug(`测验已完成，跳过（${src.title}）`);
+          log8.debug(`测验已完成，跳过（${src.title}）`);
           scheduleDelay();
           return;
         }
         if (isEnabled(SITE_ID, TOGGLE.AI_ANSWER)) {
-          pause(`遇到未完成的测验「${src.title}」，但 AI 答题还没实现`);
+          if (src.taskId === null) {
+            log8.warn(`测验没有 task_id，进不去答题页：${src.title}`);
+            pause(`测验「${src.title}」没有 task_id，进不去答题页，请手动完成`);
+            return;
+          }
+          saveHandoff(String(src.taskId));
+          announce("打开", src);
+          log8.info(`AI 作答：整页前往答题页 tid=${src.taskId}（${src.title}）`);
+          location.href = examUrl(cid, src.taskId);
           return;
         }
         if (isEnabled(SITE_ID, TOGGLE.SKIP_QUIZ)) {
-          log7.info(`跳过未完成的测验：${src.title}`);
+          log8.info(`跳过未完成的测验：${src.title}`);
           scheduleDelay();
           return;
         }
@@ -2684,13 +3517,13 @@ ${options.desc ?? ""}
         navigateTo(sourceHash(cid, leaf, src.id));
         phase = "video";
         endedArmed = true;
-        log7.info(`开始播放：${leaf.titles.join(" / ")} / ${src.title}`);
+        log8.info(`开始播放：${leaf.titles.join(" / ")} / ${src.title}`);
         checkTimer = window.setTimeout(() => {
           checkTimer = null;
           if (stopped || paused || phase !== "video") return;
           const v = document.querySelector("video");
           if (v !== null && v.ended) {
-            log7.debug("视频已在片尾，直接推进");
+            log8.debug("视频已在片尾，直接推进");
             phase = "idle";
             scheduleHold();
           }
@@ -2702,7 +3535,7 @@ ${options.desc ?? ""}
         announce(skipOpen ? "跳转" : "打开", src);
         navigateTo(sourceHash(cid, leaf, src.id));
         if (skipOpen) {
-          log7.info(`附件只路过，不打开文件：${src.title}`);
+          log8.info(`附件只路过，不打开文件：${src.title}`);
           scheduleDelay();
           return;
         }
@@ -2712,25 +3545,25 @@ ${options.desc ?? ""}
         if (uri !== "") {
           const how = openInBackgroundTab(uri);
           if (how === "ctrl") {
-            log7.info(`打开附件（合成 Ctrl+左键，后台标签页）：${name}`);
-            log7.debug("1.2 秒后会用 GM_openInTab 兜一次；看到两个标签页就说明 Ctrl+左键生效了");
+            log8.info(`打开附件（合成 Ctrl+左键，后台标签页）：${name}`);
+            log8.debug("1.2 秒后会用 GM_openInTab 兜一次；看到两个标签页就说明 Ctrl+左键生效了");
           } else if (how === "gm") {
-            log7.info(`打开附件（GM_openInTab 后台标签页）：${name}`);
+            log8.info(`打开附件（GM_openInTab 后台标签页）：${name}`);
           } else {
-            log7.warn(`附件打开失败：${name}`);
+            log8.warn(`附件打开失败：${name}`);
             host.toast(`附件「${name}」打开失败，请手动查看`, "warn");
           }
         } else {
-          log7.warn(`附件没有 document[].uri（${src.title}）`);
+          log8.warn(`附件没有 document[].uri（${src.title}）`);
         }
         scheduleDelay();
         return;
       }
-      if (kind === "unknown") log7.debug(`未知资源类型 ${src.type}，按文本处理（${src.title}）`);
+      if (kind === "unknown") log8.debug(`未知资源类型 ${src.type}，按文本处理（${src.title}）`);
       if (kind === "text" && isEnabled(SITE_ID, TOGGLE.SKIP_TEXT)) {
         announce("跳转", src);
         navigateTo(sourceHash(cid, leaf, src.id));
-        log7.debug(`文本不停留：${src.title}`);
+        log8.debug(`文本不停留：${src.title}`);
         next();
         return;
       }
@@ -2755,7 +3588,7 @@ ${options.desc ?? ""}
           write(cursorKey(), leaf.nodeId);
         }
         if (subIndex >= currentSources.length) {
-          if (currentSources.length === 0) log7.debug(`跳过无资源的叶子 ${leaf.nodeId} ${leaf.title}`);
+          if (currentSources.length === 0) log8.debug(`跳过无资源的叶子 ${leaf.nodeId} ${leaf.title}`);
           cursor++;
           currentLeaf = null;
           currentSources = [];
@@ -2779,30 +3612,30 @@ ${options.desc ?? ""}
       if (el2 === null || el2.tagName !== "VIDEO") return;
       if (stopped || paused) return;
       if (!endedArmed) {
-        log7.debug("忽略未布防的 ended（当前项不是视频）");
+        log8.debug("忽略未布防的 ended（当前项不是视频）");
         return;
       }
       if (!el2.isConnected) {
-        log7.debug("忽略已脱离文档的 ended（播放器被换掉了）");
+        log8.debug("忽略已脱离文档的 ended（播放器被换掉了）");
         return;
       }
       const now = Date.now();
       if (now - lastAdvanceAt < ENDED_DEDUPE_MS) {
-        log7.debug("忽略重复的 ended");
+        log8.debug("忽略重复的 ended");
         return;
       }
       endedArmed = false;
       lastAdvanceAt = now;
       clearTimers();
       phase = "idle";
-      log7.info("视频播放完毕，准备进入下一项");
+      log8.info("视频播放完毕，准备进入下一项");
       scheduleHold();
     };
     function boot2() {
       const hashAtBoot = location.hash;
       const found = courseIdFromLocation(location.pathname, hashAtBoot);
       if (found === null) {
-        log7.warn(`拿不到课程 id，连播不启动（pathname=${location.pathname}，hash=${hashAtBoot}）`);
+        log8.warn(`拿不到课程 id，连播不启动（pathname=${location.pathname}，hash=${hashAtBoot}）`);
         return;
       }
       cid = found;
@@ -2816,7 +3649,7 @@ ${options.desc ?? ""}
         leaves = list;
         const { index, by } = resolveCursor(hashAtBoot);
         cursor = index;
-        log7.info(
+        log8.info(
           `连播已启动：cid=${cid}，叶子 ${leaves.length} 个（未完成 ${countUnfinished()} 个），从第 ${cursor + 1} 个开始（装载时 hash=${show(hashAtBoot)}；对齐=${by}；目录到货时 hash=${show(location.hash)}）`
         );
         host.toast("自动连播已启动", "info");
@@ -2897,7 +3730,7 @@ ${options.desc ?? ""}
       resume() {
         if (stopped) return;
         paused = false;
-        log7.info("连播已恢复");
+        log8.info("连播已恢复");
         host.toast("连播已恢复", "info");
         void step();
       },
@@ -2919,18 +3752,79 @@ ${options.desc ?? ""}
     if (isEnabled(SITE_ID, TOGGLE.AUTO_NEXT)) {
       boot2();
     } else {
-      log7.debug("自动连播开关未开，只挂手柄不启动");
+      log8.debug("自动连播开关未开，只挂手柄不启动");
     }
     return uninstall;
   }
 
   // src/sites/uooc/tabs/ai.ts
+  var log9 = scoped("uooc/ai-tab");
   var UOOC_AI_TAB = {
     id: `${SITE_ID}:ai`,
     title: "AI 作答",
     order: 220,
     mount(root, ctx) {
       root.appendChild(renderSiteSettings(SITE_ID, null, ctx, { onlyGroups: [GROUP.AI] }));
+      const status = el("div", { class: "sztb-field-desc", text: "" });
+      const testBtn = el("button", {
+        class: "sztb-btn",
+        text: "测试连接",
+        attrs: { type: "button" },
+        on: {
+          click: () => {
+            void (async () => {
+              const cfg = aiConfig();
+              if (cfg === null) {
+                status.textContent = "请先填「接口地址」与「模型名」";
+                ctx.host.toast("配置不完整", "warn");
+                return;
+              }
+              testBtn.disabled = true;
+              status.textContent = "正在测试…";
+              const r = await testConnection(cfg);
+              status.textContent = r.detail;
+              log9.info(`测试连接：${r.ok ? "OK" : "失败"} — ${r.detail}`);
+              ctx.host.toast(r.ok ? "连接正常" : "连接失败，详见下方说明", r.ok ? "success" : "error");
+              testBtn.disabled = false;
+            })();
+          }
+        }
+      });
+      const runBtn = el("button", {
+        class: "sztb-btn",
+        text: "现在开始作答（当前试卷）",
+        attrs: { type: "button", "data-variant": "primary" },
+        on: {
+          click: () => {
+            void (async () => {
+              const tid = tidFromLocation();
+              if (tid === null) {
+                status.textContent = "当前页面不是一份试卷（地址里找不到 tid）";
+                ctx.host.toast("请先打开一份试卷", "warn");
+                return;
+              }
+              runBtn.disabled = true;
+              status.textContent = "正在作答…（进度看【日志】标签页）";
+              try {
+                const r = await runQuizAnswer(tid, ctx.host);
+                status.textContent = r === null ? "作答未完成，详见日志" : `已填入 ${r.filled} 题${r.submitted ? "，已点提交" : "（未提交）"}`;
+              } finally {
+                runBtn.disabled = false;
+              }
+            })();
+          }
+        }
+      });
+      root.appendChild(
+        el(
+          "div",
+          { class: "sztb-field" },
+          el("div", { class: "sztb-group-title", text: "操作" }),
+          el("div", { class: "sztb-field-desc", text: "答完不会自动交卷：会先弹确认框，你点了才会提交。" }),
+          el("div", { class: "sztb-modal-foot" }, testBtn, runBtn),
+          status
+        )
+      );
     }
   };
 
@@ -2955,7 +3849,7 @@ ${options.desc ?? ""}
   };
 
   // src/sites/uooc/video.ts
-  var log8 = scoped("uooc/video");
+  var log10 = scoped("uooc/video");
   var VIDEO_ID = "player_html5_api";
   var TARGET_RATE = 2;
   var RESCAN_DEBOUNCE_MS = 200;
@@ -2979,7 +3873,7 @@ ${options.desc ?? ""}
       if (stamps.length >= FIGHT_MAX) {
         mutedUntil = now + FIGHT_COOLDOWN_MS;
         stamps.length = 0;
-        log8.warn(`${label}在 ${FIGHT_WINDOW_MS / 1e3} 秒内被反复改回，暂停纠正 ${FIGHT_COOLDOWN_MS / 1e3} 秒`);
+        log10.warn(`${label}在 ${FIGHT_WINDOW_MS / 1e3} 秒内被反复改回，暂停纠正 ${FIGHT_COOLDOWN_MS / 1e3} 秒`);
         return false;
       }
       stamps.push(now);
@@ -3012,7 +3906,7 @@ ${options.desc ?? ""}
       const found = asVideo(doc.getElementById(VIDEO_ID)) ?? asVideo(doc.querySelector("video"));
       if (found !== null) {
         cachedFrameVideo = found;
-        log8.debug("播放器在同源 iframe 内，已切换查找目标");
+        log10.debug("播放器在同源 iframe 内，已切换查找目标");
         return found;
       }
     }
@@ -3047,7 +3941,7 @@ ${options.desc ?? ""}
     applied.set(v, state);
     if (!announced.has(v)) {
       announced.add(v);
-      log8.info(
+      log10.info(
         `播放器助手已就绪：二倍速=${wantRate ? "开" : "关"}，静音=${wantMute ? "开" : "关"}，防失焦=${isEnabled(SITE_ID, TOGGLE.KEEP_PLAYING) ? "开" : "关"}（当前速率 ${v.playbackRate}x）`
       );
     }
@@ -3061,7 +3955,7 @@ ${options.desc ?? ""}
     const p = v.play();
     if (p !== void 0 && typeof p.catch === "function") {
       p.catch((err) => {
-        log8.debug(`抢播被拒绝：${err instanceof Error ? err.message : String(err)}`);
+        log10.debug(`抢播被拒绝：${err instanceof Error ? err.message : String(err)}`);
       });
     }
   }
@@ -3123,7 +4017,7 @@ ${options.desc ?? ""}
     document.addEventListener("volumechange", onMediaEvent, true);
     window.addEventListener("hashchange", schedule2);
     window.addEventListener("popstate", schedule2);
-    log8.debug("视频助手已挂载（二倍速 / 静音 / 防失焦）");
+    log10.debug("视频助手已挂载（二倍速 / 静音 / 防失焦）");
     return () => {
       stopped = true;
       if (timer3 !== null) {
@@ -3140,10 +4034,11 @@ ${options.desc ?? ""}
   }
 
   // src/sites/uooc/index.ts
-  var log9 = scoped("site/uooc");
+  var log11 = scoped("site/uooc");
   var HOSTS = ["uooc.net.cn", "*.uooc.net.cn"];
   var PAGES = ["/home/learn/index*", "/home/learn/new/*", "/exam/*"];
   var LEARN_PATH_PREFIX = "/home/learn/";
+  var EXAM_PATH_PREFIX = "/exam/";
   var uoocAdapter = {
     id: SITE_ID,
     name: "UOOC 优课联盟",
@@ -3170,22 +4065,30 @@ ${options.desc ?? ""}
     init(ctx) {
       applyUoocSettings();
       const onLearnPage = location.pathname.startsWith(LEARN_PATH_PREFIX);
+      const onExamPage = location.pathname.startsWith(EXAM_PATH_PREFIX);
       let autoplayMounted = false;
       if (onLearnPage) {
         startVideoAssist();
         startAutoplay({ toast: (message, kind) => ctx.panel.toast(message, kind) });
         autoplayMounted = true;
+      } else if (onExamPage) {
+        if (isEnabled(SITE_ID, TOGGLE.AI_ANSWER)) {
+          log11.info("答题页：AI 作答开着，交给 ai/index.ts 自动接管");
+          void autoAnswerExamPage(ctx.panel);
+        } else {
+          log11.debug("答题页，但「AI 作答」开关没开，不自动作答");
+        }
       } else {
-        log9.debug(`非学习页（${location.pathname}），本次不启动视频助手与连播`);
+        log11.debug(`非学习页（${location.pathname}），本次不启动视频助手与连播`);
       }
-      log9.info(
+      log11.info(
         `UOOC 适配器已启用：isFeaturePage=${String(ctx.isFeaturePage)}，路径=${location.pathname}，视频助手=${onLearnPage ? "已挂载" : "未挂载"}，连播=${autoplayMounted ? "已挂载" : "未挂载"}`
       );
     }
   };
 
   // src/sites/bkxk/settings.ts
-  var log10 = scoped("bkxk/settings");
+  var log12 = scoped("bkxk/settings");
   var SITE_ID2 = "bkxk";
   var TOGGLE2 = {
     /** 🔴 写接口总开关（抢课）。旧仓库红线 R1：默认 false，不得改 */
@@ -3330,13 +4233,13 @@ ${options.desc ?? ""}
     const raw = getValue(SITE_ID2, VALUE2.INTERVAL_MS);
     const ms = clampLimit("intervalMs", raw);
     if (isBelowRecommended("intervalMs", ms)) {
-      log10.warn(`请求间隔被设为 ${ms}ms，低于建议下限 ${LIMITS.intervalMs.recommended}ms`);
+      log12.warn(`请求间隔被设为 ${ms}ms，低于建议下限 ${LIMITS.intervalMs.recommended}ms`);
     }
     setIntervalMs(ms);
   }
 
   // src/sites/bkxk/session.ts
-  var log11 = scoped("bkxk/session");
+  var log13 = scoped("bkxk/session");
   var DEFAULT_CAMPUS = "01";
   var EMPTY_SESSION = {
     studentCode: "",
@@ -3395,7 +4298,7 @@ ${options.desc ?? ""}
   function readSession() {
     const ss = pageSessionStorage();
     if (ss === null) {
-      log11.warn("读不到 sessionStorage，按未登录处理");
+      log13.warn("读不到 sessionStorage，按未登录处理");
       return EMPTY_SESSION;
     }
     try {
@@ -3405,7 +4308,7 @@ ${options.desc ?? ""}
         token: ss.getItem("token")
       });
     } catch (err) {
-      log11.warn("读取会话失败，按未登录处理", err);
+      log13.warn("读取会话失败，按未登录处理", err);
       return EMPTY_SESSION;
     }
   }
@@ -3508,7 +4411,7 @@ ${options.desc ?? ""}
   }
 
   // src/sites/bkxk/legacy.ts
-  var log12 = scoped("bkxk/legacy");
+  var log14 = scoped("bkxk/legacy");
   var LEGACY_SETTINGS_KEY = "szubkxk.settings.v2";
   var LEGACY_STORE_PREFIX = "szubkxk.v2.";
   var LEGACY_DATA_KEY = {
@@ -3649,12 +4552,12 @@ ${options.desc ?? ""}
     const plan = planCustomCarry(site, common);
     write(CARRY_FLAG_KEY, true);
     if (plan.empty) {
-      for (const line of plan.notices) log12.warn(`搬运 · ${line}`);
+      for (const line of plan.notices) log14.warn(`搬运 · ${line}`);
       return [];
     }
     for (const e of plan.entries) write(e.key, e.value);
-    log12.info(`自定义课程搬运完成：${plan.report.join("；")}`);
-    for (const line of plan.notices) log12.warn(`搬运 · ${line}`);
+    log14.info(`自定义课程搬运完成：${plan.report.join("；")}`);
+    for (const line of plan.notices) log14.warn(`搬运 · ${line}`);
     return [...plan.report, ...plan.notices];
   }
   function readLegacySnapshot() {
@@ -3694,7 +4597,7 @@ ${options.desc ?? ""}
     const lines = [];
     if (plan.empty && plan.notices.length === 0) {
       write(MIGRATION_FLAG_KEY, true);
-      log12.info("未发现旧版数据，跳过迁移");
+      log14.info("未发现旧版数据，跳过迁移");
       return [];
     }
     for (const e of plan.entries) {
@@ -3702,9 +4605,9 @@ ${options.desc ?? ""}
     }
     write(MIGRATION_FLAG_KEY, true);
     lines.push(...plan.report, ...plan.notices);
-    log12.info(`旧数据迁移完成：写入 ${plan.entries.length} 项`);
-    for (const line of plan.report) log12.info(`迁移 · ${line}`);
-    for (const line of plan.notices) log12.warn(`迁移 · ${line}`);
+    log14.info(`旧数据迁移完成：写入 ${plan.entries.length} 项`);
+    for (const line of plan.report) log14.info(`迁移 · ${line}`);
+    for (const line of plan.notices) log14.warn(`迁移 · ${line}`);
     return lines;
   }
 
@@ -3889,11 +4792,11 @@ ${options.desc ?? ""}
   }
 
   // src/sites/bkxk/hijack.ts
-  var log13 = scoped("bkxk/hijack");
+  var log15 = scoped("bkxk/hijack");
   var CUSTOM_ID_PREFIX = "szu-custom-";
   var LIST_RE = /elective\/(?:programCourse|unProgramCourse|publicCourse|recommendedCourse|queryCourse|course|minorCourse|retakeCourse|sportCourse)\.do/i;
   var TIMETABLE_RE = /elective\/teachingTime\.do/i;
-  function kindOf(url) {
+  function kindOf2(url) {
     if (typeof url !== "string" || url === "") return null;
     if (TIMETABLE_RE.test(url)) return "timetable";
     if (LIST_RE.test(url)) return "list";
@@ -4022,7 +4925,7 @@ ${options.desc ?? ""}
     if (String(root["code"]) !== "1") return null;
     const res = kind === "timetable" ? augmentTimetable(root, items2) : augmentList(root, items2);
     if (res.changed === 0) return null;
-    log13.info(`[接管] ${kind} 改写了 ${res.changed} 处`);
+    log15.info(`[接管] ${kind} 改写了 ${res.changed} 处`);
     return JSON.stringify(res.json);
   }
   function transformCurrentResponse(kind, text) {
@@ -4036,7 +4939,7 @@ ${options.desc ?? ""}
     return rewroteTimetable;
   }
   function rewriteXhr(xhr) {
-    const kind = kindOf(typeof xhr.responseURL === "string" ? xhr.responseURL : null);
+    const kind = kindOf2(typeof xhr.responseURL === "string" ? xhr.responseURL : null);
     if (kind === null) return false;
     const rt = typeof xhr.responseType === "string" ? xhr.responseType : "";
     if (rt !== "" && rt !== "text" && rt !== "json") return false;
@@ -4055,7 +4958,7 @@ ${options.desc ?? ""}
         Object.defineProperty(xhr, "response", { configurable: true, get: () => JSON.parse(next) });
       }
     } catch {
-      log13.warn("接管响应失败（无法改写 responseText）");
+      log15.warn("接管响应失败（无法改写 responseText）");
       return false;
     }
     return true;
@@ -4090,14 +4993,14 @@ ${options.desc ?? ""}
       const p = orig(input, init);
       if (init !== void 0 && init !== null && init["__szuSkip"] === true) return p;
       const url = typeof input === "string" ? input : input?.url ?? "";
-      const kind = kindOf(url);
+      const kind = kindOf2(url);
       if (kind === null) return p;
       return p.then(async (res) => {
         const text = await res.text();
         const next = transformCurrentResponse(kind, text);
         if (next === null) return res;
         if (typeof ResponseCtor !== "function") {
-          log13.warn("接管响应失败（环境里没有 Response 构造器）");
+          log15.warn("接管响应失败（环境里没有 Response 构造器）");
           return res;
         }
         const Ctor = ResponseCtor;
@@ -4111,7 +5014,7 @@ ${options.desc ?? ""}
   function installHijack(target = pageRealm()) {
     const xhr = installXhr2(target);
     const fetch2 = installFetch2(target);
-    if (xhr || fetch2) log13.info(`响应接管已安装（XHR=${String(xhr)} fetch=${String(fetch2)}）`);
+    if (xhr || fetch2) log15.info(`响应接管已安装（XHR=${String(xhr)} fetch=${String(fetch2)}）`);
     return xhr || fetch2;
   }
 
@@ -4359,7 +5262,7 @@ ${options.desc ?? ""}
   }
 
   // src/sites/bkxk/api.ts
-  var log14 = scoped("bkxk/api");
+  var log16 = scoped("bkxk/api");
   var BASE_PATH = "/xsxkapp/sys/xsxkapp/";
   var EP = {
     // 只读：课程查询（按类别分派）
@@ -4547,7 +5450,7 @@ code: ${input.code ?? ""} | msg: ${input.msg}
 ${text}
 ──────────────────────────────
 `;
-    log14.error(
+    log16.error(
       `未识别返回（已全量落档） code=${input.code ?? ""}${input.msg !== "" ? ` msg=${input.msg}` : ""}`
     );
     console.log(`%c${block}`, "color:#c00");
@@ -4559,7 +5462,7 @@ ${text}
     const requestHeaders = token !== "" ? { ...headers(token), ...extra } : { ...extra };
     if (o.body !== void 0) requestHeaders["Content-Type"] = "application/x-www-form-urlencoded";
     const url = o.timestamp === true ? appendTimestamp(o.url) : o.url;
-    log14.info(`[请求] ${o.action} ${o.url}`);
+    log16.info(`[请求] ${o.action} ${o.url}`);
     const raw = await request({
       url,
       method: o.method ?? "POST",
@@ -4582,7 +5485,7 @@ ${text}
   }
 
   // src/sites/bkxk/courses.ts
-  var log15 = scoped("bkxk/courses");
+  var log17 = scoped("bkxk/courses");
   function asRecord4(value) {
     if (value === null || typeof value !== "object" || Array.isArray(value)) return {};
     return value;
@@ -4675,12 +5578,12 @@ ${text}
   function flatten(json) {
     const list = listFrom(json);
     if (list === null) {
-      log15.warn("列表响应里没有顶层 dataList，返回空列表（站点改版？端点形态变了？）");
+      log17.warn("列表响应里没有顶层 dataList，返回空列表（站点改版？端点形态变了？）");
       return [];
     }
     const out = [];
     for (const item of list) out.push(...classesOf(item));
-    log15.info(`列表响应 ${list.length} 项 → ${out.length} 个教学班`);
+    log17.info(`列表响应 ${list.length} 项 → ${out.length} 个教学班`);
     return out;
   }
   function remainOf(c) {
@@ -4703,15 +5606,15 @@ ${text}
     });
     const origin = p.origin ?? currentOrigin();
     if (origin === "") {
-      log15.warn("取不到 origin，放弃拉取课程列表");
+      log17.warn("取不到 origin，放弃拉取课程列表");
       return denied("取不到 origin");
     }
     if (p.studentCode === "") {
-      log15.warn("会话里没有学号，放弃拉取课程列表");
+      log17.warn("会话里没有学号，放弃拉取课程列表");
       return denied("缺少学号");
     }
     if (p.batchCode === null || p.batchCode === "") {
-      log15.warn("没有选课批次码，放弃拉取课程列表");
+      log17.warn("没有选课批次码，放弃拉取课程列表");
       return denied("缺少选课批次码");
     }
     const url = endpointUrl(CATEGORY_EP[p.category], origin);
@@ -5105,7 +6008,7 @@ ${text}
   }
 
   // src/sites/bkxk/monitor.ts
-  var log16 = scoped("bkxk/monitor");
+  var log18 = scoped("bkxk/monitor");
   var panel = null;
   function bindMonitorPanel(p) {
     panel = p;
@@ -5122,7 +6025,7 @@ ${text}
       try {
         fn();
       } catch (err) {
-        log16.warn("监控订阅回调抛错（已忽略）", err);
+        log18.warn("监控订阅回调抛错（已忽略）", err);
       }
     }
   }
@@ -5179,7 +6082,7 @@ ${text}
       return false;
     }
     polling = true;
-    log16.info(`开始监控轮询（${currentMode()}），监控项 ${String(store.items.length)} 条`);
+    log18.info(`开始监控轮询（${currentMode()}），监控项 ${String(store.items.length)} 条`);
     panel?.toast(`开始监控（${String(store.items.length)} 条）`, "success");
     notify();
     void loop();
@@ -5189,7 +6092,7 @@ ${text}
     if (!polling) return false;
     polling = false;
     interruptSleep();
-    log16.info("已停止监控轮询");
+    log18.info("已停止监控轮询");
     panel?.toast("已停止监控轮询", "info");
     notify();
     return true;
@@ -5206,7 +6109,7 @@ ${text}
       }
     } catch (err) {
       polling = false;
-      log16.error("监控轮询异常结束", err);
+      log18.error("监控轮询异常结束", err);
       panel?.toast("监控轮询异常，已停止（详见日志）", "error");
     } finally {
       notify();
@@ -5238,7 +6141,7 @@ ${text}
   async function checkOne(store, tcId) {
     const ctx = bkxkContext();
     if (ctx.batchCode === "") {
-      log16.warn(`查容量跳过 ${tcId}：批次码为空（请刷新选课页）`);
+      log18.warn(`查容量跳过 ${tcId}：批次码为空（请刷新选课页）`);
       return {
         store,
         row: { teachingClassID: tcId, remain: null, kind: "nobatch", msg: "批次码为空（请刷新选课页）" }
@@ -5261,14 +6164,14 @@ ${text}
       if (kind === RESP_KIND.OK) remain = capacityRemain(r.cls.data);
     } catch (err) {
       const text = err instanceof Error ? err.message : String(err);
-      log16.warn(`查容量请求异常：${tcId}`, err);
+      log18.warn(`查容量请求异常：${tcId}`, err);
       const applied3 = applyCheck(store, tcId, null, Date.now(), `请求异常：${text}`);
       saveMonitorStore(applied3.store);
       return { store: applied3.store, row: { teachingClassID: tcId, remain: null, kind: "exception", msg: text } };
     }
     if (kind !== RESP_KIND.OK) {
       noteAuthLost(kind);
-      log16.warn(`查容量失败（${kind}）：${tcId} ${msg}`);
+      log18.warn(`查容量失败（${kind}）：${tcId} ${msg}`);
       const applied3 = applyCheck(store, tcId, null, Date.now(), msg);
       saveMonitorStore(applied3.store);
       return { store: applied3.store, row: { teachingClassID: tcId, remain: null, kind, msg } };
@@ -5293,27 +6196,27 @@ ${text}
           origin: pageOrigin()
         });
       } catch (err) {
-        log16.warn(`类别 ${category} 请求异常（pageNumber=${String(page)}）`, err);
+        log18.warn(`类别 ${category} 请求异常（pageNumber=${String(page)}）`, err);
         return out.length > 0 ? out : null;
       }
       if (r.kind !== RESP_KIND.OK) {
         noteAuthLost(r.kind);
-        log16.warn(`类别 ${category} 拉取失败（pageNumber=${String(page)}，${r.kind}）：${r.msg}`);
+        log18.warn(`类别 ${category} 拉取失败（pageNumber=${String(page)}，${r.kind}）：${r.msg}`);
         return out.length > 0 ? out : null;
       }
       for (const c of r.classes) out.push(c);
       if (r.classes.length < PAGE_SIZE) return out;
     }
-    log16.warn(`类别 ${category} 超过 ${String(MAX_PAGES)} 页上限，只用前 ${String(out.length)} 条比对`);
+    log18.warn(`类别 ${category} 超过 ${String(MAX_PAGES)} 页上限，只用前 ${String(out.length)} 条比对`);
     return out;
   }
   async function pollCategory(start) {
     const { groups, skipped } = groupByCategory(start.items);
     if (skipped > 0) {
-      log16.warn(`类别监控：跳过 ${String(skipped)} 条缺类别代码的监控项（无法按类别查询）`);
+      log18.warn(`类别监控：跳过 ${String(skipped)} 条缺类别代码的监控项（无法按类别查询）`);
     }
     if (groups.length === 0) {
-      log16.warn("类别监控：监控项都缺类别代码，无法按类别查询");
+      log18.warn("类别监控：监控项都缺类别代码，无法按类别查询");
       return { checked: 0, hits: [] };
     }
     let store = start;
@@ -5349,7 +6252,7 @@ ${text}
   function noteAuthLost(kind) {
     if (kind !== RESP_KIND.UNAUTHENTICATED) return false;
     stopPolling();
-    log16.error("登录态失效，已停止监控轮询");
+    log18.error("登录态失效，已停止监控轮询");
     panel?.toast("登录态失效，已停止监控，请刷新页面重新登录", "error");
     panel?.alertAuthExpired();
     return true;
@@ -5364,10 +6267,10 @@ ${text}
     const withCount = addHitCount(loadMonitorStore(), res.hits.length);
     saveMonitorStore(withCount);
     const summary = hitSummaryText(res.hits, (tcId) => nameOf(withCount, tcId));
-    log16.info(`监控命中余量：${summary}`);
+    log18.info(`监控命中余量：${summary}`);
     panel?.toast(`发现余量：${summary}`, "success");
     if (!isEnabled(SITE_ID2, TOGGLE2.WRITE_API)) {
-      log16.warn("监控命中余量，但写接口总开关未开启，只提醒不自动抢");
+      log18.warn("监控命中余量，但写接口总开关未开启，只提醒不自动抢");
       return;
     }
     for (const row3 of res.hits) {
@@ -5399,7 +6302,7 @@ ${text}
       });
       if (r.cls.kind === RESP_KIND.OK) {
         const name = item.courseName === "" ? item.teachingClassID : item.courseName;
-        log16.info(`监控自动抢成功 ${name}`);
+        log18.info(`监控自动抢成功 ${name}`);
         panel?.toast(`监控抢到：${name}`, "success");
         const removed = removeMonitorItem(loadMonitorStore(), item.teachingClassID);
         if (removed.removed) saveMonitorStore(removed.store);
@@ -5407,12 +6310,12 @@ ${text}
       }
       const msg = r.cls.msg === "" ? r.cls.kind : r.cls.msg;
       updateMonitor((s) => patchMonitor(s, item.teachingClassID, { lastMsg: msg }));
-      log16.warn(`监控自动抢未成功（${r.cls.kind}）：${msg}`);
+      log18.warn(`监控自动抢未成功（${r.cls.kind}）：${msg}`);
       noteAuthLost(r.cls.kind);
       return { ok: false, reason: r.cls.kind, msg };
     } catch (err) {
       const text = err instanceof Error ? err.message : String(err);
-      log16.warn(`监控自动抢请求异常：${item.teachingClassID}`, err);
+      log18.warn(`监控自动抢请求异常：${item.teachingClassID}`, err);
       return { ok: false, reason: "exception", msg: text };
     }
   }
@@ -5610,7 +6513,7 @@ ${text}
   }
 
   // src/sites/bkxk/tasks.ts
-  var log17 = scoped("bkxk/tasks");
+  var log19 = scoped("bkxk/tasks");
   var panel2 = null;
   function bindTaskPanel(p) {
     panel2 = p;
@@ -5627,7 +6530,7 @@ ${text}
       try {
         fn();
       } catch (err) {
-        log17.warn("任务订阅回调抛错（已忽略）", err);
+        log19.warn("任务订阅回调抛错（已忽略）", err);
       }
     }
   }
@@ -5649,7 +6552,7 @@ ${text}
   }
   function startTasks() {
     if (!isEnabled(SITE_ID2, TOGGLE2.WRITE_API)) {
-      log17.warn("写接口总开关未开启，拒绝开始抢课");
+      log19.warn("写接口总开关未开启，拒绝开始抢课");
       panel2?.toast("写接口总开关未开启，请先到【设置】里打开", "warn");
       return { ok: false, reason: "write-disabled", count: 0 };
     }
@@ -5659,7 +6562,7 @@ ${text}
     const stale = clearStaleTasks(loadTaskStore());
     if (stale.cleared > 0) {
       saveTaskStore(stale.store);
-      log17.info(`开始前清洗了 ${String(stale.cleared)} 条「已勾选但上次跑失败」的任务，它们会重新参与`);
+      log19.info(`开始前清洗了 ${String(stale.cleared)} 条「已勾选但上次跑失败」的任务，它们会重新参与`);
     }
     const list = activeTasks(loadTaskStore().items);
     if (list.length === 0) {
@@ -5667,7 +6570,7 @@ ${text}
       return { ok: false, reason: "no-task", count: 0 };
     }
     running = true;
-    log17.info(`开始抢课，任务数 ${String(list.length)}`);
+    log19.info(`开始抢课，任务数 ${String(list.length)}`);
     panel2?.toast(`开始抢课（${String(list.length)} 条）`, "success");
     void loop2();
     return { ok: true, reason: "", count: list.length };
@@ -5680,7 +6583,7 @@ ${text}
     const changed = after.items.some((t, i) => t !== before.items[i]);
     if (changed) saveTaskStore(after);
     else notify2();
-    log17.info("已停止抢课");
+    log19.info("已停止抢课");
     panel2?.toast("已停止抢课", "info");
     return true;
   }
@@ -5694,7 +6597,7 @@ ${text}
       while (running) {
         if (activeTasks(loadTaskStore().items).length === 0) {
           running = false;
-          log17.info("全部任务已结束");
+          log19.info("全部任务已结束");
           panel2?.toast("全部任务已结束", "info");
           return;
         }
@@ -5705,7 +6608,7 @@ ${text}
       }
     } catch (err) {
       running = false;
-      log17.error("抢课循环异常结束", err);
+      log19.error("抢课循环异常结束", err);
       panel2?.toast("抢课循环异常，已停止（详见日志）", "error");
     } finally {
       notify2();
@@ -5731,7 +6634,7 @@ ${text}
         lastMsg: "缺少学号或选课批次码，请在设置中补全",
         lastKind: TASK_KIND.TERMINAL
       });
-      log17.error(`抢课中止：缺少学号或批次码 ${task.teachingClassID}`);
+      log19.error(`抢课中止：缺少学号或批次码 ${task.teachingClassID}`);
       return;
     }
     if (task.category === "") {
@@ -5740,7 +6643,7 @@ ${text}
         lastMsg: "未能识别该教学班的类别代码，请重新在列表中点击「添加抢课」",
         lastKind: TASK_KIND.TERMINAL
       });
-      log17.error(`抢课中止：类别代码未知 ${task.teachingClassID}`);
+      log19.error(`抢课中止：类别代码未知 ${task.teachingClassID}`);
       return;
     }
     finish(task.id, { status: TASK_STATUS.RUNNING, attempts: task.attempts + 1 });
@@ -5772,20 +6675,20 @@ ${text}
         lastMsg: `请求异常：${text}`,
         lastKind: TASK_KIND.UNKNOWN
       });
-      log17.warn(`抢课请求异常（${retry ? "稍后重试" : "已停手"}）：${task.teachingClassID}`, err);
+      log19.warn(`抢课请求异常（${retry ? "稍后重试" : "已停手"}）：${task.teachingClassID}`, err);
       return;
     }
     if (kind === RESP_KIND.OK) {
       finish(task.id, { status: TASK_STATUS.SUCCESS, lastMsg: msg, lastKind: TASK_KIND.OK });
       const name = task.courseName === "" ? task.teachingClassID : task.courseName;
-      log17.info(`抢课成功 ${name}`);
+      log19.info(`抢课成功 ${name}`);
       panel2?.toast(`抢课成功：${name}`, "success");
       return;
     }
     if (kind === RESP_KIND.UNAUTHENTICATED) {
       running = false;
       finish(task.id, { status: TASK_STATUS.FAILED, lastMsg: AUTH_MSG2, lastKind: TASK_KIND.AUTH });
-      log17.error("登录态失效，已停止全部任务");
+      log19.error("登录态失效，已停止全部任务");
       panel2?.toast("登录态失效，已停止全部任务，请刷新页面重新登录", "error");
       panel2?.alertAuthExpired();
       return;
@@ -5793,16 +6696,16 @@ ${text}
     const cls = kind === RESP_KIND.BUSINESS ? classifyMsg(msg) : TASK_KIND.UNKNOWN;
     if (shouldRetry(task.retryMode, cls)) {
       finish(task.id, { status: TASK_STATUS.PENDING, lastMsg: msg, lastKind: cls });
-      log17.warn(`抢课未成功，稍后重试（${kindLabel(cls)}）：${msg}`);
+      log19.warn(`抢课未成功，稍后重试（${kindLabel(cls)}）：${msg}`);
     } else {
       finish(task.id, { status: TASK_STATUS.FAILED, lastMsg: msg, lastKind: cls });
       const mode = RETRY_MODE_NAME[task.retryMode] ?? task.retryMode;
-      log17.warn(`抢课失败，已按「${mode}」停手（${kindLabel(cls)}）：${msg}`);
+      log19.warn(`抢课失败，已按「${mode}」停手（${kindLabel(cls)}）：${msg}`);
     }
   }
 
   // src/sites/bkxk/list.ts
-  var log18 = scoped("site/bkxk/list");
+  var log20 = scoped("site/bkxk/list");
   var LIST_PAGE_MARK = "grablessons.do";
   var RESCAN_DELAY_MS = 120;
   var MAX_BLOCKS_PER_SCAN = 400;
@@ -5895,11 +6798,11 @@ ${text}
   async function copyId(tcId, panel3) {
     const res = await copyText(tcId);
     if (res.ok) {
-      log18.info(`已复制教学班ID ${tcId} 到剪贴板（方式：${res.method}）`);
+      log20.info(`已复制教学班ID ${tcId} 到剪贴板（方式：${res.method}）`);
       panel3.toast("已复制教学班ID", "success");
       return;
     }
-    log18.warn(`复制教学班ID 失败：${res.detail}（可手动选中那一行复制）`);
+    log20.warn(`复制教学班ID 失败：${res.detail}（可手动选中那一行复制）`);
     panel3.toast("复制失败，请手动选中复制", "warn");
   }
   function applyGrabButton(btn, on) {
@@ -5936,13 +6839,13 @@ ${text}
     });
     applyGrabButton(btn, nowOn);
     if (nowOn) {
-      log18.info(`已加入抢课队列：${targetText(info)}（本轮只入队，不会发送任何请求）`);
+      log20.info(`已加入抢课队列：${targetText(info)}（本轮只入队，不会发送任何请求）`);
       ctx.panel.toast(
         `已加入抢课队列：${info.courseName === "" ? info.tcId : info.courseName}`,
         "success"
       );
     } else {
-      log18.info(`已移出抢课队列：${targetText(info)}（站点上已经选到的课不会被退掉）`);
+      log20.info(`已移出抢课队列：${targetText(info)}（站点上已经选到的课不会被退掉）`);
       ctx.panel.toast("已移出抢课队列（不会退掉已经选上的课）", "info");
     }
   }
@@ -5958,10 +6861,10 @@ ${text}
     });
     applyMonitorButton(btn, nowOn);
     if (nowOn) {
-      log18.info(`已加入监控列表：${targetText(info)}（到监控页点【开始监控】才会轮询）`);
+      log20.info(`已加入监控列表：${targetText(info)}（到监控页点【开始监控】才会轮询）`);
       ctx.panel.toast("已加入监控", "success");
     } else {
-      log18.info(`已移出监控列表：${targetText(info)}`);
+      log20.info(`已移出监控列表：${targetText(info)}`);
       ctx.panel.toast("已移出监控", "info");
     }
   }
@@ -6019,7 +6922,7 @@ ${text}
     if (ownsBlock(unit)) return;
     const tcId = tcIdIn(unit);
     if (tcId === null) {
-      log18.debug("卡片 .cv-info 未取到教学班 id，跳过（站点结构可能已变）");
+      log20.debug("卡片 .cv-info 未取到教学班 id，跳过（站点结构可能已变）");
       return;
     }
     const info = infoForUnit(unit, tcId);
@@ -6036,7 +6939,7 @@ ${text}
     if (cell === null) return;
     const ids = tcIdsIn(cell);
     if (ids.length === 0) {
-      log18.debug("列表行未取到教学班 id，跳过（站点结构可能已变）");
+      log20.debug("列表行未取到教学班 id，跳过（站点结构可能已变）");
       return;
     }
     const col = el("div", { class: "sztb-bkxk-col" });
@@ -6102,7 +7005,7 @@ ${text}
     const nodes = document.querySelectorAll(".sztb-bkxk-block, .sztb-bkxk-col, .sztb-bkxk-head");
     if (nodes.length === 0) return;
     for (const node of nodes) node.remove();
-    log18.info(`列表注入开关已关闭：移除 ${String(nodes.length)} 个注入节点`);
+    log20.info(`列表注入开关已关闭：移除 ${String(nodes.length)} 个注入节点`);
   }
   function scan(ctx) {
     if (!isEnabled(SITE_ID2, TOGGLE2.LIST_INJECT)) {
@@ -6122,7 +7025,7 @@ ${text}
   }
   function startListInjection(panel3) {
     if (!location.pathname.includes(LIST_PAGE_MARK)) {
-      log18.debug(`当前不是选课页（${location.pathname}），跳过列表注入`);
+      log20.debug(`当前不是选课页（${location.pathname}），跳过列表注入`);
       return () => void 0;
     }
     const ctx = {
@@ -6143,7 +7046,7 @@ ${text}
       scan(ctx);
       observer = new MutationObserver(schedule2);
       observer.observe(document.body, { childList: true, subtree: true });
-      log18.info(
+      log20.info(
         `选课列表注入已就绪：抢课队列 ${String(loadTaskStore().items.length)} 条 / 监控 ${String(loadMonitorStore().items.length)} 条（本轮点击只入队，不发请求）`
       );
     });
@@ -6188,7 +7091,7 @@ ${text}
   }
 
   // src/sites/bkxk/timetable.ts
-  var log19 = scoped("site/bkxk/timetable");
+  var log21 = scoped("site/bkxk/timetable");
   var TT_PAGE_MARK = "curriculum.do";
   var MAX_TRIES = 20;
   var RETRY_MS = 500;
@@ -6214,12 +7117,12 @@ ${text}
   function askSiteToRefetch(reason) {
     const mod = pageRecord()[SITE_TIMETABLE_MODULE];
     if (mod === void 0 || typeof mod.init !== "function") {
-      log19.warn(
+      log21.warn(
         `站点没有 ${SITE_TIMETABLE_MODULE}.init（改版了？）—— 这一轮的自定义课程不会出现，刷新页面可重来`
       );
       return false;
     }
-    log19.info(
+    log21.info(
       `请站点重新请求一次课表（${reason}；上一发响应${didRewriteTimetable() ? "已被我们改写" : "我们没赶上"}）⇒ ${SITE_TIMETABLE_MODULE}.init()`
     );
     mod.init.call(mod);
@@ -6240,7 +7143,7 @@ ${text}
     if (!ok) {
       if (!loggedDrawn && tags > 0) {
         loggedDrawn = true;
-        log19.info(
+        log21.info(
           `站点画出的课表里已经带上我们的标记 ${String(tags)} 个（自定义课程 ${String(enabled)} 门）`
         );
       }
@@ -6260,7 +7163,7 @@ ${text}
   }
   function startTimetableInjection() {
     if (!location.pathname.includes(TT_PAGE_MARK)) {
-      log19.debug(`当前不是课表页（${location.pathname}），跳过课表接管`);
+      log21.debug(`当前不是课表页（${location.pathname}），跳过课表接管`);
       return () => void 0;
     }
     let observer = null;
@@ -6284,13 +7187,13 @@ ${text}
         if (tries < MAX_TRIES) {
           retry = window.setTimeout(attempt2, RETRY_MS);
         } else {
-          log19.warn(`未找到课表容器 #${SITE_TABLE_ID}，放弃接管（站点的课表可能还没出数据）`);
+          log21.warn(`未找到课表容器 #${SITE_TABLE_ID}，放弃接管（站点的课表可能还没出数据）`);
         }
         return;
       }
       injectTagStyle();
       const courses = readEnabledCustomCourses();
-      log19.info(
+      log21.info(
         `课表页接管就绪：自定义课程 ${String(courses.length)} 门；课表由站点自己画，我们只加「自定义」标签`
       );
       autoRefetchIfNeeded(table);
@@ -6452,7 +7355,7 @@ ${text}
 `;
 
   // src/sites/bkxk/tabs/tasks.ts
-  var log20 = scoped("bkxk/tasks-tab");
+  var log22 = scoped("bkxk/tasks-tab");
   var BKXK_TASKS_TAB_ID = "bkxk:tasks";
   var MODE_ORDER = [RETRY_MODE.SMART, RETRY_MODE.NEVER, RETRY_MODE.ALWAYS];
   var GATE_POLL_MS = 1e3;
@@ -6554,7 +7457,7 @@ ${text}
       check.checked = task.enabled;
       check.addEventListener("change", () => {
         updateTasks((s) => toggleTask2(s, task.id).store);
-        log20.info(
+        log22.info(
           `${task.enabled ? "取消勾选" : "勾选"}任务「${task.courseName === "" ? task.teachingClassID : task.courseName}」`
         );
         render();
@@ -6625,7 +7528,7 @@ ${text}
       mode.value = RETRY_MODE_NAME[task.retryMode] === void 0 ? RETRY_MODE.SMART : task.retryMode;
       mode.addEventListener("change", () => {
         updateTasks((s) => setRetryMode(s, task.id, mode.value));
-        log20.info(`任务「${task.courseName || task.teachingClassID}」的重试策略改为 ${mode.value}`);
+        log22.info(`任务「${task.courseName || task.teachingClassID}」的重试策略改为 ${mode.value}`);
         render();
       });
       ops.appendChild(mode);
@@ -6636,7 +7539,7 @@ ${text}
       });
       del.addEventListener("click", () => {
         updateTasks((s) => removeTask(s, task.id).store);
-        log20.info(`已从队列删除任务「${task.courseName || task.teachingClassID}」`);
+        log22.info(`已从队列删除任务「${task.courseName || task.teachingClassID}」`);
         render();
       });
       ops.appendChild(del);
@@ -6644,7 +7547,7 @@ ${text}
       return item;
     }
     startBtn.addEventListener("click", () => {
-      if (!syncGate()) log20.warn("写接口总开关未开，拒绝开始");
+      if (!syncGate()) log22.warn("写接口总开关未开，拒绝开始");
       const res = startTasks();
       if (!res.ok && res.reason === "already-running") ctx.host.toast("已经在抢课中了", "info");
       render();
@@ -6667,7 +7570,7 @@ ${text}
       }).then((yes) => {
         if (!yes) return;
         updateTasks((s) => resetTasks(s));
-        log20.info(`已重置 ${String(stale)} 条未成功的任务`);
+        log22.info(`已重置 ${String(stale)} 条未成功的任务`);
         ctx.host.toast("已重置", "success");
         render();
       });
@@ -6687,7 +7590,7 @@ ${text}
       }).then((yes) => {
         if (!yes) return;
         updateTasks(() => clearTasks());
-        log20.info(`已清空抢课队列（${String(n)} 条）`);
+        log22.info(`已清空抢课队列（${String(n)} 条）`);
         ctx.host.toast("已清空队列", "success");
         render();
       });
@@ -6831,7 +7734,7 @@ ${text}
 `;
 
   // src/sites/bkxk/tabs/monitor.ts
-  var log21 = scoped("bkxk/monitor-tab");
+  var log23 = scoped("bkxk/monitor-tab");
   var BKXK_MONITOR_TAB_ID = "bkxk:monitor";
   var TICK_MS = 1e3;
   var GRAB_REASON = {
@@ -6867,7 +7770,7 @@ ${text}
     modeRow.appendChild(modeSelect);
     modeSelect.addEventListener("change", () => {
       setValue(SITE_ID2, VALUE2.MONITOR_MODE, modeSelect.value);
-      log21.info(`监控模式改为 ${modeSelect.value}`);
+      log23.info(`监控模式改为 ${modeSelect.value}`);
       render();
     });
     const modeHint = el("span", { class: "sztb-bkxk-mo-meta" });
@@ -7007,7 +7910,7 @@ ${text}
       });
       del.addEventListener("click", () => {
         updateMonitor((s) => removeMonitorItem(s, item.teachingClassID).store);
-        log21.info(`已移出监控列表：${item.courseName || item.teachingClassID}`);
+        log23.info(`已移出监控列表：${item.courseName || item.teachingClassID}`);
         render();
       });
       ops.appendChild(del);
@@ -7041,7 +7944,7 @@ ${text}
     });
     resetBtn.addEventListener("click", () => {
       updateMonitor((s) => resetMonitorStats(s));
-      log21.info("已重置监控统计（余量、检查时间、命中次数与上次抢课结果）");
+      log23.info("已重置监控统计（余量、检查时间、命中次数与上次抢课结果）");
       ctx.host.toast("已重置统计，下次检查会重新填", "success");
       render();
     });
@@ -7061,7 +7964,7 @@ ${text}
         if (!yes) return;
         stopPolling();
         updateMonitor(() => clearMonitor());
-        log21.info(`已清空监控列表（${String(n)} 条）`);
+        log23.info(`已清空监控列表（${String(n)} 条）`);
         ctx.host.toast("已清空监控列表", "success");
         render();
       });
@@ -7328,7 +8231,7 @@ ${text}
 `;
 
   // src/sites/bkxk/tabs/custom.ts
-  var log22 = scoped("bkxk/custom-tab");
+  var log24 = scoped("bkxk/custom-tab");
   var BKXK_CUSTOM_TAB_ID = "bkxk:custom";
   var PARITY_OPTIONS = [
     ["", "每周"],
@@ -7610,7 +8513,7 @@ ${text}
       }
       const parsed = parsePlace(place);
       if (parsed.length !== segs.length) {
-        log22.warn(
+        log24.warn(
           `生成的时间文本与解析结果对不上：${place}（解析出 ${String(parsed.length)} 段，表单有 ${String(segs.length)} 段）`
         );
         const msg = "时间文本生成异常，已取消本次提交（请把这条日志报给开发者）";
@@ -7623,7 +8526,7 @@ ${text}
       const next = editing === null ? appendCourse(courses, draft, makeCourseId(Date.now(), Math.random())) : updateCourse(courses, editing, draft);
       mutate(next);
       resetForm();
-      log22.info(`${editing === null ? "添加" : "修改"}自定义课程「${name}」（${place}）`);
+      log24.info(`${editing === null ? "添加" : "修改"}自定义课程「${name}」（${place}）`);
       ctx.host.toast(editing === null ? "已添加" : "已保存修改", "success");
     }
     function beginEdit(course) {
@@ -7637,7 +8540,7 @@ ${text}
         const msg = "这门课原本的时间文本解析不出，已按默认值回填，请重新填写";
         showHint(msg);
         ctx.host.toast(msg, "warn");
-        log22.warn(`自定义课程「${course.name}」的 place 解析不出：${course.place}`);
+        log24.warn(`自定义课程「${course.name}」的 place 解析不出：${course.place}`);
       } else {
         segs = drafts.map((d) => ({ ...d }));
         hideHint();
@@ -7661,7 +8564,7 @@ ${text}
           return;
         }
         mutate(setCourseEnabled(courses, course.id, toggle.checked));
-        log22.info(`${toggle.checked ? "启用" : "停用"}自定义课程「${course.name}」`);
+        log24.info(`${toggle.checked ? "启用" : "停用"}自定义课程「${course.name}」`);
       });
       item.appendChild(toggle);
       const main2 = el("div", { class: "sztb-bkxk-itemmain" });
@@ -7695,7 +8598,7 @@ ${text}
         const wasEditing = editingId === course.id;
         mutate(removeCourse(courses, course.id));
         if (wasEditing) resetForm();
-        log22.info(`删除自定义课程「${course.name}」`);
+        log24.info(`删除自定义课程「${course.name}」`);
         ctx.host.toast("已删除", "success");
       });
       ops.appendChild(editBtn);
@@ -7731,7 +8634,7 @@ ${text}
       writeCustomCourses(next);
       renderList();
       renderConflicts();
-      if (refreshTimetable() > 0) log22.info("已请站点重画课表（这次带的课程就是你刚改的）");
+      if (refreshTimetable() > 0) log24.info("已请站点重画课表（这次带的课程就是你刚改的）");
     }
     addSegBtn.addEventListener("click", () => {
       if (!guard()) return;
@@ -7763,7 +8666,7 @@ ${text}
         if (!ok) return;
         mutate([]);
         resetForm();
-        log22.info(`清空自定义课程：删除 ${String(n)} 门`);
+        log24.info(`清空自定义课程：删除 ${String(n)} 门`);
         ctx.host.toast("已清空", "success");
       });
     });
@@ -7791,7 +8694,7 @@ ${text}
   };
 
   // src/sites/bkxk/index.ts
-  var log23 = scoped("site/bkxk");
+  var log25 = scoped("site/bkxk");
   var HOSTS2 = ["bkxk.szu.edu.cn"];
   var PAGES2 = ["*default/grablessons.do*", "*default/curriculum.do*"];
   var bkxkAdapter = {
@@ -7817,13 +8720,13 @@ ${text}
       registerBkxkSettings();
       const carried = runCustomCarry();
       if (lines.length > 0) {
-        log23.info(`已从旧版迁移 ${lines.length} 条内容，详情见日志页`);
+        log25.info(`已从旧版迁移 ${lines.length} 条内容，详情见日志页`);
       }
       if (carried.length > 0) {
-        log23.info(`自定义课程已搬到通用键（${carried.length} 条说明见日志页）`);
+        log25.info(`自定义课程已搬到通用键（${carried.length} 条说明见日志页）`);
       }
       if (lines.length === 0 && carried.length === 0) {
-        log23.debug(`无旧数据需要迁移（earlyInit @ ${ctx.url.pathname}）`);
+        log25.debug(`无旧数据需要迁移（earlyInit @ ${ctx.url.pathname}）`);
       }
     },
     /** 挂载期：DOM 已就绪，可以安全地把配置推给运行时并报登录态。 */
@@ -7833,11 +8736,11 @@ ${text}
       bindMonitorPanel(ctx.panel);
       const session = readSession();
       if (!session.loggedIn) {
-        log23.warn("未读到有效登录态：学号或 token 缺失，功能接口会失败。请先在站内完成登录。");
+        log25.warn("未读到有效登录态：学号或 token 缺失，功能接口会失败。请先在站内完成登录。");
       } else {
-        log23.info(`站点已就绪：${sessionSummary(session)}`);
+        log25.info(`站点已就绪：${sessionSummary(session)}`);
       }
-      log23.info(`功能页=${String(ctx.isFeaturePage)}（任务 / 监控 / 自定义 / 设置四个站点标签页已就绪）`);
+      log25.info(`功能页=${String(ctx.isFeaturePage)}（任务 / 监控 / 自定义 / 设置四个站点标签页已就绪）`);
       startListInjection(ctx.panel);
       startTimetableInjection();
     }
@@ -7856,10 +8759,10 @@ ${text}
   }
 
   // src/main.ts
-  var log24 = scoped("main");
+  var log26 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-07T15:53:24.019Z" : null;
-  var BUILD_NO = true ? 76 : null;
+  var BUILD_TIME = true ? "2026-10-07T16:18:34.766Z" : null;
+  var BUILD_NO = true ? 77 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();
@@ -7899,7 +8802,7 @@ ${text}
       version: VERSION
     }));
     booted = { panel: panel3, adapterId: res.adapter?.id ?? null };
-    log24.info(
+    log26.info(
       `深大人工具箱 ${VERSION_LABEL} 已装载（host=${url.hostname}，分派=${res.reason}，站点=${res.adapter?.id ?? "无"}，功能页=${res.autoExpand ? "是" : "否"}）`
     );
     res.adapter?.init?.({
@@ -7919,10 +8822,10 @@ ${text}
         return;
       }
       if (!res.inject) {
-        log24.debug(`站内跳转后不再属于支持范围，保持现有悬浮窗`);
+        log26.debug(`站内跳转后不再属于支持范围，保持现有悬浮窗`);
         return;
       }
-      log24.info(`站内跳转导致重新分派：${bootedFor} → ${location.href}`);
+      log26.info(`站内跳转导致重新分派：${bootedFor} → ${location.href}`);
       bootedFor = location.href;
       boot(url, res);
     };
@@ -7949,9 +8852,9 @@ ${text}
     if (res.adapter?.earlyInit !== void 0) {
       try {
         res.adapter.earlyInit({ adapter: res.adapter, url });
-        log24.debug(`已执行启动期钩子：${res.adapter.id}`);
+        log26.debug(`已执行启动期钩子：${res.adapter.id}`);
       } catch (err) {
-        log24.error(`启动期钩子执行失败：${res.adapter.id}`, err);
+        log26.error(`启动期钩子执行失败：${res.adapter.id}`, err);
       }
     }
     whenDomReady(() => {

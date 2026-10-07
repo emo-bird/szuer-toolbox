@@ -58,6 +58,18 @@ export interface HttpRequest {
   responseType?: 'text' | 'json';
   /** 出队优先级，默认 PRIORITY.NORMAL */
   priority?: number;
+  /**
+   * 用哪个出口发这个请求，默认 `'page'`。
+   *
+   *  - `'page'` —— 页面自己的 `fetch`（`unsafeWindow.fetch`）。**同源请求走这个**：
+   *    凭证、请求头、`Referer` 与站点自己发的请求完全一致，站点分不出来。
+   *  - `'gm'`  —— `GM_xmlhttpRequest`。**只有跨域请求才用它**（当前唯一用户是
+   *    「调用用户自己配置的大模型接口」，域名是用户填的，不可能预先知道）。
+   *    ⚠️ 它**不带页面 cookie**（这是特性不是缺陷：不该把优课的登录态发给第三方模型）。
+   *
+   * 出口仍然是本函数一处决定的 —— 不要在调用方自己写 `GM_xmlhttpRequest`。
+   */
+  channel?: 'page' | 'gm';
 }
 
 export interface HttpResponse {
@@ -247,6 +259,71 @@ async function viaFetch(req: HttpRequest, body: string | undefined): Promise<Raw
   return { status: res.status, statusText: res.statusText, text, finalUrl: res.url };
 }
 
+// -------------------------------------------------------------- GM 出口
+
+interface GmResponse {
+  status: number;
+  statusText: string;
+  responseText: string;
+  finalUrl?: string;
+}
+
+interface GmDetails {
+  method: string;
+  url: string;
+  headers?: Record<string, string>;
+  data?: string;
+  timeout?: number;
+  onload?: (r: GmResponse) => void;
+  onerror?: (e: unknown) => void;
+  ontimeout?: () => void;
+}
+
+type GmXhr = (details: GmDetails) => { abort(): void } | undefined;
+
+/**
+ * 取 `GM_xmlhttpRequest`。
+ *
+ * ⚠️ 它在油猴沙箱里是**真全局**，不在 `unsafeWindow` 上 —— 页面里当然也没有。
+ * 所以这里读 `globalThis`，读不到就说明清单里没声明 `@grant GM_xmlhttpRequest`
+ * （或者当前环境是纯 node 测试），此时**如实报错**，不要静默退回 fetch：
+ * 静默退回的后果是「跨域请求被浏览器 CORS 拦掉」，报错信息会指向 CORS，
+ * 让人往完全错误的方向查。
+ */
+function resolveGm(): GmXhr | null {
+  const g = globalThis as Record<string, unknown>;
+  const fn = g['GM_xmlhttpRequest'];
+  return typeof fn === 'function' ? (fn as GmXhr) : null;
+}
+
+function viaGm(req: HttpRequest, body: string | undefined): Promise<RawResult> {
+  const gm = resolveGm();
+  if (gm === null) {
+    return Promise.reject(new Error('GM_xmlhttpRequest 不可用：油猴清单里缺少 @grant GM_xmlhttpRequest'));
+  }
+  return new Promise<RawResult>((resolve, reject) => {
+    const handle = gm({
+      method: req.method ?? 'GET',
+      url: req.url,
+      ...(req.headers !== undefined ? { headers: req.headers } : {}),
+      ...(body !== undefined ? { data: body } : {}),
+      ...(req.timeoutMs !== undefined ? { timeout: req.timeoutMs } : {}),
+      onload: (r) => {
+        resolve({
+          status: r.status,
+          statusText: r.statusText,
+          text: r.responseText ?? '',
+          finalUrl: r.finalUrl ?? req.url,
+        });
+      },
+      onerror: () => reject(new Error('GM_xmlhttpRequest 网络错误')),
+      ontimeout: () => reject(new Error('GM_xmlhttpRequest 超时')),
+    });
+    // gm() 可能返回 undefined（部分实现），此时没法主动 abort —— 靠 timeout 兜底
+    if (handle === undefined) log.debug('GM_xmlhttpRequest 未返回句柄，abort 不可用');
+  });
+}
+
 // -------------------------------------------------------------- 公开 API
 
 /**
@@ -256,7 +333,8 @@ export async function request(req: HttpRequest): Promise<HttpResponse> {
   const body = toBody(req.data);
   const started = Date.now();
 
-  const raw = await enqueue<RawResult>(() => viaFetch(req, body), req.priority);
+  const send = req.channel === 'gm' ? () => viaGm(req, body) : () => viaFetch(req, body);
+  const raw = await enqueue<RawResult>(send, req.priority);
 
   const elapsedMs = Date.now() - started;
   let json: unknown = null;
@@ -270,8 +348,9 @@ export async function request(req: HttpRequest): Promise<HttpResponse> {
   }
 
   // 只记路径，不记 query（query 里可能有 token），绝不记 header / body
+  const via = req.channel === 'gm' ? ' [gm]' : '';
   log.debug(
-    `${req.method ?? 'GET'} ${safePath(req.url)} → ${raw.status} (${elapsedMs}ms, ${raw.text.length}B)`,
+    `${req.method ?? 'GET'}${via} ${safePath(req.url)} → ${raw.status} (${elapsedMs}ms, ${raw.text.length}B)`,
   );
 
   return { ...raw, elapsedMs, json };

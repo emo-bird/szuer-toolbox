@@ -12,14 +12,19 @@ const checks = [
   ['@version 0.1.0', /^\/\/ @version\s+0\.1\.0$/m.test(text)],
   ['@match szu.edu.cn', /^\/\/ @match\s+\*:\/\/\*\.szu\.edu\.cn\/\*$/m.test(text)],
   ['@match uooc.net.cn', /^\/\/ @match\s+\*:\/\/\*\.uooc\.net\.cn\/\*$/m.test(text)],
-  // 请求出口定稿为「页面 fetch」（需求文档 Q-AE）：不再声明 GM_xmlhttpRequest，
-  // 也不再需要 @connect 白名单；改为申请 unsafeWindow 以拿到页面上下文的 fetch。
-  ['不再声明 @grant GM_xmlhttpRequest', !/^\/\/ @grant\s+GM_xmlhttpRequest$/m.test(text)],
+  // 请求出口分两个（需求文档 Q-AE 的后续演进）：
+  //   - 同源请求仍走页面 fetch（申请 unsafeWindow 拿到页面上下文的 fetch）；
+  //   - **跨域请求**（用户自己配置的大模型接口）只能走 GM_xmlhttpRequest ——
+  //     域名是用户填的，不可能预先写进 @match，页面 fetch 会被 CORS 拦掉。
+  // 所以这两条**同时**成立：既要 unsafeWindow，也要 GM_xmlhttpRequest。
+  ['声明 @grant GM_xmlhttpRequest', /^\/\/ @grant\s+GM_xmlhttpRequest$/m.test(text)],
   ['声明 @grant unsafeWindow', /^\/\/ @grant\s+unsafeWindow$/m.test(text)],
+  // @connect * 是必须的：接口域名用户自己填，白名单写不出来。
+  // 代价是油猴不再逐域询问 —— 但脚本只往用户显式配置的那一个地址发请求。
+  ['声明 @connect *', /^\/\/ @connect\s+\*$/m.test(text)],
   // 附件要在后台开标签页：不带用户手势的程序化 <a target=_blank> 会被弹窗拦截器静默拦掉，
   // 只有 GM_openInTab 不受影响（真机冒烟实证：日志报 OK、实际一个标签页都没开出来）。
   ['声明 @grant GM_openInTab', /^\/\/ @grant\s+GM_openInTab$/m.test(text)],
-  ['没有遗留的 @connect 白名单', !/^\/\/ @connect\s/m.test(text)],
   ['@noframes', /^\/\/ @noframes$/m.test(text)],
   ['@run-at document-start', /^\/\/ @run-at\s+document-start$/m.test(text)],
   [

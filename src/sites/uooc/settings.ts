@@ -30,6 +30,7 @@
 import { registerValue, getValue as getStoredValue } from '../../common/core/settings.ts';
 import type { SiteToggleDef } from '../types.ts';
 import { scoped } from '../../common/core/log.ts';
+import type { LlmConfig } from './ai/llm.ts';
 
 const log = scoped('uooc/settings');
 
@@ -80,6 +81,16 @@ export const VALUE = {
   WAIT_BEFORE_MS: 'wait-before-ms',
   /** 一项处理完、跳下一项**之前**停留多久（ms） */
   HOLD_AFTER_MS: 'hold-after-ms',
+  /** 大模型接口根地址（OpenAI Chat Completions 兼容），如 `https://api.openai.com/v1` */
+  AI_BASE_URL: 'ai-base-url',
+  /** 大模型 API Key */
+  AI_API_KEY: 'ai-api-key',
+  /** 模型名，如 `gpt-4o-mini` */
+  AI_MODEL: 'ai-model',
+  /** 单次请求超时（ms） */
+  AI_TIMEOUT_MS: 'ai-timeout-ms',
+  /** 同时答几道题（1~8） */
+  AI_CONCURRENCY: 'ai-concurrency',
 } as const;
 
 export const UOOC_TOGGLES: readonly SiteToggleDef[] = [
@@ -150,7 +161,9 @@ export const UOOC_TOGGLES: readonly SiteToggleDef[] = [
   {
     id: TOGGLE.AI_ANSWER,
     label: 'AI 答题',
-    desc: '测验未完成时由脚本作答（尚未实现，开了也没用）',
+    desc:
+      '连播遇到未完成的测验就整页跳到答题页，脚本拉题问模型并回填；' +
+      '提交前会弹确认框，人机验证码要你手动点一下',
     risk: 'trace',
     default: false,
     group: GROUP.AI,
@@ -181,6 +194,58 @@ export function registerUoocSettings(): void {
     kind: 'number',
     group: GROUP.AUTOPLAY,
   });
+
+  // ------------------------------------------------------------ AI 作答（U6–U9）
+
+  registerValue<string>({
+    siteId: SITE_ID,
+    id: VALUE.AI_BASE_URL,
+    label: '接口地址',
+    desc: 'OpenAI Chat Completions 兼容的根地址，会自动补 /chat/completions。例：https://api.openai.com/v1',
+    default: '',
+    kind: 'url',
+    group: GROUP.AI,
+  });
+
+  registerValue<string>({
+    siteId: SITE_ID,
+    id: VALUE.AI_API_KEY,
+    label: 'API Key',
+    desc: '只存在你本机的油猴存储里。本地部署（ollama 等）不需要填',
+    default: '',
+    kind: 'password',
+    group: GROUP.AI,
+  });
+
+  registerValue<string>({
+    siteId: SITE_ID,
+    id: VALUE.AI_MODEL,
+    label: '模型名',
+    desc: '填服务商文档里那个精确的模型 id，例：gpt-4o-mini',
+    default: '',
+    kind: 'text',
+    group: GROUP.AI,
+  });
+
+  registerValue<string>({
+    siteId: SITE_ID,
+    id: VALUE.AI_TIMEOUT_MS,
+    label: '超时(ms)',
+    desc: '单次请求的最长等待时间；推理型模型要调大',
+    default: '60000',
+    kind: 'number',
+    group: GROUP.AI,
+  });
+
+  registerValue<string>({
+    siteId: SITE_ID,
+    id: VALUE.AI_CONCURRENCY,
+    label: '并发数',
+    desc: '同时答几道题（1~8）。默认 1 最稳；调高容易撞到服务商的速率限制（表现为「这道题没答出来」）',
+    default: '1',
+    kind: 'number',
+    group: GROUP.AI,
+  });
 }
 
 /** 读一个毫秒配置项；非法值回退到 `fallbackMs` 并留一条 warn */
@@ -204,6 +269,35 @@ export function holdAfterMs(): number {
   return readMs(VALUE.HOLD_AFTER_MS, 3000);
 }
 
+/** 读一个字符串配置项并去掉首尾空白 */
+function readText(id: string): string {
+  return getStoredValue<string>(SITE_ID, id).trim();
+}
+
+/**
+ * 大模型的完整配置；**配置不全时返回 null**（调用方据此给出人话提示，而不是发一个注定 404 的请求）。
+ *
+ * 判据只要求「地址 + 模型名」：API Key 允许为空 —— 本地 ollama / vllm 不需要，
+ * 而 OpenAI 那类会直接返回 401，报错信息已经足够清楚。
+ */
+export function aiConfig(): LlmConfig | null {
+  const baseUrl = readText(VALUE.AI_BASE_URL);
+  const model = readText(VALUE.AI_MODEL);
+  if (baseUrl === '' || model === '') return null;
+  return {
+    baseUrl,
+    model,
+    apiKey: readText(VALUE.AI_API_KEY),
+    timeoutMs: readMs(VALUE.AI_TIMEOUT_MS, 60000),
+  };
+}
+
+/** AI 作答的并发数，夹在 1~8（上限是防呆，不是性能调优） */
+export function aiConcurrency(): number {
+  const n = Math.floor(readMs(VALUE.AI_CONCURRENCY, 1));
+  return Math.min(8, Math.max(1, n));
+}
+
 /**
  * 把配置项推进运行时（启动时跑一次）。
  *
@@ -213,4 +307,7 @@ export function holdAfterMs(): number {
 export function applyUoocSettings(): void {
   waitBeforeMs();
   holdAfterMs();
+  aiConcurrency();
+  // aiConfig() 允许返回 null（还没配），所以这里只报一次「配没配」，不当异常
+  log.info(`AI 作答配置：${aiConfig() === null ? '未配置（AI 答题用不了）' : '已配置'}`);
 }

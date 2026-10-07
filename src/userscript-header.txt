@@ -25,6 +25,8 @@
 // @grant        GM_setClipboard
 // @grant        GM_registerMenuCommand
 // @grant        GM_openInTab
+// @grant        GM_xmlhttpRequest
+// @connect      *
 // @run-at       document-start
 // @noframes
 // ==/UserScript==
