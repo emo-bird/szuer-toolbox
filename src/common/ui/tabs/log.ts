@@ -29,6 +29,16 @@ async function copyAll(): Promise<void> {
 }
 
 const tabCss = `
+/*
+ * 日志页必须自己就是「有确定高度的容器」，否则粘底一定失效。
+ * 根因：.sztb-body 是 padding:10px 的滚动盒（style.css:188），而 .sztb-pane 默认
+ * 由内容撑高（style.css:194 只写了 display/flex-direction/gap）⇒ .sztb-log-wrap 的
+ * height:100% 遇到「父高度 auto」会退化成 auto，.sztb-log 永远不产生溢出、
+ * scrollTop 恒为 0，真正在滚的其实是外层 .sztb-body。
+ * 于是「新日志到底」这段逻辑盯的是一个根本没在滚的元素，表现为日志一直停在顶上。
+ * 把 pane 钉成 body 的内容高度，滚动权就交回日志区自己（顺带把工具栏固定住）。
+ */
+.sztb-pane[data-tab="common:log"] { height: 100%; min-height: 0; overflow: hidden; }
 .sztb-log-wrap { display: flex; flex-direction: column; gap: 8px; height: 100%; min-height: 0; }
 .sztb-log { overflow: auto; flex: 1 1 auto; }
 .sztb-log-empty { padding: 20px 8px; text-align: center; color: var(--sztb-text-dim); font-size: 12.5px; }
