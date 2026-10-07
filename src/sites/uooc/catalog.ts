@@ -300,10 +300,3 @@ export function findLeafIndex(leaves: readonly CatalogLeaf[], chain: readonly nu
   return leaves.findIndex((leaf) => sameChain(leaf.chain, chain));
 }
 
-/**
- * 连播范围：「止于本章」时，求出当前叶子所在章的 id。
- * 返回值直接与 `leaf.chain[0]` 比较即可。
- */
-export function chapterOf(leaf: CatalogLeaf): number | null {
-  return leaf.chain.length > 0 ? (leaf.chain[0] ?? null) : null;
-}

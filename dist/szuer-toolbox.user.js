@@ -50,7 +50,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-07T14:13:24.886Z（构建号 68） */
+/* 构建信息：2026-10-07T14:26:48.138Z（构建号 69） */
 
 "use strict";
 (() => {
@@ -2085,9 +2085,6 @@ ${options.desc ?? ""}
   function findLeafIndex(leaves, chain) {
     return leaves.findIndex((leaf) => sameChain(leaf.chain, chain));
   }
-  function chapterOf(leaf) {
-    return leaf.chain.length > 0 ? leaf.chain[0] ?? null : null;
-  }
 
   // src/sites/uooc/intercept.ts
   var log5 = scoped("uooc/intercept");
@@ -2263,8 +2260,6 @@ ${options.desc ?? ""}
     AI_ANSWER: "ai-answer"
   };
   var VALUE = {
-    /** 连播范围：章内 / 跨章 */
-    NEXT_SCOPE: "nextScope",
     /** 连播每一项之间的等待时间（ms），全局单一值 */
     NEXT_WAIT_MS: "next-wait-ms"
   };
@@ -2321,18 +2316,6 @@ ${options.desc ?? ""}
   function registerUoocSettings() {
     registerValue({
       siteId: SITE_ID,
-      id: VALUE.NEXT_SCOPE,
-      label: "连播范围",
-      desc: "连播到本章结束后",
-      default: "chapter",
-      kind: "select",
-      options: [
-        { value: "chapter", label: "止于本章" },
-        { value: "all", label: "跨章继续" }
-      ]
-    });
-    registerValue({
-      siteId: SITE_ID,
       id: VALUE.NEXT_WAIT_MS,
       label: "连播等待时间(ms)",
       desc: "每走到一项后停留多久再继续，所有资源共用",
@@ -2341,10 +2324,6 @@ ${options.desc ?? ""}
     });
   }
   function applyUoocSettings() {
-    const scope = getValue(SITE_ID, VALUE.NEXT_SCOPE);
-    if (scope !== "chapter" && scope !== "all") {
-      log6.warn(`连播范围取值异常（${scope}），按「止于本章」处理`);
-    }
     const waitMs = Number(getValue(SITE_ID, VALUE.NEXT_WAIT_MS));
     if (!Number.isFinite(waitMs) || waitMs < 0) {
       log6.warn(`连播等待时间取值异常（${String(getValue(SITE_ID, VALUE.NEXT_WAIT_MS))}），按 5000ms 处理`);
@@ -2405,7 +2384,6 @@ ${options.desc ?? ""}
     let currentLeaf = null;
     let currentSources = [];
     let subIndex = 0;
-    let startChapter = null;
     async function sourcesOf(leaf) {
       const key = String(leaf.nodeId);
       const primed = peekUnitLearn(key);
@@ -2596,10 +2574,6 @@ ${options.desc ?? ""}
           finish2("已到目录末尾");
           return;
         }
-        if (startChapter !== null && chapterOf(leaf) !== startChapter) {
-          finish2("已到本章末尾");
-          return;
-        }
         if (currentLeaf !== leaf) {
           const sources = await sourcesOf(leaf);
           if (stopped || paused) return;
@@ -2655,8 +2629,6 @@ ${options.desc ?? ""}
         const chain = currentChainFromHash(hash);
         const at = chain === null ? -1 : findLeafIndex(leaves, chain);
         cursor = at >= 0 ? at : 0;
-        const here = leaves[cursor];
-        startChapter = here === void 0 ? null : chapterOf(here);
         log7.info(`连播已启动：cid=${cid}，叶子 ${leaves.length} 个，从第 ${cursor + 1} 个开始`);
         host.toast("自动连播已启动", "info");
         void step();
@@ -7611,8 +7583,8 @@ ${text}
   // src/main.ts
   var log24 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-07T14:13:24.886Z" : null;
-  var BUILD_NO = true ? 68 : null;
+  var BUILD_TIME = true ? "2026-10-07T14:26:48.138Z" : null;
+  var BUILD_NO = true ? 69 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();

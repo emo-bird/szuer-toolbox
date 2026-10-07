@@ -146,7 +146,9 @@ npm run typecheck ; npm test ; node tools/verify-build.mjs
 - `SITE_ID = 'uooc'`（同时是 storage 命名空间前缀）。
 - `TOGGLE`：`RATE_2X='rate-2x'`（🟢 二倍速，默认开）、`MUTE='mute'`（🟢 静音，默认开）、
   `KEEP_PLAYING='keep-playing'`（🟢 防暂停，默认开）、`AUTO_NEXT='auto-next'`（🟠 自动连播，默认关，**见 §8.2**）。
-- `VALUE`：`NEXT_SCOPE='nextScope'`（连播范围：`chapter` 止于本章 / `all` 跨章继续，默认 `chapter`）。
+- `VALUE`：只剩 `NEXT_WAIT_MS='next-wait-ms'`（连播每项之间的等待时间，默认 `'5000'`）。
+  ⚠️ 原来的 `NEXT_SCOPE='nextScope'`（连播范围）**已整体移除**（用户 m00971），
+  连播不再设范围上限 —— 详见 `docs/UOOC-连播与答题-需求细则.md` C 节。
 - 风险门禁由 `common/core/settings.ts` 的 `isEnabled` **统一兜底**：🟢 safe 与 🟠 trace
   都按声明的 `default` 走；🔴 irreversible **一律强制 false**，与 `default` 写什么无关 ——
   所以 🔴 的 `default` 也一律写 `false`。

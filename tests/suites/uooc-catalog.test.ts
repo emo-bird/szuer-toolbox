@@ -8,7 +8,6 @@
 import {
   SOURCE_TYPE,
   catalogListUrl,
-  chapterOf,
   classifySource,
   courseIdFromLocation,
   currentChainFromHash,
@@ -125,12 +124,6 @@ describe('uooc/catalog · 展平叶子', () => {
   it('空叶子照样进队列（运行时才知道它没资源）', () => {
     const leaves = flattenLeaves(tree);
     assert(leaves.some((l) => l.nodeId === 733704712), '733704712 是实测的空叶子，必须出现在队列里');
-  });
-
-  it('chapterOf 取链首', () => {
-    const leaves = flattenLeaves(tree);
-    assertEqual(chapterOf(leaves[0]!), 766102022);
-    assertEqual(chapterOf(leaves[leaves.length - 1]!), 60253051);
   });
 });
 

@@ -39,8 +39,6 @@ export const TOGGLE = {
 
 /** 配置项 id 常量 */
 export const VALUE = {
-  /** 连播范围：章内 / 跨章 */
-  NEXT_SCOPE: 'nextScope',
   /** 连播每一项之间的等待时间（ms），全局单一值 */
   NEXT_WAIT_MS: 'next-wait-ms',
 } as const;
@@ -103,19 +101,6 @@ export const UOOC_TOGGLES: readonly SiteToggleDef[] = [
 export function registerUoocSettings(): void {
   registerValue<string>({
     siteId: SITE_ID,
-    id: VALUE.NEXT_SCOPE,
-    label: '连播范围',
-    desc: '连播到本章结束后',
-    default: 'chapter',
-    kind: 'select',
-    options: [
-      { value: 'chapter', label: '止于本章' },
-      { value: 'all', label: '跨章继续' },
-    ],
-  });
-
-  registerValue<string>({
-    siteId: SITE_ID,
     id: VALUE.NEXT_WAIT_MS,
     label: '连播等待时间(ms)',
     desc: '每走到一项后停留多久再继续，所有资源共用',
@@ -127,15 +112,10 @@ export function registerUoocSettings(): void {
 /**
  * 把配置项推进运行时（启动时跑一次）。
  *
- * 目前只有连播范围，`video.ts` 每次触发时自己读，所以这里只做一次存在性检查，
+ * 目前只有连播等待时间，`autoplay.ts` 每次用时自己读，所以这里只做一次存在性检查，
  * 保证拼错 id 时能在日志里立刻看见，而不是静默用默认值。
  */
 export function applyUoocSettings(): void {
-  const scope = getStoredValue<string>(SITE_ID, VALUE.NEXT_SCOPE);
-  if (scope !== 'chapter' && scope !== 'all') {
-    log.warn(`连播范围取值异常（${scope}），按「止于本章」处理`);
-  }
-
   const waitMs = Number(getStoredValue<string>(SITE_ID, VALUE.NEXT_WAIT_MS));
   if (!Number.isFinite(waitMs) || waitMs < 0) {
     log.warn(`连播等待时间取值异常（${String(getStoredValue(SITE_ID, VALUE.NEXT_WAIT_MS))}），按 5000ms 处理`);

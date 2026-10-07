@@ -36,7 +36,6 @@ import {
   type CatalogLeaf,
   type UnitSource,
   catalogListUrl,
-  chapterOf,
   classifySource,
   courseIdFromLocation,
   currentChainFromHash,
@@ -163,7 +162,6 @@ export function startAutoplay(host: AutoplayHost): () => void {
   let currentLeaf: CatalogLeaf | null = null;
   let currentSources: UnitSource[] = [];
   let subIndex = 0;
-  let startChapter: number | null = null;
 
   // ---------------------------------------------------------- 资源获取
 
@@ -403,11 +401,7 @@ export function startAutoplay(host: AutoplayHost): () => void {
         return;
       }
 
-      // 连播范围：止于本章
-      if (startChapter !== null && chapterOf(leaf) !== startChapter) {
-        finish('已到本章末尾');
-        return;
-      }
+      // 不设范围上限：跨章一直播下去，走到目录末尾才停（用户 m00971 拍板移除「连播范围」）
 
       if (currentLeaf !== leaf) {
         const sources = await sourcesOf(leaf);
@@ -476,8 +470,6 @@ export function startAutoplay(host: AutoplayHost): () => void {
       const chain = currentChainFromHash(hash);
       const at = chain === null ? -1 : findLeafIndex(leaves, chain);
       cursor = at >= 0 ? at : 0;
-      const here = leaves[cursor];
-      startChapter = here === undefined ? null : chapterOf(here);
 
       log.info(`连播已启动：cid=${cid}，叶子 ${leaves.length} 个，从第 ${cursor + 1} 个开始`);
       host.toast('自动连播已启动', 'info');
