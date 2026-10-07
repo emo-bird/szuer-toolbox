@@ -74,6 +74,11 @@ const UNIT_INTERCEPT_TIMEOUT_MS = 3000;
 const DEFAULT_WAIT_MS = 5000;
 /** 切到视频后，检查「是不是已经播完了」的延迟 */
 const VIDEO_END_CHECK_MS = 1500;
+/**
+ * `ended` 去重窗口：部分播放器在片尾会连发两条 `ended`，只认第一条。
+ * 窗口开得比 `VIDEO_END_CHECK_MS` 大一点，免得两条路径各推一次。
+ */
+const ENDED_DEDUPE_MS = 1000;
 
 /** 面板能力（从 `SiteInitContext.panel` 取） */
 export interface AutoplayHost {
@@ -155,6 +160,20 @@ export function startAutoplay(host: AutoplayHost): () => void {
   let phase: 'idle' | 'video' | 'delay' = 'idle';
   let delayTimer: number | null = null;
   let checkTimer: number | null = null;
+
+  /**
+   * 「当前这一项已经布好 ended 陷阱」。
+   *
+   * 为什么需要它：早先的版本拿 `phase === 'video'` 当「能不能处理 ended」的判据，
+   * 结果凡是 phase 不是播放态的情形（已经 `finish()` 过、上一次 `next()` 还没走完、
+   * 页面才刚 boot）都会让 ended **被静默丢弃**——不报错、不打日志，
+   * 用户看到的就是「视频播完了但一动不动」。
+   *
+   * 现在改成显式布防：只有 `act()` 判定「这一项是视频」时才布防，`next()` 立刻撤防。
+   */
+  let endedArmed = false;
+  /** 上一次因 ended 推进的时刻，用于压制播放器连发的重复事件 */
+  let lastAdvanceAt = 0;
 
   let cid = '';
   let leaves: CatalogLeaf[] = [];
@@ -292,6 +311,7 @@ export function startAutoplay(host: AutoplayHost): () => void {
   /** 推进到下一项 */
   function next(): void {
     if (stopped) return;
+    endedArmed = false; // 离开当前项，立刻撤防
     subIndex++;
     if (subIndex >= currentSources.length) {
       cursor++;
@@ -346,6 +366,7 @@ export function startAutoplay(host: AutoplayHost): () => void {
     if (kind === 'video') {
       navigateTo(sourceHash(cid, leaf, src.id));
       phase = 'video';
+      endedArmed = true; // 布防：这一项是视频，等它的 ended
       log.info(`开始播放：${leaf.titles.join(' / ')} / ${src.title}`);
       // 兜底：万一这条视频已经播完了（目录里 finished=1 且定位在片尾），`ended` 不会再来
       checkTimer = window.setTimeout(() => {
@@ -440,7 +461,27 @@ export function startAutoplay(host: AutoplayHost): () => void {
   const onEnded = (ev: Event): void => {
     const el = ev.target;
     if (el === null || (el as Element).tagName !== 'VIDEO') return;
-    if (phase !== 'video') return;
+    if (stopped || paused) return;
+
+    // 三重护栏，都是「宁可不动，也不要乱跳」：
+    if (!endedArmed) {
+      // 当前项不是视频（文本 / 附件 / 测验的等待期），或这一条已经推进过了
+      log.debug('忽略未布防的 ended（当前项不是视频）');
+      return;
+    }
+    if (!(el as HTMLVideoElement).isConnected) {
+      // 播放器已经被换掉，这是旧元素迟到的 ended
+      log.debug('忽略已脱离文档的 ended（播放器被换掉了）');
+      return;
+    }
+    const now = Date.now();
+    if (now - lastAdvanceAt < ENDED_DEDUPE_MS) {
+      log.debug('忽略重复的 ended');
+      return;
+    }
+
+    endedArmed = false;
+    lastAdvanceAt = now;
     clearTimers();
     phase = 'idle';
     log.info('视频播放完毕，进入下一项');

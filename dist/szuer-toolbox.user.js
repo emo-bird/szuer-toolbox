@@ -50,7 +50,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-07T14:26:48.138Z（构建号 69） */
+/* 构建信息：2026-10-07T14:28:47.231Z（构建号 70） */
 
 "use strict";
 (() => {
@@ -2337,6 +2337,7 @@ ${options.desc ?? ""}
   var UNIT_INTERCEPT_TIMEOUT_MS = 3e3;
   var DEFAULT_WAIT_MS = 5e3;
   var VIDEO_END_CHECK_MS = 1500;
+  var ENDED_DEDUPE_MS = 1e3;
   var AUTOPLAY_HANDLE_KEY = "__szuUoocAutoplay";
   function readWaitMs() {
     const raw = Number(getValue(SITE_ID, VALUE.NEXT_WAIT_MS));
@@ -2378,6 +2379,8 @@ ${options.desc ?? ""}
     let phase = "idle";
     let delayTimer = null;
     let checkTimer = null;
+    let endedArmed = false;
+    let lastAdvanceAt = 0;
     let cid = "";
     let leaves = [];
     let cursor = 0;
@@ -2482,6 +2485,7 @@ ${options.desc ?? ""}
     }
     function next() {
       if (stopped) return;
+      endedArmed = false;
       subIndex++;
       if (subIndex >= currentSources.length) {
         cursor++;
@@ -2528,6 +2532,7 @@ ${options.desc ?? ""}
       if (kind === "video") {
         navigateTo(sourceHash(cid, leaf, src.id));
         phase = "video";
+        endedArmed = true;
         log7.info(`开始播放：${leaf.titles.join(" / ")} / ${src.title}`);
         checkTimer = window.setTimeout(() => {
           checkTimer = null;
@@ -2604,7 +2609,22 @@ ${options.desc ?? ""}
     const onEnded = (ev) => {
       const el2 = ev.target;
       if (el2 === null || el2.tagName !== "VIDEO") return;
-      if (phase !== "video") return;
+      if (stopped || paused) return;
+      if (!endedArmed) {
+        log7.debug("忽略未布防的 ended（当前项不是视频）");
+        return;
+      }
+      if (!el2.isConnected) {
+        log7.debug("忽略已脱离文档的 ended（播放器被换掉了）");
+        return;
+      }
+      const now = Date.now();
+      if (now - lastAdvanceAt < ENDED_DEDUPE_MS) {
+        log7.debug("忽略重复的 ended");
+        return;
+      }
+      endedArmed = false;
+      lastAdvanceAt = now;
       clearTimers();
       phase = "idle";
       log7.info("视频播放完毕，进入下一项");
@@ -7583,8 +7603,8 @@ ${text}
   // src/main.ts
   var log24 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-07T14:26:48.138Z" : null;
-  var BUILD_NO = true ? 69 : null;
+  var BUILD_TIME = true ? "2026-10-07T14:28:47.231Z" : null;
+  var BUILD_NO = true ? 70 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();
