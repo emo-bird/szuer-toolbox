@@ -113,6 +113,16 @@ export interface SiteAdapter {
   /** 站点专属功能开关；注册后由设置标签页统一渲染复选框 */
   readonly toggles?: readonly SiteToggleDef[];
   /**
+   * 本站的设置**已经渲染进了自己的标签页**，请公共设置页不要再列一遍。
+   *
+   * 为什么需要显式声明：`hasOwnSettingsTab` 原本靠「有没有一个 id 等于
+   * `<siteId>:settings` 的标签页」来判定（见 `sites/registry.ts` 的约定）。
+   * 但站点把设置**拆成多页**时（UOOC = 视频 / 连播 / AI 作答），一个 id 表达不了，
+   * 那个等式必然不成立 —— 没有这个字段，公共设置页就会把同一个开关再渲染一次，
+   * 于是同一个开关在面板里出现两遍、还能从两处改。
+   */
+  readonly settingsInOwnTabs?: boolean;
+  /**
    * **启动期**钩子：在 `document-start` 时机调用，**早于页面加载任何脚本**。
    *
    * 存在的理由：响应接管（劫持页面 XHR / fetch）必须抢在站点自己的脚本之前完成，

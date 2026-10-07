@@ -105,17 +105,35 @@ function renderValueField(siteId: string, def: ValueDef<unknown>): HTMLElement {
   return field;
 }
 
+/** `renderSiteSettings` 的可选参数 */
+export interface SiteSettingsOptions {
+  /**
+   * 只渲染这些分组的开关与配置项（分组名 = `SiteToggleDef.group` / `ValueDef.group`）。
+   *
+   * 用途：站点把自己的设置**拆成多个标签页**时，每一页只渲染属于自己那一组的东西。
+   * 落地形态是**过滤**而不是隐藏 —— 不在这一页的项根本不进 DOM，
+   * 所以同一个设置不可能从两个地方改。
+   *
+   * 给了这个参数就**不再画任何分组标题**（标签页的标题已经说明了这一页是什么），
+   * 也不再画「功能开关 / 参数设置」两个大标题：版面是「开关 → 配置项」的平铺列表。
+   * 不给 = 渲染全部（公共【全局设置】页走这条），保持原版面。
+   */
+  readonly onlyGroups?: readonly string[];
+}
+
 /**
  * 渲染某个站点的全部设置（功能开关 + 配置项）。
  *
  * @param siteId   站点 id
  * @param siteName 站点名。传 `null` 表示不画站名标题 —— 站点自己的标签页里不用重复
  * @param ctx      标签页上下文（只为拿 `host.confirm` / `host.toast`）
+ * @param opts     见 `SiteSettingsOptions`
  */
 export function renderSiteSettings(
   siteId: string,
   siteName: string | null,
   ctx: TabContext,
+  opts: SiteSettingsOptions = {},
 ): DocumentFragment {
   const frag = document.createDocumentFragment();
 
@@ -123,11 +141,17 @@ export function renderSiteSettings(
     frag.appendChild(el('div', { class: 'sztb-group-title', text: siteName }));
   }
 
-  const toggles = togglesOf(siteId);
-  const values = valuesOf(siteId);
+  const only = opts.onlyGroups;
+  const inPage = (group: string | undefined): boolean =>
+    only === undefined || only.includes(group ?? '');
+
+  const toggles = togglesOf(siteId).filter((t) => inPage(t.group));
+  const values = valuesOf(siteId).filter((d) => inPage(d.group));
 
   if (toggles.length > 0) {
-    frag.appendChild(el('div', { class: 'sztb-group-title', text: '功能开关' }));
+    if (only === undefined) {
+      frag.appendChild(el('div', { class: 'sztb-group-title', text: '功能开关' }));
+    }
 
     // 按 group 聚合，保持 togglesOf 已排好的顺序
     const byGroup = new Map<string, typeof toggles>();
@@ -139,7 +163,7 @@ export function renderSiteSettings(
     }
 
     for (const [group, items] of byGroup) {
-      if (group !== '') {
+      if (group !== '' && only === undefined) {
         frag.appendChild(el('div', { class: 'sztb-group-title', text: group }));
       }
       for (const item of items) {
@@ -167,7 +191,9 @@ export function renderSiteSettings(
   }
 
   if (values.length > 0) {
-    frag.appendChild(el('div', { class: 'sztb-group-title', text: '参数设置' }));
+    if (only === undefined) {
+      frag.appendChild(el('div', { class: 'sztb-group-title', text: '参数设置' }));
+    }
     for (const def of values) frag.appendChild(renderValueField(siteId, def));
   }
 

@@ -111,6 +111,15 @@ export interface ValueDef<T> {
   readonly label: string;
   /** 补充说明。渲染在标签**下方的独立一行**（不是塞在输入框里） */
   readonly desc?: string;
+  /**
+   * 分组名。同一个站点把设置拆成多个标签页时，用它决定这一项归哪一页
+   * （`renderSiteSettings` 的 `onlyGroups` 按这个名字过滤）。
+   *
+   * 与 `SiteToggleDef.group` 是同一套名字 —— 一个站点的开关与配置项写同一个
+   * 分组名，才会落到同一个标签页里。留空 = 不属于任何分组，只会出现在
+   * 「渲染全部」的入口（公共【全局设置】页）。
+   */
+  readonly group?: string;
   readonly default: T;
   /** 渲染成什么控件。`select` 必须一并给出 `options` */
   readonly kind: 'text' | 'password' | 'number' | 'url' | 'select';

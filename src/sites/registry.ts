@@ -51,10 +51,20 @@ export function settingsTabId(siteId: string): string {
   return `${siteId}:settings`;
 }
 
-/** 该站点是否自己注册了设置标签页 */
+/**
+ * 该站点是否自己注册了设置标签页。
+ *
+ * 两条都算「自己管设置」：
+ *   1. 有一个 id 等于 `<siteId>:settings` 的标签页（约定见上，bkxk 走这条）；
+ *   2. 适配器显式声明了 `settingsInOwnTabs: true` —— 站点把设置**拆成多个**标签页，
+ *      没有任何一个 id 能代表全部（UOOC = 视频 / 连播 / AI 作答，走这条）。
+ *
+ * 判定错了的代价不是「少显示一项」，而是同一个开关在面板里出现两遍、还能从两处改。
+ */
 export function hasOwnSettingsTab(siteId: string): boolean {
   const adapter = getAdapter(siteId);
   if (adapter === undefined) return false;
+  if (adapter.settingsInOwnTabs === true) return true;
   return adapter.tabs.some((t) => t.id === settingsTabId(siteId));
 }
 
