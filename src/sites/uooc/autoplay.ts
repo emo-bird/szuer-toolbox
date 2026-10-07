@@ -621,11 +621,12 @@ export function startAutoplay(host: AutoplayHost): () => void {
       const { index, by } = resolveCursor(hashAtBoot);
       cursor = index;
 
-      // ⚠️ 这条日志是「从第一节开始」那个 bug 的取证口（用户 m01302 拍板 A）：
-      // 两个时刻的 hash 原文 + 最终对齐方式，下次复现直接看这一行就够。
+      // ⚠️ 这条日志是起点 bug 的取证口（用户 m01302 拍板 A；2026-10 m03919 又修过一次）：
+      // 两个时刻的 hash 原文 + 最终对齐方式 + 进度统计，下次复现直接看这一行就够。
       log.info(
-        `连播已启动：cid=${cid}，叶子 ${leaves.length} 个，从第 ${cursor + 1} 个开始` +
-          `（装载时 hash=${show(hashAtBoot)}；对齐=${by}；目录到货时 hash=${show(location.hash)}）`,
+        `连播已启动：cid=${cid}，叶子 ${leaves.length} 个（未完成 ${countUnfinished()} 个），` +
+          `从第 ${cursor + 1} 个开始（装载时 hash=${show(hashAtBoot)}；对齐=${by}；` +
+          `目录到货时 hash=${show(location.hash)}）`,
       );
       host.toast('自动连播已启动', 'info');
       void step();
@@ -642,15 +643,24 @@ export function startAutoplay(host: AutoplayHost): () => void {
   }
 
   /**
-   * 对齐「这次该从哪个叶子开始」。用户 m01302 拍板 A：先取证、再兜底。
+   * 对齐「这次该从哪个叶子开始」。
    *
-   * 优先级：
-   * 1. **装载时的 hash** —— 用户地址栏里那个，最可信；
-   * 2. **目录到货时的 hash** —— 站点可能在 Angular 起来后才把 hash 写上去（t≈5s）；
-   * 3. **记住的叶子** —— 附件那条 URL 末尾 `sourceId` 恒为 0
-   *    （`catalog.ts:227` 早就标注「没验证过站点自己是不是也用 0」），站点可能不认、
+   * 2026-10 修 BUG（用户 m03875 报「打开已经学了一部分的课程，连播还是从头开始」，
+   * m03919 拍板「站点 learning 优先」）：原来的第 1 顺位是**装载时的 hash**，
+   * 而站点自己会把 hash 落在第 1 章第 1 节 ⇒ hash 一有值就直接返回，
+   * 后面几级（包括「学到哪了」）**一次都没轮到上场**。
+   *
+   * 现在的优先级：
+   * 1. **站点说用户正在这条链上**（`learning=1`，见 `catalog.ts` 的 `CatalogLeaf.learning`）
+   *    且这条链上有没学完的 → 取链上第一个 `finished !== 1`；
+   *    链上全都学完了 → 取链上第一个（别把用户甩到别处去）；
+   * 2. **装载时的 hash** —— 用户自己点进来的位置，最可信的「显式导航」；
+   * 3. **目录到货时的 hash** —— 站点可能在 Angular 起来后才把 hash 写上去（t≈5s）；
+   * 4. **记住的叶子** —— 附件那条 URL 末尾 `sourceId` 恒为 0
+   *    （`catalog.ts` 早就标注「没验证过站点自己是不是也用 0」），站点可能不认、
    *    把 hash 规整掉，这时只能靠上一次连播的记忆兜底；
-   * 4. 全都没有，才从第 1 个开始。
+   * 5. **第一个没学完的叶子** —— 什么线索都没有，至少别从「已完成」的那条开始；
+   * 6. 全都没有，才从第 1 个开始。
    */
   function resolveCursor(hashAtBoot: string): { index: number; by: string } {
     const byHash = (hash: string): number => {
@@ -658,19 +668,60 @@ export function startAutoplay(host: AutoplayHost): () => void {
       return chain === null ? -1 : findLeafIndex(leaves, chain);
     };
 
+    // 1. 站点记的「你正学到这儿」
+    const onPath = leaves.findIndex((leaf) => leaf.learning === 1);
+    if (onPath >= 0) {
+      const firstUnfinished = firstUnfinishedFrom(onPath);
+      if (firstUnfinished >= 0) {
+        return { index: firstUnfinished, by: `站点 learning 链上的第一个未完成（${firstUnfinished + 1}）` };
+      }
+      return { index: onPath, by: `站点 learning 链（${onPath + 1}，链上均已学完）` };
+    }
+
+    // 2./3. hash
     const atBoot = byHash(hashAtBoot);
     if (atBoot >= 0) return { index: atBoot, by: '装载时 hash' };
 
     const atNow = byHash(location.hash);
     if (atNow >= 0) return { index: atNow, by: '到货时 hash' };
 
+    // 4. 上次连播记住的叶子
     const saved = read<number | null>(cursorKey(), null);
     if (saved !== null) {
       const at = leaves.findIndex((leaf) => leaf.nodeId === saved);
       if (at >= 0) return { index: at, by: `记住的叶子 ${saved}` };
     }
 
+    // 5. 第一个没学完的叶子
+    const unfinished = firstUnfinishedFrom(0);
+    if (unfinished >= 0) return { index: unfinished, by: '第一个未完成的叶子' };
+
     return { index: 0, by: '没有可用线索，从第 1 个开始' };
+  }
+
+  /**
+   * 从 `from` 起（含）往后找第一个「还没学完且在同一个 learning 链上」的叶子。
+   *
+   * 「同一个链」= 该叶子的 `learning` 也是 1（`flattenLeaves` 已把链标记铺到每个叶子上）。
+   * `from` 本身不在 learning 链上时（第 5 顺位那次调用），退化成「从 `from` 起第一个未完成」。
+   * 找不到返回 -1。已学完 = `finished === 1`。
+   */
+  function firstUnfinishedFrom(from: number): number {
+    const start = leaves[from];
+    if (start === undefined) return -1;
+    const requireSameChain = start.learning === 1;
+    for (let i = from; i < leaves.length; i += 1) {
+      const leaf = leaves[i];
+      if (leaf === undefined) continue;
+      if (requireSameChain && leaf.learning !== 1) break;
+      if (leaf.finished !== 1) return i;
+    }
+    return -1;
+  }
+
+  /** 日志用：还有几个叶子没学完（站点没给 `finished` 的按「没学完」算） */
+  function countUnfinished(): number {
+    return leaves.reduce((n, leaf) => (leaf.finished === 1 ? n : n + 1), 0);
   }
 
   function uninstall(): void {

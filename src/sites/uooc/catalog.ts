@@ -60,7 +60,16 @@ export interface CatalogNode {
   id: number;
   name: string;
   children?: CatalogNode[];
+  /** 站点自己的完成标记：1=已完成。**每个节点都有**，不只是叶子 */
   finished?: number;
+  /**
+   * 站点自己的「你正学到这儿」指针：1=当前定位。
+   *
+   * 实测（2026-10，`local/capture/catalog-list.json`）整棵树里**只有 2 个**节点
+   * 是 `learning=1` —— 一个章、一个它下面的节，正好是用户当时看到的位置。
+   * 连播的起点以它为准（用户 m03919 拍板）。
+   */
+  learning?: number;
   status?: string;
 }
 
@@ -73,6 +82,15 @@ export interface CatalogLeaf {
   chain: number[];
   /** 与 `chain` 平行的标题链，用来打日志 */
   titles: string[];
+  /** 原样带上来的完成标记（1=已完成）；缺省表示站点没给 */
+  finished?: number;
+  /**
+   * `1` = 本叶子在「站点说用户正在这里」的那条链上。
+   *
+   * 注意是**链**不是点：站点实测只把 `learning=1` 标在章和节上，叶子自己没标，
+   * 所以 `flattenLeaves` 会把它沿链往下传。
+   */
+  learning?: number;
 }
 
 function normalizeNode(raw: unknown): CatalogNode | null {
@@ -83,6 +101,7 @@ function normalizeNode(raw: unknown): CatalogNode | null {
 
   const node: CatalogNode = { id, name: String(o['name'] ?? '') };
   if (typeof o['finished'] === 'number') node.finished = o['finished'];
+  if (typeof o['learning'] === 'number') node.learning = o['learning'];
   if (typeof o['status'] === 'string') node.status = o['status'];
 
   if (Array.isArray(o['children'])) {
@@ -109,17 +128,30 @@ export function parseCatalogTree(raw: unknown): CatalogNode[] {
 export function flattenLeaves(tree: readonly CatalogNode[]): CatalogLeaf[] {
   const out: CatalogLeaf[] = [];
 
-  const walk = (node: CatalogNode, ids: number[], titles: string[]): void => {
+  const walk = (
+    node: CatalogNode,
+    ids: number[],
+    titles: string[],
+    onLearningPath: boolean,
+  ): void => {
     const chain = [...ids, node.id];
     const chainTitles = [...titles, node.name];
+    // `learning` 可能只标在章/节上（实测就是如此），所以要**往下传**：
+    // 叶子自己没标，但它在「站点说用户正在这里」的那条链上。
+    const learningHere = node.learning === 1;
+    const learningPath = onLearningPath || learningHere;
+
     if (node.children === undefined || node.children.length === 0) {
-      out.push({ nodeId: node.id, title: node.name, chain, titles: chainTitles });
+      const leaf: CatalogLeaf = { nodeId: node.id, title: node.name, chain, titles: chainTitles };
+      if (node.finished !== undefined) leaf.finished = node.finished;
+      if (learningPath) leaf.learning = 1;
+      out.push(leaf);
       return;
     }
-    for (const child of node.children) walk(child, chain, chainTitles);
+    for (const child of node.children) walk(child, chain, chainTitles, learningPath);
   };
 
-  for (const node of tree) walk(node, [], []);
+  for (const node of tree) walk(node, [], [], false);
   return out;
 }
 

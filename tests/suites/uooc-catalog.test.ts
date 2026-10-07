@@ -127,6 +127,60 @@ describe('uooc/catalog · 展平叶子', () => {
   });
 });
 
+describe('uooc/catalog · 进度字段（起点判定要用）', () => {
+  // 形状照抄实测：`finished` 每个节点都有；`learning=1` 只标在章和节上，叶子自己不标
+  const tree = parseCatalogTree({
+    data: [
+      {
+        id: 100,
+        name: '第1章',
+        finished: 1,
+        learning: 0,
+        children: [
+          { id: 111, name: '1.1 已学完', finished: 1, learning: 0 },
+          { id: 112, name: '1.2 没学', finished: 0, learning: 0 },
+        ],
+      },
+      {
+        id: 200,
+        name: '第4章',
+        finished: 0,
+        learning: 1,
+        children: [
+          {
+            id: 210,
+            name: '4.1 用户在的节',
+            finished: 0,
+            learning: 1,
+            children: [
+              { id: 211, name: '4.1.1 已学完', finished: 1, learning: 0 },
+              { id: 212, name: '4.1.2 没学', finished: 0, learning: 0 },
+            ],
+          },
+          { id: 220, name: '4.2 没学', finished: 0, learning: 0 },
+        ],
+      },
+    ],
+  });
+
+  it('finished 原样带到叶子上', () => {
+    const leaves = flattenLeaves(tree);
+    assertEqual(leaves.find((l) => l.nodeId === 111)!.finished, 1);
+    assertEqual(leaves.find((l) => l.nodeId === 112)!.finished, 0);
+  });
+
+  it('learning 沿链往下传：章/节标了，它们下面的每个叶子都算在链上', () => {
+    const leaves = flattenLeaves(tree);
+    const onPath = leaves.filter((l) => l.learning === 1).map((l) => l.nodeId);
+    assertDeepEqual(onPath, [211, 212, 220]);
+  });
+
+  it('learning=0 的节点下面不会有叶子被误标', () => {
+    const leaves = flattenLeaves(tree);
+    assertEqual(leaves.find((l) => l.nodeId === 112)!.learning, undefined);
+  });
+});
+
 describe('uooc/catalog · 地址拼装', () => {
   const leaves = flattenLeaves(
     parseCatalogTree({

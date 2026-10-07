@@ -50,7 +50,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-07T15:42:14.756Z（构建号 74） */
+/* 构建信息：2026-10-07T15:52:50.740Z（构建号 75） */
 
 "use strict";
 (() => {
@@ -2000,6 +2000,7 @@ ${options.desc ?? ""}
     if (!Number.isFinite(id)) return null;
     const node = { id, name: String(o["name"] ?? "") };
     if (typeof o["finished"] === "number") node.finished = o["finished"];
+    if (typeof o["learning"] === "number") node.learning = o["learning"];
     if (typeof o["status"] === "string") node.status = o["status"];
     if (Array.isArray(o["children"])) {
       const kids = o["children"].map(normalizeNode).filter((n) => n !== null);
@@ -2015,16 +2016,21 @@ ${options.desc ?? ""}
   }
   function flattenLeaves(tree) {
     const out = [];
-    const walk = (node, ids, titles) => {
+    const walk = (node, ids, titles, onLearningPath) => {
       const chain = [...ids, node.id];
       const chainTitles = [...titles, node.name];
+      const learningHere = node.learning === 1;
+      const learningPath = onLearningPath || learningHere;
       if (node.children === void 0 || node.children.length === 0) {
-        out.push({ nodeId: node.id, title: node.name, chain, titles: chainTitles });
+        const leaf = { nodeId: node.id, title: node.name, chain, titles: chainTitles };
+        if (node.finished !== void 0) leaf.finished = node.finished;
+        if (learningPath) leaf.learning = 1;
+        out.push(leaf);
         return;
       }
-      for (const child of node.children) walk(child, chain, chainTitles);
+      for (const child of node.children) walk(child, chain, chainTitles, learningPath);
     };
-    for (const node of tree) walk(node, [], []);
+    for (const node of tree) walk(node, [], [], false);
     return out;
   }
   function toBoolFlag(v) {
@@ -2811,7 +2817,7 @@ ${options.desc ?? ""}
         const { index, by } = resolveCursor(hashAtBoot);
         cursor = index;
         log7.info(
-          `连播已启动：cid=${cid}，叶子 ${leaves.length} 个，从第 ${cursor + 1} 个开始（装载时 hash=${show(hashAtBoot)}；对齐=${by}；目录到货时 hash=${show(location.hash)}）`
+          `连播已启动：cid=${cid}，叶子 ${leaves.length} 个（未完成 ${countUnfinished()} 个），从第 ${cursor + 1} 个开始（装载时 hash=${show(hashAtBoot)}；对齐=${by}；目录到货时 hash=${show(location.hash)}）`
         );
         host.toast("自动连播已启动", "info");
         void step();
@@ -2828,6 +2834,14 @@ ${options.desc ?? ""}
         const chain = currentChainFromHash(hash);
         return chain === null ? -1 : findLeafIndex(leaves, chain);
       };
+      const onPath = leaves.findIndex((leaf) => leaf.learning === 1);
+      if (onPath >= 0) {
+        const firstUnfinished = firstUnfinishedFrom(onPath);
+        if (firstUnfinished >= 0) {
+          return { index: firstUnfinished, by: `站点 learning 链上的第一个未完成（${firstUnfinished + 1}）` };
+        }
+        return { index: onPath, by: `站点 learning 链（${onPath + 1}，链上均已学完）` };
+      }
       const atBoot = byHash(hashAtBoot);
       if (atBoot >= 0) return { index: atBoot, by: "装载时 hash" };
       const atNow = byHash(location.hash);
@@ -2837,7 +2851,24 @@ ${options.desc ?? ""}
         const at = leaves.findIndex((leaf) => leaf.nodeId === saved);
         if (at >= 0) return { index: at, by: `记住的叶子 ${saved}` };
       }
+      const unfinished = firstUnfinishedFrom(0);
+      if (unfinished >= 0) return { index: unfinished, by: "第一个未完成的叶子" };
       return { index: 0, by: "没有可用线索，从第 1 个开始" };
+    }
+    function firstUnfinishedFrom(from) {
+      const start = leaves[from];
+      if (start === void 0) return -1;
+      const requireSameChain = start.learning === 1;
+      for (let i = from; i < leaves.length; i += 1) {
+        const leaf = leaves[i];
+        if (leaf === void 0) continue;
+        if (requireSameChain && leaf.learning !== 1) break;
+        if (leaf.finished !== 1) return i;
+      }
+      return -1;
+    }
+    function countUnfinished() {
+      return leaves.reduce((n, leaf) => leaf.finished === 1 ? n : n + 1, 0);
     }
     function uninstall() {
       if (stopped) return;
@@ -7813,8 +7844,8 @@ ${text}
   // src/main.ts
   var log24 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-07T15:42:14.756Z" : null;
-  var BUILD_NO = true ? 74 : null;
+  var BUILD_TIME = true ? "2026-10-07T15:52:50.740Z" : null;
+  var BUILD_NO = true ? 75 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();
