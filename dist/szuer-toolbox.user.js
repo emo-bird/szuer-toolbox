@@ -50,7 +50,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-07T14:33:00.932Z（构建号 72） */
+/* 构建信息：2026-10-07T14:54:46.207Z（构建号 73） */
 
 "use strict";
 (() => {
@@ -1333,13 +1333,28 @@ ${options.desc ?? ""}
     root.appendChild(wrap);
     const AT_BOTTOM_SLACK = 8;
     let autoScroll = true;
+    let lastTop = 0;
+    let visible = false;
     const atBottom = () => pre.scrollTop + pre.clientHeight >= pre.scrollHeight - AT_BOTTOM_SLACK;
     pre.addEventListener("scroll", () => {
+      if (pre.clientHeight === 0) return;
+      lastTop = pre.scrollTop;
       autoScroll = atBottom();
     });
     function scrollToBottom() {
       pre.scrollTop = pre.scrollHeight;
     }
+    function restoreScroll() {
+      if (autoScroll) scrollToBottom();
+      else pre.scrollTop = Math.min(lastTop, pre.scrollHeight);
+    }
+    const sizeObserver = new ResizeObserver(() => {
+      const nowVisible = pre.clientHeight > 0;
+      if (nowVisible === visible) return;
+      visible = nowVisible;
+      if (nowVisible) restoreScroll();
+    });
+    sizeObserver.observe(pre);
     function line(entry) {
       return el("div", {
         class: "sztb-log-line",
@@ -1375,6 +1390,7 @@ ${options.desc ?? ""}
       if (autoScroll) scrollToBottom();
     });
     return () => {
+      sizeObserver.disconnect();
       off();
     };
   }
@@ -2352,7 +2368,11 @@ ${options.desc ?? ""}
         gmOpen(url, {
           active: false,
           // 后台打开，不抢当前课程页的焦点
-          insert: true,
+          // 实测（用户 m01302）：附件 URI 会落到 view.officeapps.live.com，
+          // 网页版 Office 自己把标签页提到前台，把课程页挤到后台。insert:true 会把
+          // 新标签页插在当前窗口旁边，Chrome 对"插在旁边的后台标签页"的处理不如
+          // "挂到窗口末尾"稳，所以改成 insert:false 试一次。
+          insert: false,
           setParent: true
         });
         return "gm";
@@ -2510,6 +2530,9 @@ ${options.desc ?? ""}
       log7.debug(`跳转 ${hash}`);
       location.hash = hash;
     }
+    function announce(action, src) {
+      host.toast(`即将${action}（${cursor + 1}/${leaves.length}）：${src.title}`, "info");
+    }
     async function act(leaf, src) {
       const kind = classifySource(src.type);
       if (kind === "quiz") {
@@ -2530,6 +2553,7 @@ ${options.desc ?? ""}
         return;
       }
       if (kind === "video") {
+        announce("播放", src);
         navigateTo(sourceHash(cid, leaf, src.id));
         phase = "video";
         endedArmed = true;
@@ -2547,6 +2571,7 @@ ${options.desc ?? ""}
         return;
       }
       if (kind === "attach") {
+        announce("打开", src);
         navigateTo(sourceHash(cid, leaf, src.id));
         const doc = src.documents[0];
         const uri = doc === void 0 ? "" : doc.uri;
@@ -2568,6 +2593,7 @@ ${options.desc ?? ""}
         return;
       }
       if (kind === "unknown") log7.debug(`未知资源类型 ${src.type}，按文本处理（${src.title}）`);
+      announce("跳转", src);
       navigateTo(sourceHash(cid, leaf, src.id));
       scheduleDelay();
     }
@@ -2585,6 +2611,7 @@ ${options.desc ?? ""}
           currentLeaf = leaf;
           currentSources = sources.filter((s) => classifySource(s.type) !== "unknown");
           subIndex = 0;
+          write(cursorKey(), leaf.nodeId);
         }
         if (subIndex >= currentSources.length) {
           if (currentSources.length === 0) log7.debug(`跳过无资源的叶子 ${leaf.nodeId} ${leaf.title}`);
@@ -2631,10 +2658,10 @@ ${options.desc ?? ""}
       next();
     };
     function boot2() {
-      const hash = location.hash;
-      const found = courseIdFromLocation(location.pathname, hash);
+      const hashAtBoot = location.hash;
+      const found = courseIdFromLocation(location.pathname, hashAtBoot);
       if (found === null) {
-        log7.warn(`拿不到课程 id，连播不启动（pathname=${location.pathname}，hash=${hash}）`);
+        log7.warn(`拿不到课程 id，连播不启动（pathname=${location.pathname}，hash=${hashAtBoot}）`);
         return;
       }
       cid = found;
@@ -2646,13 +2673,36 @@ ${options.desc ?? ""}
           return;
         }
         leaves = list;
-        const chain = currentChainFromHash(hash);
-        const at = chain === null ? -1 : findLeafIndex(leaves, chain);
-        cursor = at >= 0 ? at : 0;
-        log7.info(`连播已启动：cid=${cid}，叶子 ${leaves.length} 个，从第 ${cursor + 1} 个开始`);
+        const { index, by } = resolveCursor(hashAtBoot);
+        cursor = index;
+        log7.info(
+          `连播已启动：cid=${cid}，叶子 ${leaves.length} 个，从第 ${cursor + 1} 个开始（装载时 hash=${show(hashAtBoot)}；对齐=${by}；目录到货时 hash=${show(location.hash)}）`
+        );
         host.toast("自动连播已启动", "info");
         void step();
       })();
+    }
+    function show(hash) {
+      return hash === "" ? "（空）" : hash;
+    }
+    function cursorKey() {
+      return `uooc:autoplay:cursor:${cid}`;
+    }
+    function resolveCursor(hashAtBoot) {
+      const byHash = (hash) => {
+        const chain = currentChainFromHash(hash);
+        return chain === null ? -1 : findLeafIndex(leaves, chain);
+      };
+      const atBoot = byHash(hashAtBoot);
+      if (atBoot >= 0) return { index: atBoot, by: "装载时 hash" };
+      const atNow = byHash(location.hash);
+      if (atNow >= 0) return { index: atNow, by: "到货时 hash" };
+      const saved = read(cursorKey(), null);
+      if (saved !== null) {
+        const at = leaves.findIndex((leaf) => leaf.nodeId === saved);
+        if (at >= 0) return { index: at, by: `记住的叶子 ${saved}` };
+      }
+      return { index: 0, by: "没有可用线索，从第 1 个开始" };
     }
     function uninstall() {
       if (stopped) return;
@@ -7603,8 +7653,8 @@ ${text}
   // src/main.ts
   var log24 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-07T14:33:00.932Z" : null;
-  var BUILD_NO = true ? 72 : null;
+  var BUILD_TIME = true ? "2026-10-07T14:54:46.207Z" : null;
+  var BUILD_NO = true ? 73 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();

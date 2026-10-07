@@ -31,6 +31,7 @@
 import { request } from '../../common/core/http.ts';
 import { scoped } from '../../common/core/log.ts';
 import { getValue, isEnabled } from '../../common/core/settings.ts';
+import { read, write } from '../../common/core/storage.ts';
 import { pageOrSelf } from '../../common/utils/page.ts';
 import {
   type CatalogLeaf,
@@ -125,7 +126,11 @@ function openInBackgroundTab(url: string): TabOpenResult {
     try {
       (gmOpen as (u: string, o?: unknown) => unknown)(url, {
         active: false, // 后台打开，不抢当前课程页的焦点
-        insert: true,
+        // 实测（用户 m01302）：附件 URI 会落到 view.officeapps.live.com，
+        // 网页版 Office 自己把标签页提到前台，把课程页挤到后台。insert:true 会把
+        // 新标签页插在当前窗口旁边，Chrome 对"插在旁边的后台标签页"的处理不如
+        // "挂到窗口末尾"稳，所以改成 insert:false 试一次。
+        insert: false,
         setParent: true,
       });
       return 'gm';
@@ -340,6 +345,16 @@ export function startAutoplay(host: AutoplayHost): () => void {
     location.hash = hash;
   }
 
+  /**
+   * 跳转前在右上角提示一次（用户 m01302 需求 1）。
+   *
+   * 用 `PanelApi.toast`（`ToastStack` 本来就固定在 `top:10px / right:10px`），
+   * 不新造组件。文案带进度 `N/总数`，和日志的「开始播放：」那条互相印证。
+   */
+  function announce(action: '播放' | '打开' | '跳转', src: UnitSource): void {
+    host.toast(`即将${action}（${cursor + 1}/${leaves.length}）：${src.title}`, 'info');
+  }
+
   /** 处理当前叶子里的一个资源 */
   async function act(leaf: CatalogLeaf, src: UnitSource): Promise<void> {
     const kind = classifySource(src.type);
@@ -364,6 +379,7 @@ export function startAutoplay(host: AutoplayHost): () => void {
     }
 
     if (kind === 'video') {
+      announce('播放', src);
       navigateTo(sourceHash(cid, leaf, src.id));
       phase = 'video';
       endedArmed = true; // 布防：这一项是视频，等它的 ended
@@ -383,6 +399,7 @@ export function startAutoplay(host: AutoplayHost): () => void {
     }
 
     if (kind === 'attach') {
+      announce('打开', src);
       navigateTo(sourceHash(cid, leaf, src.id));
       const doc = src.documents[0];
       const uri = doc === undefined ? '' : doc.uri;
@@ -407,6 +424,7 @@ export function startAutoplay(host: AutoplayHost): () => void {
     if (kind === 'unknown') log.debug(`未知资源类型 ${src.type}，按文本处理（${src.title}）`);
 
     // 附件 / 文本 / 讨论（跳过时）/ 未知类型：都是「跳过去 → 等一会儿 → 下一项」
+    announce('跳转', src);
     navigateTo(sourceHash(cid, leaf, src.id));
     scheduleDelay();
   }
@@ -430,6 +448,8 @@ export function startAutoplay(host: AutoplayHost): () => void {
         currentLeaf = leaf;
         currentSources = sources.filter((s) => classifySource(s.type) !== 'unknown');
         subIndex = 0;
+        // 记住进度：刷新后哪怕 hash 被站点规整掉，也能接着播（见 resolveCursor）
+        write(cursorKey(), leaf.nodeId);
       }
 
       if (subIndex >= currentSources.length) {
@@ -491,10 +511,10 @@ export function startAutoplay(host: AutoplayHost): () => void {
   // ---------------------------------------------------------- 启动
 
   function boot(): void {
-    const hash = location.hash;
-    const found = courseIdFromLocation(location.pathname, hash);
+    const hashAtBoot = location.hash;
+    const found = courseIdFromLocation(location.pathname, hashAtBoot);
     if (found === null) {
-      log.warn(`拿不到课程 id，连播不启动（pathname=${location.pathname}，hash=${hash}）`);
+      log.warn(`拿不到课程 id，连播不启动（pathname=${location.pathname}，hash=${hashAtBoot}）`);
       return;
     }
     cid = found;
@@ -508,14 +528,59 @@ export function startAutoplay(host: AutoplayHost): () => void {
       }
       leaves = list;
 
-      const chain = currentChainFromHash(hash);
-      const at = chain === null ? -1 : findLeafIndex(leaves, chain);
-      cursor = at >= 0 ? at : 0;
+      const { index, by } = resolveCursor(hashAtBoot);
+      cursor = index;
 
-      log.info(`连播已启动：cid=${cid}，叶子 ${leaves.length} 个，从第 ${cursor + 1} 个开始`);
+      // ⚠️ 这条日志是「从第一节开始」那个 bug 的取证口（用户 m01302 拍板 A）：
+      // 两个时刻的 hash 原文 + 最终对齐方式，下次复现直接看这一行就够。
+      log.info(
+        `连播已启动：cid=${cid}，叶子 ${leaves.length} 个，从第 ${cursor + 1} 个开始` +
+          `（装载时 hash=${show(hashAtBoot)}；对齐=${by}；目录到货时 hash=${show(location.hash)}）`,
+      );
       host.toast('自动连播已启动', 'info');
       void step();
     })();
+  }
+
+  function show(hash: string): string {
+    return hash === '' ? '（空）' : hash;
+  }
+
+  /** 上次连播停在哪个叶子 —— **按课程分键**，换课程不会串 */
+  function cursorKey(): string {
+    return `uooc:autoplay:cursor:${cid}`;
+  }
+
+  /**
+   * 对齐「这次该从哪个叶子开始」。用户 m01302 拍板 A：先取证、再兜底。
+   *
+   * 优先级：
+   * 1. **装载时的 hash** —— 用户地址栏里那个，最可信；
+   * 2. **目录到货时的 hash** —— 站点可能在 Angular 起来后才把 hash 写上去（t≈5s）；
+   * 3. **记住的叶子** —— 附件那条 URL 末尾 `sourceId` 恒为 0
+   *    （`catalog.ts:227` 早就标注「没验证过站点自己是不是也用 0」），站点可能不认、
+   *    把 hash 规整掉，这时只能靠上一次连播的记忆兜底；
+   * 4. 全都没有，才从第 1 个开始。
+   */
+  function resolveCursor(hashAtBoot: string): { index: number; by: string } {
+    const byHash = (hash: string): number => {
+      const chain = currentChainFromHash(hash);
+      return chain === null ? -1 : findLeafIndex(leaves, chain);
+    };
+
+    const atBoot = byHash(hashAtBoot);
+    if (atBoot >= 0) return { index: atBoot, by: '装载时 hash' };
+
+    const atNow = byHash(location.hash);
+    if (atNow >= 0) return { index: atNow, by: '到货时 hash' };
+
+    const saved = read<number | null>(cursorKey(), null);
+    if (saved !== null) {
+      const at = leaves.findIndex((leaf) => leaf.nodeId === saved);
+      if (at >= 0) return { index: at, by: `记住的叶子 ${saved}` };
+    }
+
+    return { index: 0, by: '没有可用线索，从第 1 个开始' };
   }
 
   function uninstall(): void {

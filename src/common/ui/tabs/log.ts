@@ -85,11 +85,21 @@ function renderTab(root: HTMLElement): () => void {
    * 用户往上翻看历史时 autoScroll 变 false，新日志就不会把他拽回底部。
    */
   const AT_BOTTOM_SLACK = 8;
+  /** 跟随开关：用户往上翻即关，自己滑回底部即开 */
   let autoScroll = true;
+  /** 停留态下记住的位置 —— 切走再切回来要回到这里，而不是被弹回顶部 */
+  let lastTop = 0;
+  /** 上一次观测到的可见性（隐藏时 clientHeight 是 0） */
+  let visible = false;
   const atBottom = (): boolean =>
     pre.scrollTop + pre.clientHeight >= pre.scrollHeight - AT_BOTTOM_SLACK;
 
   pre.addEventListener('scroll', () => {
+    // ⚠️ 隐藏时（`.sztb-pane { display:none }`，见 style.css:194）clientHeight 与
+    // scrollHeight 都是 0，`atBottom()` 会退化成 true，把用户的「停留」悄悄改回「跟随」。
+    // 用户 m01302 要求「切换悬浮窗页面不影响状态」，所以不可见时一律不更新状态。
+    if (pre.clientHeight === 0) return;
+    lastTop = pre.scrollTop;
     autoScroll = atBottom();
   });
 
@@ -97,6 +107,28 @@ function renderTab(root: HTMLElement): () => void {
   function scrollToBottom(): void {
     pre.scrollTop = pre.scrollHeight;
   }
+
+  /**
+   * 切回日志页 / 展开面板时恢复现场（用户 m01302）：
+   * 跟随态 → 直接滚到底；停留态 → 回到用户上次看的那一行。
+   */
+  function restoreScroll(): void {
+    if (autoScroll) scrollToBottom();
+    else pre.scrollTop = Math.min(lastTop, pre.scrollHeight);
+  }
+
+  /**
+   * 隐藏的标签页是 `display:none`，尺寸为 0。尺寸从 0 变回非 0 就是「重新可见」，
+   * 这时补一次恢复 —— 光靠新日志触发滚到底是不够的：日志停了以后切回来，
+   * 元素还停在顶部（这正是用户 m01302 报的现象）。
+   */
+  const sizeObserver = new ResizeObserver(() => {
+    const nowVisible = pre.clientHeight > 0;
+    if (nowVisible === visible) return;
+    visible = nowVisible;
+    if (nowVisible) restoreScroll();
+  });
+  sizeObserver.observe(pre);
 
   function line(entry: LogEntry): HTMLElement {
     return el('div', {
@@ -151,6 +183,7 @@ function renderTab(root: HTMLElement): () => void {
   });
 
   return () => {
+    sizeObserver.disconnect();
     off();
   };
 }
