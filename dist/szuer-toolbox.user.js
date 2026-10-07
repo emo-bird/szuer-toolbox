@@ -50,7 +50,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-07T14:54:46.207Z（构建号 73） */
+/* 构建信息：2026-10-07T15:42:14.756Z（构建号 74） */
 
 "use strict";
 (() => {
@@ -1103,15 +1103,19 @@ ${options.desc ?? ""}
     }
     return field;
   }
-  function renderSiteSettings(siteId, siteName, ctx) {
+  function renderSiteSettings(siteId, siteName, ctx, opts = {}) {
     const frag = document.createDocumentFragment();
     if (siteName !== null) {
       frag.appendChild(el("div", { class: "sztb-group-title", text: siteName }));
     }
-    const toggles = togglesOf(siteId);
-    const values = valuesOf(siteId);
+    const only = opts.onlyGroups;
+    const inPage = (group) => only === void 0 || only.includes(group ?? "");
+    const toggles = togglesOf(siteId).filter((t) => inPage(t.group));
+    const values = valuesOf(siteId).filter((d) => inPage(d.group));
     if (toggles.length > 0) {
-      frag.appendChild(el("div", { class: "sztb-group-title", text: "功能开关" }));
+      if (only === void 0) {
+        frag.appendChild(el("div", { class: "sztb-group-title", text: "功能开关" }));
+      }
       const byGroup = /* @__PURE__ */ new Map();
       for (const item of toggles) {
         const g = item.group ?? "";
@@ -1120,7 +1124,7 @@ ${options.desc ?? ""}
         else arr.push(item);
       }
       for (const [group, items2] of byGroup) {
-        if (group !== "") {
+        if (group !== "" && only === void 0) {
           frag.appendChild(el("div", { class: "sztb-group-title", text: group }));
         }
         for (const item of items2) {
@@ -1131,7 +1135,7 @@ ${options.desc ?? ""}
               ...item.desc !== void 0 ? { desc: item.desc } : {},
               checked: isEnabled(item.siteId, item.id),
               risk: item.risk,
-              confirm: (opts) => ctx.host.confirm(opts),
+              confirm: (opts2) => ctx.host.confirm(opts2),
               onChange: (checked) => {
                 setEnabled(item.siteId, item.id, checked);
                 ctx.host.toast(
@@ -1145,7 +1149,9 @@ ${options.desc ?? ""}
       }
     }
     if (values.length > 0) {
-      frag.appendChild(el("div", { class: "sztb-group-title", text: "参数设置" }));
+      if (only === void 0) {
+        frag.appendChild(el("div", { class: "sztb-group-title", text: "参数设置" }));
+      }
       for (const def of values) frag.appendChild(renderValueField(siteId, def));
     }
     return frag;
@@ -1285,6 +1291,16 @@ ${options.desc ?? ""}
     await copyText(text);
   }
   var tabCss = `
+/*
+ * 日志页必须自己就是「有确定高度的容器」，否则粘底一定失效。
+ * 根因：.sztb-body 是 padding:10px 的滚动盒（style.css:188），而 .sztb-pane 默认
+ * 由内容撑高（style.css:194 只写了 display/flex-direction/gap）⇒ .sztb-log-wrap 的
+ * height:100% 遇到「父高度 auto」会退化成 auto，.sztb-log 永远不产生溢出、
+ * scrollTop 恒为 0，真正在滚的其实是外层 .sztb-body。
+ * 于是「新日志到底」这段逻辑盯的是一个根本没在滚的元素，表现为日志一直停在顶上。
+ * 把 pane 钉成 body 的内容高度，滚动权就交回日志区自己（顺带把工具栏固定住）。
+ */
+.sztb-pane[data-tab="common:log"] { height: 100%; min-height: 0; overflow: hidden; }
 .sztb-log-wrap { display: flex; flex-direction: column; gap: 8px; height: 100%; min-height: 0; }
 .sztb-log { overflow: auto; flex: 1 1 auto; }
 .sztb-log-empty { padding: 20px 8px; text-align: center; color: var(--sztb-text-dim); font-size: 12.5px; }
@@ -1802,6 +1818,7 @@ ${options.desc ?? ""}
   function hasOwnSettingsTab(siteId) {
     const adapter = getAdapter(siteId);
     if (adapter === void 0) return false;
+    if (adapter.settingsInOwnTabs === true) return true;
     return adapter.tabs.some((t) => t.id === settingsTabId(siteId));
   }
   var NOT_INJECT = { inject: false, adapter: null, autoExpand: false, reason: "none" };
@@ -2261,6 +2278,14 @@ ${options.desc ?? ""}
   // src/sites/uooc/settings.ts
   var log6 = scoped("uooc/settings");
   var SITE_ID = "uooc";
+  var GROUP = {
+    /** 播放器行为（U1/U2/U4） */
+    VIDEO: "视频",
+    /** 连播行为（U3） */
+    AUTOPLAY: "连播",
+    /** AI 作答（U6–U9） */
+    AI: "AI 作答"
+  };
   var TOGGLE = {
     /** 🟢 二倍速播放（U1） */
     RATE_2X: "rate-2x",
@@ -2270,14 +2295,22 @@ ${options.desc ?? ""}
     KEEP_PLAYING: "keep-playing",
     /** 🟠 自动连播（U3） */
     AUTO_NEXT: "auto-next",
-    /** 🟢 连播遇到讨论不暂停（需求细则 A.3「跳过讨论」，默认开） */
+    /** 🟢 附件只路过，不打开文件（仍导航到该小节）—— 用户 m01816 需求 2 */
+    SKIP_ATTACHMENT: "skip-attachment",
+    /** 🟢 文本不停留：导航过去后不等待，直接下一项 */
+    SKIP_TEXT: "skip-text",
+    /** 🟢 讨论不停留、不暂停（需求细则 A.3「跳过讨论」，默认开） */
     SKIP_DISCUSSION: "skip-discussion",
+    /** 🟠 测验不自动进入：连播走到测验就停下等用户 */
+    SKIP_QUIZ: "skip-quiz",
     /** 🟠 AI 答题（U6–U9）—— 未实现，先占位 */
     AI_ANSWER: "ai-answer"
   };
   var VALUE = {
-    /** 连播每一项之间的等待时间（ms），全局单一值 */
-    NEXT_WAIT_MS: "next-wait-ms"
+    /** 跳到下一项**之后**等多久再处理它（ms） */
+    WAIT_BEFORE_MS: "wait-before-ms",
+    /** 一项处理完、跳下一项**之前**停留多久（ms） */
+    HOLD_AFTER_MS: "hold-after-ms"
   };
   var UOOC_TOGGLES = [
     {
@@ -2286,7 +2319,7 @@ ${options.desc ?? ""}
       desc: "锁在 2 倍速，在播放器里改回去会被扳回",
       risk: "safe",
       default: true,
-      group: "视频"
+      group: GROUP.VIDEO
     },
     {
       id: TOGGLE.MUTE,
@@ -2294,7 +2327,7 @@ ${options.desc ?? ""}
       desc: "锁在静音，取消会被扳回",
       risk: "safe",
       default: true,
-      group: "视频"
+      group: GROUP.VIDEO
     },
     {
       id: TOGGLE.KEEP_PLAYING,
@@ -2302,7 +2335,7 @@ ${options.desc ?? ""}
       desc: "暂停会被立刻恢复（含你自己按的暂停）",
       risk: "safe",
       default: true,
-      group: "视频"
+      group: GROUP.VIDEO
     },
     {
       id: TOGGLE.AUTO_NEXT,
@@ -2310,7 +2343,23 @@ ${options.desc ?? ""}
       desc: "播完自动打开目录里的下一个视频",
       risk: "trace",
       default: false,
-      group: "视频"
+      group: GROUP.AUTOPLAY
+    },
+    {
+      id: TOGGLE.SKIP_ATTACHMENT,
+      label: "跳过附件",
+      desc: "不打开附件文件（仍导航到该小节）。打开时会尝试在后台标签页里打开",
+      risk: "safe",
+      default: true,
+      group: GROUP.AUTOPLAY
+    },
+    {
+      id: TOGGLE.SKIP_TEXT,
+      label: "跳过文本",
+      desc: "文本不停留：导航过去后不等待，直接下一项",
+      risk: "safe",
+      default: false,
+      group: GROUP.AUTOPLAY
     },
     {
       id: TOGGLE.SKIP_DISCUSSION,
@@ -2318,7 +2367,15 @@ ${options.desc ?? ""}
       desc: "连播遇到讨论不提醒、不暂停，等一会儿直接继续",
       risk: "safe",
       default: true,
-      group: "连播"
+      group: GROUP.AUTOPLAY
+    },
+    {
+      id: TOGGLE.SKIP_QUIZ,
+      label: "跳过测验",
+      desc: "不自动进入测验：连播走到测验就停下等你（AI 作答是另一个开关）",
+      risk: "trace",
+      default: false,
+      group: GROUP.AUTOPLAY
     },
     {
       id: TOGGLE.AI_ANSWER,
@@ -2326,24 +2383,47 @@ ${options.desc ?? ""}
       desc: "测验未完成时由脚本作答（尚未实现，开了也没用）",
       risk: "trace",
       default: false,
-      group: "连播"
+      group: GROUP.AI
     }
   ];
   function registerUoocSettings() {
     registerValue({
       siteId: SITE_ID,
-      id: VALUE.NEXT_WAIT_MS,
-      label: "连播等待时间(ms)",
-      desc: "每走到一项后停留多久再继续，所有资源共用",
+      id: VALUE.WAIT_BEFORE_MS,
+      label: "跳转后等待(ms)",
+      desc: "导航到某一项之后先等这么久，再开始处理它（给页面加载与视频缓冲留时间）",
       default: "5000",
-      kind: "number"
+      kind: "number",
+      group: GROUP.AUTOPLAY
+    });
+    registerValue({
+      siteId: SITE_ID,
+      id: VALUE.HOLD_AFTER_MS,
+      label: "播完后停留(ms)",
+      desc: "一项处理完、跳下一项之前停留的时间（0 = 立刻跳）",
+      default: "3000",
+      kind: "number",
+      group: GROUP.AUTOPLAY
     });
   }
-  function applyUoocSettings() {
-    const waitMs = Number(getValue(SITE_ID, VALUE.NEXT_WAIT_MS));
-    if (!Number.isFinite(waitMs) || waitMs < 0) {
-      log6.warn(`连播等待时间取值异常（${String(getValue(SITE_ID, VALUE.NEXT_WAIT_MS))}），按 5000ms 处理`);
+  function readMs(id, fallbackMs) {
+    const raw = getValue(SITE_ID, id);
+    const num3 = Number(raw);
+    if (!Number.isFinite(num3) || num3 < 0) {
+      log6.warn(`${id} 取值异常（${String(raw)}），按 ${fallbackMs}ms 处理`);
+      return fallbackMs;
     }
+    return num3;
+  }
+  function waitBeforeMs() {
+    return readMs(VALUE.WAIT_BEFORE_MS, 5e3);
+  }
+  function holdAfterMs() {
+    return readMs(VALUE.HOLD_AFTER_MS, 3e3);
+  }
+  function applyUoocSettings() {
+    waitBeforeMs();
+    holdAfterMs();
   }
 
   // src/sites/uooc/autoplay.ts
@@ -2351,47 +2431,69 @@ ${options.desc ?? ""}
   var FALLBACK_AFTER_LOAD_MS = 2e3;
   var CATALOG_HARD_TIMEOUT_MS = 3e4;
   var UNIT_INTERCEPT_TIMEOUT_MS = 3e3;
-  var DEFAULT_WAIT_MS = 5e3;
   var VIDEO_END_CHECK_MS = 1500;
   var ENDED_DEDUPE_MS = 1e3;
   var AUTOPLAY_HANDLE_KEY = "__szuUoocAutoplay";
-  function readWaitMs() {
-    const raw = Number(getValue(SITE_ID, VALUE.NEXT_WAIT_MS));
-    return Number.isFinite(raw) && raw >= 0 ? raw : DEFAULT_WAIT_MS;
-  }
-  function openInBackgroundTab(url) {
-    if (url === "") return "failed";
-    const g = globalThis;
-    const gmOpen = g["GM_openInTab"];
-    if (typeof gmOpen === "function") {
-      try {
-        gmOpen(url, {
-          active: false,
-          // 后台打开，不抢当前课程页的焦点
-          // 实测（用户 m01302）：附件 URI 会落到 view.officeapps.live.com，
-          // 网页版 Office 自己把标签页提到前台，把课程页挤到后台。insert:true 会把
-          // 新标签页插在当前窗口旁边，Chrome 对"插在旁边的后台标签页"的处理不如
-          // "挂到窗口末尾"稳，所以改成 insert:false 试一次。
-          insert: false,
-          setParent: true
-        });
-        return "gm";
-      } catch (err) {
-        log7.warn(`GM_openInTab 不可用，退回 <a>：${String(err)}`);
-      }
-    }
+  var CTRL_CLICK_FALLBACK_MS = 1200;
+  function synthesizeCtrlClick(url) {
     try {
       const a = document.createElement("a");
       a.href = url;
       a.target = "_blank";
       a.rel = "noopener noreferrer";
+      a.style.display = "none";
       document.body.appendChild(a);
-      a.click();
+      a.dispatchEvent(
+        new MouseEvent("click", {
+          bubbles: true,
+          cancelable: true,
+          ctrlKey: true,
+          // Windows / Linux
+          metaKey: true,
+          // macOS 的 Cmd+左键
+          view: window
+        })
+      );
       a.remove();
-      return "anchor";
-    } catch {
-      return "failed";
+      return true;
+    } catch (err) {
+      log7.warn(`合成 Ctrl+左键失败：${String(err)}`);
+      return false;
     }
+  }
+  function openViaGm(url) {
+    const g = globalThis;
+    const gmOpen = g["GM_openInTab"];
+    if (typeof gmOpen !== "function") return false;
+    try {
+      gmOpen(url, {
+        active: false,
+        // 后台打开，不抢当前课程页的焦点
+        insert: false,
+        // 挂到窗口末尾，别插在当前标签页旁边
+        setParent: true
+      });
+      return true;
+    } catch (err) {
+      log7.warn(`GM_openInTab 不可用：${String(err)}`);
+      return false;
+    }
+  }
+  function scheduleGmFallback(url) {
+    window.setTimeout(() => {
+      if (openViaGm(url)) {
+        log7.debug("已用 GM_openInTab 兜底（看到两个标签页 = Ctrl+左键生效了）");
+      }
+    }, CTRL_CLICK_FALLBACK_MS);
+  }
+  function openInBackgroundTab(url) {
+    if (url === "") return "failed";
+    if (synthesizeCtrlClick(url)) {
+      scheduleGmFallback(url);
+      return "ctrl";
+    }
+    if (openViaGm(url)) return "gm";
+    return "failed";
   }
   function startAutoplay(host) {
     let stopped = false;
@@ -2515,8 +2617,22 @@ ${options.desc ?? ""}
       }
       void step();
     }
+    function scheduleHold() {
+      const ms = holdAfterMs();
+      if (ms <= 0) {
+        next();
+        return;
+      }
+      phase = "delay";
+      log7.debug(`播完，停留 ${ms}ms 后继续`);
+      delayTimer = window.setTimeout(() => {
+        delayTimer = null;
+        phase = "idle";
+        next();
+      }, ms);
+    }
     function scheduleDelay() {
-      const ms = readWaitMs();
+      const ms = waitBeforeMs();
       phase = "delay";
       log7.debug(`等待 ${ms}ms 后继续`);
       delayTimer = window.setTimeout(() => {
@@ -2545,6 +2661,11 @@ ${options.desc ?? ""}
           pause(`遇到未完成的测验「${src.title}」，但 AI 答题还没实现`);
           return;
         }
+        if (isEnabled(SITE_ID, TOGGLE.SKIP_QUIZ)) {
+          log7.info(`跳过未完成的测验：${src.title}`);
+          scheduleDelay();
+          return;
+        }
         pause(`遇到未完成的测验「${src.title}」，请手动完成`);
         return;
       }
@@ -2565,23 +2686,30 @@ ${options.desc ?? ""}
           if (v !== null && v.ended) {
             log7.debug("视频已在片尾，直接推进");
             phase = "idle";
-            next();
+            scheduleHold();
           }
         }, VIDEO_END_CHECK_MS);
         return;
       }
       if (kind === "attach") {
-        announce("打开", src);
+        const skipOpen = isEnabled(SITE_ID, TOGGLE.SKIP_ATTACHMENT);
+        announce(skipOpen ? "跳转" : "打开", src);
         navigateTo(sourceHash(cid, leaf, src.id));
+        if (skipOpen) {
+          log7.info(`附件只路过，不打开文件：${src.title}`);
+          scheduleDelay();
+          return;
+        }
         const doc = src.documents[0];
         const uri = doc === void 0 ? "" : doc.uri;
         const name = doc === void 0 ? src.title : doc.title;
         if (uri !== "") {
           const how = openInBackgroundTab(uri);
-          if (how === "gm") {
-            log7.info(`打开附件（后台标签页）：${name}`);
-          } else if (how === "anchor") {
-            log7.info(`尝试打开附件：${name}（走 <a target=_blank>，无法确认是否被弹窗拦截）`);
+          if (how === "ctrl") {
+            log7.info(`打开附件（合成 Ctrl+左键，后台标签页）：${name}`);
+            log7.debug("1.2 秒后会用 GM_openInTab 兜一次；看到两个标签页就说明 Ctrl+左键生效了");
+          } else if (how === "gm") {
+            log7.info(`打开附件（GM_openInTab 后台标签页）：${name}`);
           } else {
             log7.warn(`附件打开失败：${name}`);
             host.toast(`附件「${name}」打开失败，请手动查看`, "warn");
@@ -2593,6 +2721,13 @@ ${options.desc ?? ""}
         return;
       }
       if (kind === "unknown") log7.debug(`未知资源类型 ${src.type}，按文本处理（${src.title}）`);
+      if (kind === "text" && isEnabled(SITE_ID, TOGGLE.SKIP_TEXT)) {
+        announce("跳转", src);
+        navigateTo(sourceHash(cid, leaf, src.id));
+        log7.debug(`文本不停留：${src.title}`);
+        next();
+        return;
+      }
       announce("跳转", src);
       navigateTo(sourceHash(cid, leaf, src.id));
       scheduleDelay();
@@ -2654,8 +2789,8 @@ ${options.desc ?? ""}
       lastAdvanceAt = now;
       clearTimers();
       phase = "idle";
-      log7.info("视频播放完毕，进入下一项");
-      next();
+      log7.info("视频播放完毕，准备进入下一项");
+      scheduleHold();
     };
     function boot2() {
       const hashAtBoot = location.hash;
@@ -2744,14 +2879,33 @@ ${options.desc ?? ""}
     return uninstall;
   }
 
-  // src/sites/uooc/tabs/settings.ts
-  var UOOC_SETTINGS_TAB_ID = settingsTabId("uooc");
-  var UOOC_SETTINGS_TAB = {
-    id: UOOC_SETTINGS_TAB_ID,
-    title: "设置",
+  // src/sites/uooc/tabs/ai.ts
+  var UOOC_AI_TAB = {
+    id: `${SITE_ID}:ai`,
+    title: "AI 作答",
+    order: 220,
+    mount(root, ctx) {
+      root.appendChild(renderSiteSettings(SITE_ID, null, ctx, { onlyGroups: [GROUP.AI] }));
+    }
+  };
+
+  // src/sites/uooc/tabs/autoplay.ts
+  var UOOC_AUTOPLAY_TAB = {
+    id: `${SITE_ID}:autoplay`,
+    title: "连播",
+    order: 210,
+    mount(root, ctx) {
+      root.appendChild(renderSiteSettings(SITE_ID, null, ctx, { onlyGroups: [GROUP.AUTOPLAY] }));
+    }
+  };
+
+  // src/sites/uooc/tabs/video.ts
+  var UOOC_VIDEO_TAB = {
+    id: `${SITE_ID}:video`,
+    title: "视频",
     order: 200,
     mount(root, ctx) {
-      root.appendChild(renderSiteSettings("uooc", null, ctx));
+      root.appendChild(renderSiteSettings(SITE_ID, null, ctx, { onlyGroups: [GROUP.VIDEO] }));
     }
   };
 
@@ -2950,7 +3104,13 @@ ${options.desc ?? ""}
     name: "UOOC 优课联盟",
     hosts: HOSTS,
     pages: PAGES,
-    tabs: [UOOC_SETTINGS_TAB],
+    tabs: [UOOC_VIDEO_TAB, UOOC_AUTOPLAY_TAB, UOOC_AI_TAB],
+    /**
+     * 本站的设置**拆成了三个标签页**（视频 / 连播 / AI 作答），没有任何一个 id
+     * 能代表全部 ⇒ 必须显式声明，否则公共【设置】页会把同一批开关再渲染一遍。
+     * 详见 `src/sites/types.ts` 的 `settingsInOwnTabs`。
+     */
+    settingsInOwnTabs: true,
     toggles: UOOC_TOGGLES,
     /**
      * 启动期：此刻 `document.body` 还不存在，**只注册设置、不碰 DOM**。
@@ -7653,8 +7813,8 @@ ${text}
   // src/main.ts
   var log24 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-07T14:54:46.207Z" : null;
-  var BUILD_NO = true ? 73 : null;
+  var BUILD_TIME = true ? "2026-10-07T15:42:14.756Z" : null;
+  var BUILD_NO = true ? 74 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();

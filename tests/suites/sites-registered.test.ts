@@ -212,14 +212,28 @@ describe('sites 真实注册表 —— 站点设置标签页归属', () => {
     assertEqual(hasOwnSettingsTab('bkxk'), true, '公共设置页据此跳过 bkxk');
   });
 
-  it('UOOC 已注册自己的设置标签页 ⇒ 公共页跳过它，只留一行指引', () => {
+  it('UOOC 把设置拆进三个自己的标签页 ⇒ 公共页跳过它，只留一行指引', () => {
     bootReal();
     const uooc = allAdapters().find((a) => a.id === 'uooc');
     assert(uooc !== undefined, 'uooc 适配器应已注册');
-    const tab = uooc!.tabs.find((t) => t.id === settingsTabId('uooc'));
-    assert(tab !== undefined, 'uooc 应注册 id 为 uooc:settings 的标签页');
-    assertEqual(tab!.title, '设置');
+    // 拆成多页之后，没有任何一个 id 能代表全部 ⇒ 必须靠这个显式声明兜住，
+    // 否则 `hasOwnSettingsTab` 的旧等式不成立，公共页会把同一批开关再渲染一遍。
+    assertEqual(uooc!.settingsInOwnTabs, true, 'UOOC 必须显式声明「设置在自己的标签页里」');
+    assertEqual(
+      uooc!.tabs.some((t) => t.id === settingsTabId('uooc')),
+      false,
+      'UOOC 不该再有 uooc:settings 这一个汇总页',
+    );
     assertEqual(hasOwnSettingsTab('uooc'), true, '公共设置页据此跳过 uooc');
+  });
+
+  it('UOOC 的三个设置页 id 都带 uooc: 前缀', () => {
+    bootReal();
+    const uooc = allAdapters().find((a) => a.id === 'uooc');
+    assertEqual(uooc!.tabs.length, 3, 'UOOC 应为 视频 / 连播 / AI 作答 三个标签页');
+    for (const tab of uooc!.tabs) {
+      assert(tab.id.startsWith('uooc:'), `站点标签页 id 应带前缀，实际=${tab.id}`);
+    }
   });
 
   it('未注册的站点一律报 false（不能因为查不到适配器就抛错）', () => {

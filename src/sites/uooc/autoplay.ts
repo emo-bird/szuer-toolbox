@@ -30,7 +30,7 @@
 
 import { request } from '../../common/core/http.ts';
 import { scoped } from '../../common/core/log.ts';
-import { getValue, isEnabled } from '../../common/core/settings.ts';
+import { isEnabled } from '../../common/core/settings.ts';
 import { read, write } from '../../common/core/storage.ts';
 import { pageOrSelf } from '../../common/utils/page.ts';
 import {
@@ -55,7 +55,7 @@ import {
   waitCatalog,
   waitUnitLearn,
 } from './intercept.ts';
-import { SITE_ID, TOGGLE, VALUE } from './settings.ts';
+import { SITE_ID, TOGGLE, holdAfterMs, waitBeforeMs } from './settings.ts';
 
 const log = scoped('uooc/autoplay');
 
@@ -71,8 +71,6 @@ const FALLBACK_AFTER_LOAD_MS = 2000;
 const CATALOG_HARD_TIMEOUT_MS = 30000;
 /** 等站点自己发 `getUnitLearn` 的上限；超时自己补发 */
 const UNIT_INTERCEPT_TIMEOUT_MS = 3000;
-/** `{等待时间}` 设置项缺失时的兜底值（需求细则 A.3 的默认值） */
-const DEFAULT_WAIT_MS = 5000;
 /** 切到视频后，检查「是不是已经播完了」的延迟 */
 const VIDEO_END_CHECK_MS = 1500;
 /**
@@ -96,11 +94,6 @@ export interface AutoplayHandle {
 
 /** 手柄挂到 `window` 上用的键名 */
 export const AUTOPLAY_HANDLE_KEY = '__szuUoocAutoplay';
-
-function readWaitMs(): number {
-  const raw = Number(getValue<string>(SITE_ID, VALUE.NEXT_WAIT_MS));
-  return Number.isFinite(raw) && raw >= 0 ? raw : DEFAULT_WAIT_MS;
-}
 
 /** 附件标签页的打开结果：`ctrl` 合成 Ctrl+左键（未确认）、`gm` 走 Tampermonkey、`failed` 明确失败 */
 export type TabOpenResult = 'ctrl' | 'gm' | 'failed';
@@ -376,9 +369,31 @@ export function startAutoplay(host: AutoplayHost): () => void {
     void step();
   }
 
-  /** 等 `{等待时间}` 后推进 */
+  /**
+   * 一项处理完、跳下一项之前先停留 `{播完后停留}`。
+   *
+   * 与 `scheduleDelay()` 的区别只是**读哪个设置**，但两者语义完全不同，别合并：
+   *   - `scheduleDelay()`（跳转后等待）：刚导航到某一项，等页面就绪；
+   *   - `scheduleHold()` （播完后停留）：这一项已经做完了，缓缓再跳走。
+   */
+  function scheduleHold(): void {
+    const ms = holdAfterMs();
+    if (ms <= 0) {
+      next();
+      return;
+    }
+    phase = 'delay';
+    log.debug(`播完，停留 ${ms}ms 后继续`);
+    delayTimer = window.setTimeout(() => {
+      delayTimer = null;
+      phase = 'idle';
+      next();
+    }, ms);
+  }
+
+  /** 等 `{跳转后等待}` 后推进 */
   function scheduleDelay(): void {
-    const ms = readWaitMs();
+    const ms = waitBeforeMs();
     phase = 'delay';
     log.debug(`等待 ${ms}ms 后继续`);
     delayTimer = window.setTimeout(() => {
@@ -418,6 +433,12 @@ export function startAutoplay(host: AutoplayHost): () => void {
         pause(`遇到未完成的测验「${src.title}」，但 AI 答题还没实现`);
         return;
       }
+      if (isEnabled(SITE_ID, TOGGLE.SKIP_QUIZ)) {
+        // 「跳过测验」= 不自动进入：连播不导航过去，直接路过（用户 m01877 拍板）
+        log.info(`跳过未完成的测验：${src.title}`);
+        scheduleDelay();
+        return;
+      }
       pause(`遇到未完成的测验「${src.title}」，请手动完成`);
       return;
     }
@@ -441,15 +462,24 @@ export function startAutoplay(host: AutoplayHost): () => void {
         if (v !== null && v.ended) {
           log.debug('视频已在片尾，直接推进');
           phase = 'idle';
-          next();
+          scheduleHold();
         }
       }, VIDEO_END_CHECK_MS);
       return;
     }
 
     if (kind === 'attach') {
-      announce('打开', src);
+      // 「跳过附件」= 不打开文件，**但仍然导航到该小节**（用户 m01816 需求 2 原话）。
+      // 导航这一步不能省：连播走过某个小节本身就是「这一项处理过了」的证据，
+      // 而且用户要的正是「小节照走、文件别开」。
+      const skipOpen = isEnabled(SITE_ID, TOGGLE.SKIP_ATTACHMENT);
+      announce(skipOpen ? '跳转' : '打开', src);
       navigateTo(sourceHash(cid, leaf, src.id));
+      if (skipOpen) {
+        log.info(`附件只路过，不打开文件：${src.title}`);
+        scheduleDelay();
+        return;
+      }
       const doc = src.documents[0];
       const uri = doc === undefined ? '' : doc.uri;
       const name = doc === undefined ? src.title : doc.title;
@@ -473,7 +503,17 @@ export function startAutoplay(host: AutoplayHost): () => void {
 
     if (kind === 'unknown') log.debug(`未知资源类型 ${src.type}，按文本处理（${src.title}）`);
 
-    // 附件 / 文本 / 讨论（跳过时）/ 未知类型：都是「跳过去 → 等一会儿 → 下一项」
+    if (kind === 'text' && isEnabled(SITE_ID, TOGGLE.SKIP_TEXT)) {
+      // 「跳过文本」= 不停留：仍然导航过去（不然这一项等于没走过），但不等待。
+      // 与「跳过附件」的差别就在这 —— 附件是「不开文件」，文本是「不占时间」。
+      announce('跳转', src);
+      navigateTo(sourceHash(cid, leaf, src.id));
+      log.debug(`文本不停留：${src.title}`);
+      next();
+      return;
+    }
+
+    // 附件（未跳过时）/ 文本 / 讨论（跳过时）/ 未知类型：都是「跳过去 → 等一会儿 → 下一项」
     announce('跳转', src);
     navigateTo(sourceHash(cid, leaf, src.id));
     scheduleDelay();
@@ -554,8 +594,8 @@ export function startAutoplay(host: AutoplayHost): () => void {
     lastAdvanceAt = now;
     clearTimers();
     phase = 'idle';
-    log.info('视频播放完毕，进入下一项');
-    next();
+    log.info('视频播放完毕，准备进入下一项');
+    scheduleHold();
   };
 
   // ---------------------------------------------------------- 启动

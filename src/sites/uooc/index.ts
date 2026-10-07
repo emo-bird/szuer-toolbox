@@ -16,7 +16,9 @@ import type { SiteAdapter } from '../types.ts';
 import { startAutoplay } from './autoplay.ts';
 import { installUoocIntercept } from './intercept.ts';
 import { SITE_ID, UOOC_TOGGLES, applyUoocSettings, registerUoocSettings } from './settings.ts';
-import { UOOC_SETTINGS_TAB } from './tabs/settings.ts';
+import { UOOC_AI_TAB } from './tabs/ai.ts';
+import { UOOC_AUTOPLAY_TAB } from './tabs/autoplay.ts';
+import { UOOC_VIDEO_TAB } from './tabs/video.ts';
 import { startVideoAssist } from './video.ts';
 
 const log = scoped('site/uooc');
@@ -54,7 +56,13 @@ export const uoocAdapter: SiteAdapter = {
   name: 'UOOC 优课联盟',
   hosts: HOSTS,
   pages: PAGES,
-  tabs: [UOOC_SETTINGS_TAB],
+  tabs: [UOOC_VIDEO_TAB, UOOC_AUTOPLAY_TAB, UOOC_AI_TAB],
+  /**
+   * 本站的设置**拆成了三个标签页**（视频 / 连播 / AI 作答），没有任何一个 id
+   * 能代表全部 ⇒ 必须显式声明，否则公共【设置】页会把同一批开关再渲染一遍。
+   * 详见 `src/sites/types.ts` 的 `settingsInOwnTabs`。
+   */
+  settingsInOwnTabs: true,
   toggles: UOOC_TOGGLES,
 
   /**
