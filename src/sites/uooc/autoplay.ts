@@ -673,9 +673,19 @@ export function startAutoplay(host: AutoplayHost): () => void {
     if (onPath >= 0) {
       const firstUnfinished = firstUnfinishedFrom(onPath);
       if (firstUnfinished >= 0) {
-        return { index: firstUnfinished, by: `站点 learning 链上的第一个未完成（${firstUnfinished + 1}）` };
+        return {
+          index: firstUnfinished,
+          by: `站点 learning 链上的第一个未完成（${firstUnfinished + 1}）`,
+        };
       }
-      return { index: onPath, by: `站点 learning 链（${onPath + 1}，链上均已学完）` };
+      // 链上全学完了：不回头，从链尾之后接着找没学完的（「学到第 4 章、第 4 章已清空」
+      // 这种情形该去第 5 章，而不是把第 4 章第 1 个再放一遍）
+      const chainEnd = lastOnChainFrom(onPath);
+      const after = firstUnfinishedFrom(chainEnd + 1);
+      if (after >= 0) {
+        return { index: after, by: `站点 learning 链已学完，往后第一个未完成（${after + 1}）` };
+      }
+      return { index: onPath, by: `站点 learning 链（${onPath + 1}，整门课都已学完）` };
     }
 
     // 2./3. hash
@@ -717,6 +727,14 @@ export function startAutoplay(host: AutoplayHost): () => void {
       if (leaf.finished !== 1) return i;
     }
     return -1;
+  }
+
+  /** `from` 所在的 learning 链的最后一个下标（`from` 不在链上时就是 `from` 自己） */
+  function lastOnChainFrom(from: number): number {
+    if (leaves[from]?.learning !== 1) return from;
+    let end = from;
+    while (leaves[end + 1]?.learning === 1) end += 1;
+    return end;
   }
 
   /** 日志用：还有几个叶子没学完（站点没给 `finished` 的按「没学完」算） */

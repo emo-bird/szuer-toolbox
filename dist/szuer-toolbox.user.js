@@ -50,7 +50,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-07T15:52:50.740Z（构建号 75） */
+/* 构建信息：2026-10-07T15:53:24.019Z（构建号 76） */
 
 "use strict";
 (() => {
@@ -2838,9 +2838,17 @@ ${options.desc ?? ""}
       if (onPath >= 0) {
         const firstUnfinished = firstUnfinishedFrom(onPath);
         if (firstUnfinished >= 0) {
-          return { index: firstUnfinished, by: `站点 learning 链上的第一个未完成（${firstUnfinished + 1}）` };
+          return {
+            index: firstUnfinished,
+            by: `站点 learning 链上的第一个未完成（${firstUnfinished + 1}）`
+          };
         }
-        return { index: onPath, by: `站点 learning 链（${onPath + 1}，链上均已学完）` };
+        const chainEnd = lastOnChainFrom(onPath);
+        const after = firstUnfinishedFrom(chainEnd + 1);
+        if (after >= 0) {
+          return { index: after, by: `站点 learning 链已学完，往后第一个未完成（${after + 1}）` };
+        }
+        return { index: onPath, by: `站点 learning 链（${onPath + 1}，整门课都已学完）` };
       }
       const atBoot = byHash(hashAtBoot);
       if (atBoot >= 0) return { index: atBoot, by: "装载时 hash" };
@@ -2866,6 +2874,12 @@ ${options.desc ?? ""}
         if (leaf.finished !== 1) return i;
       }
       return -1;
+    }
+    function lastOnChainFrom(from) {
+      if (leaves[from]?.learning !== 1) return from;
+      let end = from;
+      while (leaves[end + 1]?.learning === 1) end += 1;
+      return end;
     }
     function countUnfinished() {
       return leaves.reduce((n, leaf) => leaf.finished === 1 ? n : n + 1, 0);
@@ -7844,8 +7858,8 @@ ${text}
   // src/main.ts
   var log24 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-07T15:52:50.740Z" : null;
-  var BUILD_NO = true ? 75 : null;
+  var BUILD_TIME = true ? "2026-10-07T15:53:24.019Z" : null;
+  var BUILD_NO = true ? 76 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();
