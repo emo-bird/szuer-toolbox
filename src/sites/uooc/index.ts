@@ -13,6 +13,8 @@
 
 import { scoped } from '../../common/core/log.ts';
 import type { SiteAdapter } from '../types.ts';
+import { startAutoplay } from './autoplay.ts';
+import { installUoocIntercept } from './intercept.ts';
 import { SITE_ID, UOOC_TOGGLES, applyUoocSettings, registerUoocSettings } from './settings.ts';
 import { UOOC_SETTINGS_TAB } from './tabs/settings.ts';
 import { startVideoAssist } from './video.ts';
@@ -36,9 +38,11 @@ const HOSTS: readonly string[] = ['uooc.net.cn', '*.uooc.net.cn'];
  * 三处对应实测到的真实 URL：
  *   - `/home/learn/index#/2042342697/57920722/...` —— 旧版学习页（hash 路由）
  *   - `/home/learn/new/2042342697#/...`           —— 新版学习页
- *   - `/exam/983779533`                           —— 新版答题页（tid 直接写在路径里）
- * 旧版的答题界面是**嵌在旧版学习页里的 iframe**（`/exam/paper?cid=&tid=`），
- * 所以它由第一条规则覆盖，不需要单独列。
+ *   - `/exam/paper?cid=2005836044&tid=153728628`  —— 答题页
+ *
+ * ⚠️ 更正：旧注释写「新版答题页 `/exam/983779533`，tid 直接写在路径里」，
+ * **2025-xx 实测是 `/exam/paper?cid=&tid=`**（`tid` 取自目录资源的 `task_id`，
+ * 见 `catalog.ts` 的 `examUrl()`）。这里两条 `/exam/*` 都能覆盖，不影响功能。
  */
 const PAGES: readonly string[] = ['/home/learn/index*', '/home/learn/new/*', '/exam/*'];
 
@@ -60,6 +64,12 @@ export const uoocAdapter: SiteAdapter = {
    */
   earlyInit() {
     registerUoocSettings();
+
+    // ⚠️ 必须在这里装嗅探，不能挪到 init：
+    // `earlyInit` 是 document-start，早于站点 Angular 启动；挪到 init 就会漏掉
+    // 首屏那波 `getCatalogList`（`src/sites/types.ts:116-124` 有明文约束）。
+    // 嗅探只读、不改写响应，所以不需要开关就能装（与 bkxk 的 hijack 同一口径）。
+    installUoocIntercept();
   },
 
   /** 挂载期：DOM 已就绪，可以开始接管播放器。 */
@@ -67,15 +77,19 @@ export const uoocAdapter: SiteAdapter = {
     applyUoocSettings();
 
     const onLearnPage = location.pathname.startsWith(LEARN_PATH_PREFIX);
+    let autoplayMounted = false;
     if (onLearnPage) {
       startVideoAssist();
+      startAutoplay({ toast: (message, kind) => ctx.panel.toast(message, kind) });
+      autoplayMounted = true;
     } else {
-      log.debug(`非学习页（${location.pathname}），本次不启动视频助手`);
+      log.debug(`非学习页（${location.pathname}），本次不启动视频助手与连播`);
     }
 
     log.info(
       `UOOC 适配器已启用：isFeaturePage=${String(ctx.isFeaturePage)}，` +
-        `路径=${location.pathname}，视频助手=${onLearnPage ? '已挂载' : '未挂载'}`,
+        `路径=${location.pathname}，视频助手=${onLearnPage ? '已挂载' : '未挂载'}，` +
+        `连播=${autoplayMounted ? '已挂载' : '未挂载'}`,
     );
   },
 };

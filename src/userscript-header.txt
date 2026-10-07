@@ -24,6 +24,7 @@
 // @grant        GM_removeValueChangeListener
 // @grant        GM_setClipboard
 // @grant        GM_registerMenuCommand
+// @grant        GM_openInTab
 // @run-at       document-start
 // @noframes
 // ==/UserScript==

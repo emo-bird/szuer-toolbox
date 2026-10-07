@@ -31,12 +31,18 @@ export const TOGGLE = {
   KEEP_PLAYING: 'keep-playing',
   /** 🟠 自动连播（U3） */
   AUTO_NEXT: 'auto-next',
+  /** 🟢 连播遇到讨论不暂停（需求细则 A.3「跳过讨论」，默认开） */
+  SKIP_DISCUSSION: 'skip-discussion',
+  /** 🟠 AI 答题（U6–U9）—— 未实现，先占位 */
+  AI_ANSWER: 'ai-answer',
 } as const;
 
 /** 配置项 id 常量 */
 export const VALUE = {
   /** 连播范围：章内 / 跨章 */
   NEXT_SCOPE: 'nextScope',
+  /** 连播每一项之间的等待时间（ms），全局单一值 */
+  NEXT_WAIT_MS: 'next-wait-ms',
 } as const;
 
 export const UOOC_TOGGLES: readonly SiteToggleDef[] = [
@@ -72,6 +78,22 @@ export const UOOC_TOGGLES: readonly SiteToggleDef[] = [
     default: false,
     group: '视频',
   },
+  {
+    id: TOGGLE.SKIP_DISCUSSION,
+    label: '跳过讨论',
+    desc: '连播遇到讨论不提醒、不暂停，等一会儿直接继续',
+    risk: 'safe',
+    default: true,
+    group: '连播',
+  },
+  {
+    id: TOGGLE.AI_ANSWER,
+    label: 'AI 答题',
+    desc: '测验未完成时由脚本作答（尚未实现，开了也没用）',
+    risk: 'trace',
+    default: false,
+    group: '连播',
+  },
 ];
 
 /**
@@ -91,6 +113,15 @@ export function registerUoocSettings(): void {
       { value: 'all', label: '跨章继续' },
     ],
   });
+
+  registerValue<string>({
+    siteId: SITE_ID,
+    id: VALUE.NEXT_WAIT_MS,
+    label: '连播等待时间(ms)',
+    desc: '每走到一项后停留多久再继续，所有资源共用',
+    default: '5000',
+    kind: 'number',
+  });
 }
 
 /**
@@ -103,5 +134,10 @@ export function applyUoocSettings(): void {
   const scope = getStoredValue<string>(SITE_ID, VALUE.NEXT_SCOPE);
   if (scope !== 'chapter' && scope !== 'all') {
     log.warn(`连播范围取值异常（${scope}），按「止于本章」处理`);
+  }
+
+  const waitMs = Number(getStoredValue<string>(SITE_ID, VALUE.NEXT_WAIT_MS));
+  if (!Number.isFinite(waitMs) || waitMs < 0) {
+    log.warn(`连播等待时间取值异常（${String(getStoredValue(SITE_ID, VALUE.NEXT_WAIT_MS))}），按 5000ms 处理`);
   }
 }

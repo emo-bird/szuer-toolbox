@@ -16,6 +16,9 @@ const checks = [
   // 也不再需要 @connect 白名单；改为申请 unsafeWindow 以拿到页面上下文的 fetch。
   ['不再声明 @grant GM_xmlhttpRequest', !/^\/\/ @grant\s+GM_xmlhttpRequest$/m.test(text)],
   ['声明 @grant unsafeWindow', /^\/\/ @grant\s+unsafeWindow$/m.test(text)],
+  // 附件要在后台开标签页：不带用户手势的程序化 <a target=_blank> 会被弹窗拦截器静默拦掉，
+  // 只有 GM_openInTab 不受影响（真机冒烟实证：日志报 OK、实际一个标签页都没开出来）。
+  ['声明 @grant GM_openInTab', /^\/\/ @grant\s+GM_openInTab$/m.test(text)],
   ['没有遗留的 @connect 白名单', !/^\/\/ @connect\s/m.test(text)],
   ['@noframes', /^\/\/ @noframes$/m.test(text)],
   ['@run-at document-start', /^\/\/ @run-at\s+document-start$/m.test(text)],
@@ -33,7 +36,12 @@ const checks = [
   ['是 IIFE（没有顶层 await/export）', !/^export\s/m.test(text) && text.includes('(() => {')],
   ['含公共标签页 id', text.includes('common:settings') && text.includes('common:log')],
   ['含演示适配器 id', text.includes('demo:playground')],
-  ['含 UOOC 适配器 id', text.includes("id: \"uooc\"") || text.includes("id: 'uooc'")],
+  // uooc 适配器的 id 用的是 SITE_ID 常量（src/sites/uooc/index.ts:53 id: SITE_ID，
+  // 常量在 src/sites/uooc/settings.ts 里定义），产物里只会留下 `var SITE_ID = "uooc"`，
+  // 不会有 `id: "uooc"` 这个字面量 —— 所以断言必须认常量，不能认字面量。
+  ['含 UOOC 适配器 id', text.includes('SITE_ID = "uooc"') || text.includes("SITE_ID = 'uooc'")],
+  ['含 UOOC 适配器', text.includes('name: "UOOC 优课联盟"')],
+  ['UOOC 适配器已注册进注册表', text.includes('registerAdapter(uoocAdapter)')],
   // 这一条专门防 UOOC 那次事故：header 的 @match 承诺了站点，注册表却没登记，
   // 表现是「脚本注入执行完全正常但什么都不做、日志里一行说明都没有」。
   // 所以既要看到适配器本体（显示名），也要看到它真的被 registerAdapter 注册。
