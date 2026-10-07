@@ -19,8 +19,12 @@
  *    这里看到该标记就跳过 —— 那条链路的响应体我们自己拿得到，走 `prime*` 直接喂进来。
  *
  * ⚠️ 截获**不可靠**（站点可能换接口、可能用缓存、可能在我们装钩子之前就发过）。
- * 所以调用方一律「等 N 毫秒，等不到就自己补发一次同源 GET」——见 `autoplay.ts` 的
- * `CATALOG_INTERCEPT_TIMEOUT_MS`。
+ * 所以调用方一律「等一会儿，等不到就自己补发一次同源 GET」——见 `autoplay.ts` 的
+ * `waitCatalog` / `catalogWhenSiteGivesUp`（`FALLBACK_AFTER_LOAD_MS` + `CATALOG_HARD_TIMEOUT_MS`）
+ * 与 `sourcesOf` 的 `UNIT_INTERCEPT_TIMEOUT_MS`。
+ *
+ * ⚠️ 别再退回「固定短超时」：站点那发 `getCatalogList` 是在 Angular 起来之后（约 5 秒）才出去的，
+ * 任何几秒级的固定超时都必然抢先补发（实测白打一发 35KB）。
  */
 
 import { scoped } from '../../common/core/log.ts';
