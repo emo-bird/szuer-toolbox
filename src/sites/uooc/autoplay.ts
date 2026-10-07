@@ -102,8 +102,83 @@ function readWaitMs(): number {
   return Number.isFinite(raw) && raw >= 0 ? raw : DEFAULT_WAIT_MS;
 }
 
-/** 附件标签页的打开结果：`gm` 走 Tampermonkey、`anchor` 走 `<a>`（未确认）、`failed` 明确失败 */
-export type TabOpenResult = 'gm' | 'anchor' | 'failed';
+/** 附件标签页的打开结果：`ctrl` 合成 Ctrl+左键（未确认）、`gm` 走 Tampermonkey、`failed` 明确失败 */
+export type TabOpenResult = 'ctrl' | 'gm' | 'failed';
+
+/** 给「合成 Ctrl+左键」留多久才认定它没开出来（无实测依据，先拍一个） */
+const CTRL_CLICK_FALLBACK_MS = 1200;
+
+/**
+ * 合成一次「Ctrl+左键」点击。
+ *
+ * Chrome 把带 `ctrlKey` 的链接点击解释成「在**后台**新标签页打开」—— 这正是我们要的，
+ * 也是用户 m01510 点名的方案。
+ *
+ * ⚠️ 两个已知风险，写在这里免得下次又踩：
+ *  1. 程序化的 `<a target="_blank">` 点击**不带用户手势**时，会被弹窗拦截器**静默**吃掉
+ *     （不抛异常、不报错）—— 本文件下面的 `openInBackgroundTab` 注释里就记着一次实测。
+ *     合成事件不是可信事件、同样吃不到用户手势，所以这一级**可能根本没开出来**，
+ *     而从调用方的返回值上看不出来。
+ *  2. 即使开出来了，附件 URI 在浏览器里会落到 Office 那边（实测 `view.officeapps.live.com`），
+ *     抢不抢前台由对方决定，我们这边管不着。
+ * ⇒ 因此它只是**一级尝试**，后面还有 GM 兜底，**不能当成结果**。
+ */
+function synthesizeCtrlClick(url: string): boolean {
+  try {
+    const a = document.createElement('a');
+    a.href = url;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.dispatchEvent(
+      new MouseEvent('click', {
+        bubbles: true,
+        cancelable: true,
+        ctrlKey: true, // Windows / Linux
+        metaKey: true, // macOS 的 Cmd+左键
+        view: window,
+      }),
+    );
+    a.remove();
+    return true;
+  } catch (err) {
+    log.warn(`合成 Ctrl+左键失败：${String(err)}`);
+    return false;
+  }
+}
+
+/** 走 Tampermonkey 的 `GM_openInTab`（不受弹窗拦截影响，header 里已 `@grant`） */
+function openViaGm(url: string): boolean {
+  const g = globalThis as Record<string, unknown>;
+  const gmOpen = g['GM_openInTab'];
+  if (typeof gmOpen !== 'function') return false;
+  try {
+    (gmOpen as (u: string, o?: unknown) => unknown)(url, {
+      active: false, // 后台打开，不抢当前课程页的焦点
+      insert: false, // 挂到窗口末尾，别插在当前标签页旁边
+      setParent: true,
+    });
+    return true;
+  } catch (err) {
+    log.warn(`GM_openInTab 不可用：${String(err)}`);
+    return false;
+  }
+}
+
+/**
+ * 「合成 Ctrl+左键」那一级**无法自证**，所以到点无条件用 GM 再兜一次。
+ * 这一步是**为了验证**而存在的：
+ *  - 看到**两个**标签页 ⇒ Ctrl+左键生成了，把 `scheduleGmFallback` 整个删掉即可；
+ *  - 只看到**一个**、且课程页仍被挤到后台 ⇒ 这条路走不通，换方案（见开发文档 §7）。
+ */
+function scheduleGmFallback(url: string): void {
+  window.setTimeout(() => {
+    if (openViaGm(url)) {
+      log.debug('已用 GM_openInTab 兜底（看到两个标签页 = Ctrl+左键生效了）');
+    }
+  }, CTRL_CLICK_FALLBACK_MS);
+}
 
 /**
  * 打开一个后台标签页。
@@ -113,45 +188,19 @@ export type TabOpenResult = 'gm' | 'anchor' | 'failed';
  * `a.click()` 开 `target="_blank"` 会被弹窗拦截器**静默**拦掉（不抛异常、不报错），
  * 和 `sites/bkxk/page-realm.ts:4-8` 记的那个坑是同一类。
  *
- * 所以优先走 Tampermonkey 的 `GM_openInTab`（不受弹窗拦截影响，header 里已 `@grant`），
- * 拿不到它才退回 `<a target="_blank">`，并且**如实**返回三态：
- * 只有走 GM 才叫成功；走 `<a>` 只能标「未确认」；抛异常才是 failed。
+ * 当前策略（用户 m01510 指定）：**先合成 Ctrl+左键**，1.2 秒后 GM 兜底；
+ * 只有合成直接抛异常才同步走 GM。返回值如实反映走的是哪一级，不反映"是否真的开出来了"。
  */
 function openInBackgroundTab(url: string): TabOpenResult {
   if (url === '') return 'failed';
 
-  const g = globalThis as Record<string, unknown>;
-  const gmOpen = g['GM_openInTab'];
-  if (typeof gmOpen === 'function') {
-    try {
-      (gmOpen as (u: string, o?: unknown) => unknown)(url, {
-        active: false, // 后台打开，不抢当前课程页的焦点
-        // 实测（用户 m01302）：附件 URI 会落到 view.officeapps.live.com，
-        // 网页版 Office 自己把标签页提到前台，把课程页挤到后台。insert:true 会把
-        // 新标签页插在当前窗口旁边，Chrome 对"插在旁边的后台标签页"的处理不如
-        // "挂到窗口末尾"稳，所以改成 insert:false 试一次。
-        insert: false,
-        setParent: true,
-      });
-      return 'gm';
-    } catch (err) {
-      log.warn(`GM_openInTab 不可用，退回 <a>：${String(err)}`);
-    }
+  if (synthesizeCtrlClick(url)) {
+    scheduleGmFallback(url);
+    return 'ctrl';
   }
 
-  try {
-    const a = document.createElement('a');
-    a.href = url;
-    a.target = '_blank';
-    a.rel = 'noopener noreferrer';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    // 弹窗拦截是静默的，这里无法证明真的开出来了 ⇒ 只能标 anchor，不能标成功
-    return 'anchor';
-  } catch {
-    return 'failed';
-  }
+  if (openViaGm(url)) return 'gm';
+  return 'failed';
 }
 
 /**
@@ -406,10 +455,11 @@ export function startAutoplay(host: AutoplayHost): () => void {
       const name = doc === undefined ? src.title : doc.title;
       if (uri !== '') {
         const how = openInBackgroundTab(uri);
-        if (how === 'gm') {
-          log.info(`打开附件（后台标签页）：${name}`);
-        } else if (how === 'anchor') {
-          log.info(`尝试打开附件：${name}（走 <a target=_blank>，无法确认是否被弹窗拦截）`);
+        if (how === 'ctrl') {
+          log.info(`打开附件（合成 Ctrl+左键，后台标签页）：${name}`);
+          log.debug('1.2 秒后会用 GM_openInTab 兜一次；看到两个标签页就说明 Ctrl+左键生效了');
+        } else if (how === 'gm') {
+          log.info(`打开附件（GM_openInTab 后台标签页）：${name}`);
         } else {
           log.warn(`附件打开失败：${name}`);
           host.toast(`附件「${name}」打开失败，请手动查看`, 'warn');
