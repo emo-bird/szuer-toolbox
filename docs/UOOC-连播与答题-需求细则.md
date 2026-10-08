@@ -74,19 +74,48 @@
 | 二倍速 / 静音 / 防失焦暂停 | `src/sites/uooc/video.ts` | ❌ 不动 |
 | 自动连播 | §B（**整段重写**） | ✅ 重写 |
 | AI 答题 | §C（**保留**） | 仅补 §D 填空题 |
-| 接口嗅探 `intercept.ts` | `src/sites/uooc/intercept.ts` | ✅ **整份删除**（新连播不再用接口） |
+| 接口嗅探 `intercept.ts` | `src/sites/uooc/intercept.ts` | ⚠️ **不再整份删**：监视页要拦目录树算进度、§C.5 要拦 `/exam/commit` 响应。**留用 + 扩写**，详见 §E.3 |
 
 ## A.4 测验：页内 iframe，**不跳转**
 
 用户原话：「**点击 dom 后页面上就会出现答题页的 iframe，直接操作 iframe 就可以，不用跳转**」。
 
-- 旧版点测验资源 ⇒ **主区域换成答题 iframe**（指向 `/exam/paper?cid=&tid=`），
+- 旧版点测验资源 ⇒ **主区域换成答题 iframe**，
   **目录还在左边、仍然可点**（用户已确认：「替换主区域，目录仍可点」）。
-- ⇒ **不整页跳转、不拼 URL、不需要 `tid`**：脚本直接进 iframe 操作 DOM 就行。
-- ⇒ **不需要「交接条」**：`ai/handoff.ts` 那套是给「整页跳转、跨页面接力」设计的，
-  旧版从头到尾同一个页面，没有这回事。见 §E.1。
+- ⇒ **不整页跳转、不拼 URL、不需要「交接条」**。`ai/handoff.ts` 那套是给
+  「整页跳转、跨页面接力」设计的，旧版从头到尾同一个页面，没有这回事。见 §E.1。
 - 于是 `/exam/*` 作为**顶级页面**只属于新版流程；本站适配范围（旧版）不涉及。
+  （适配器的 `pages` 因此**不再列 `/exam/*`**，见 `src/sites/uooc/index.ts`。）
 - ⚠️ iframe 是**同源**的（`ai/fill.ts` 的 `collectRoots()` 能扫到它），所以 DOM 操作没问题。
+
+### A.4.1 `tid` 从哪来 —— **从 iframe 的 `src` 里读**（m05858 修正）
+
+> 原文这里写的是「**不需要 `tid`**」，**写过头了**，已按用户 m05858 的实测修正。
+
+用户 m05858 给出的真实 iframe 地址：
+
+```
+https://www.uooc.net.cn/exam/1208164042      ← 没有查询参数，数字在路径里
+```
+
+抓包侧对上（`local/uooc-flow-index.txt:24 / :140 / :48 / :49`，同一个测验连着四发）：
+
+```
+GET /exam/736720049                          200 / 302
+GET /exam/taskInfo?tid=736720049             200  application/json
+GET /exam/getTaskPaper?tid=736720049         200  application/json
+```
+
+⇒ 路径末段那个数字**就是 `tid`**，站点自己紧接着就拿它去 `getTaskPaper` 了。
+
+- 所以：`tid` **白写在答题 iframe 的地址里**，连播不需要预先知道、也不需要跨页面传递
+  —— §A.4 那句「不需要交接」的真意在此。
+- `tidFromLocation()` **两种形状都认**（`ai/index.ts`）：
+  `/exam/{tid}`（页内 iframe 走这条）与 `/exam/paper?cid=&tid=`（整页形态）。
+- `quizTidOnPage()`：**先扫 `iframe[src*="/exam/"]`**，扫不到再退回当前地址。
+- ⚠️ **仍然走 `fetchPaper(tid)` 接口拉题**，不是「从 iframe 的 DOM 里读题」。
+  理由：接口给得出**每题满分 `score`** 与 `student_answer`，而 §C.5「按 `score_list`
+  挑低分题重答」必须要前者；纯 DOM 读题拿不到满分，只能退化成「按分数升序」。
 
 ---
 
@@ -100,7 +129,9 @@
 三条硬约束：
 
 1. **不调任何目录接口。** `getCatalogList` / `getUnitLearn` / `learning` 链 —— 一律不碰。
-   因此 `src/sites/uooc/intercept.ts` 整份删除，`catalog.ts` 的接口模型整份作废。
+   因此连播导航本身不再用接口；但 `src/sites/uooc/intercept.ts` **不整份删**
+   （§C.5 要拦 `/exam/commit` 响应、监视页要拦目录树算进度），见 §E.3。
+   `catalog.ts` 的接口模型（解析 / 展平 / 拼 URL）整份作废，只留类型字典。
 2. **下一项从当前 DOM 里现取**，不预知、不缓存。
 3. **判定发生在「点开之后」**：先点 → 等页面变 → 再看当前页是什么 → 决定动作。
 
@@ -524,7 +555,9 @@ activate(el):
 
 **已拍板（不再问）**：
 
-- ✅ 测验的 `tid` 怎么来 —— **不用来**。旧版点测验 = 页内 iframe，直接操作 iframe，不跳转、不拼 URL。
+- ✅ 测验的 `tid` 怎么来 —— **从答题 iframe 的 `src` 里读**（m05858 修正，详见 §A.4.1）。
+  旧版点测验 = 页内 iframe，`tid` 就在它的地址末段（`/exam/1208164042`），
+  不用连播预知、不用跨页面交接。**题目仍走 `fetchPaper(tid)` 接口**（要每题满分 `score`）。
 - ✅ 填空题（§D）—— **这次不做**，连播优先；需求留在文档里，下一轮再开。
 - ✅ `tests/suites/uooc-catalog.test.ts` —— **随删**。
 - ✅ commit 返回判据（m04879 素材）—— `code==1` 通过 / `code==110` 未通过（含 `score_list`/`pass_score`），§B.5/§C.5 采用。
