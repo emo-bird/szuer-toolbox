@@ -52,7 +52,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-08T15:27:52.445Z（构建号 88） */
+/* 构建信息：2026-10-08T16:20:52.768Z（构建号 90） */
 
 "use strict";
 (() => {
@@ -2964,10 +2964,12 @@ ${options.desc ?? ""}
     AI_ANSWER: "ai-answer"
   };
   var VALUE = {
-    /** 跳到下一项**之后**等多久再处理它（ms） */
+    /** 改完 `location.hash` 之后、开始等元素出现之前的固定 sleep（ms） */
     WAIT_BEFORE_MS: "wait-before-ms",
-    /** 一项处理完、跳下一项**之前**停留多久（ms） */
+    /** 一项处理完（`ended` 之后）停留多久再重拉课程树（ms） */
     HOLD_AFTER_MS: "hold-after-ms",
+    /** 除 API 请求本身之外，所有「等某个条件出现」的超时（ms） */
+    WAIT_TIMEOUT_MS: "wait-timeout-ms",
     /** 大模型接口根地址（OpenAI Chat Completions 兼容），如 `https://api.openai.com/v1` */
     AI_BASE_URL: "ai-base-url",
     /** 大模型 API Key */
@@ -3018,7 +3020,7 @@ ${options.desc ?? ""}
       siteId: SITE_ID,
       id: VALUE.WAIT_BEFORE_MS,
       label: "跳转后等待(ms)",
-      desc: "导航到某一项之后先等这么久，再开始处理它（给页面加载与视频缓冲留时间）",
+      desc: "改完地址栏 hash 后先等这么久，再开始等页面元素出现（给页面加载与视频缓冲留时间）",
       default: "5000",
       kind: "number",
       group: GROUP.AUTOPLAY
@@ -3027,8 +3029,17 @@ ${options.desc ?? ""}
       siteId: SITE_ID,
       id: VALUE.HOLD_AFTER_MS,
       label: "播完后停留(ms)",
-      desc: "一项处理完、跳下一项之前停留的时间（0 = 立刻跳）",
-      default: "3000",
+      desc: "视频播放结束（ended）后停留这么久，再去重拉课程树确认完成状态",
+      default: "5000",
+      kind: "number",
+      group: GROUP.AUTOPLAY
+    });
+    registerValue({
+      siteId: SITE_ID,
+      id: VALUE.WAIT_TIMEOUT_MS,
+      label: "全局等待超时(ms)",
+      desc: "除取数请求外，所有「等某个东西出现」的超时上限（等元素、等待测验交卷……）",
+      default: "30000",
       kind: "number",
       group: GROUP.AUTOPLAY
     });
@@ -3091,7 +3102,7 @@ ${options.desc ?? ""}
     return readMs(VALUE.WAIT_BEFORE_MS, 5e3);
   }
   function holdAfterMs() {
-    return readMs(VALUE.HOLD_AFTER_MS, 3e3);
+    return readMs(VALUE.HOLD_AFTER_MS, 5e3);
   }
   function readText(id) {
     return getValue(SITE_ID, id).trim();
@@ -9445,8 +9456,8 @@ ${text}
   // src/main.ts
   var log29 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-08T15:27:52.445Z" : null;
-  var BUILD_NO = true ? 88 : null;
+  var BUILD_TIME = true ? "2026-10-08T16:20:52.768Z" : null;
+  var BUILD_NO = true ? 90 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();

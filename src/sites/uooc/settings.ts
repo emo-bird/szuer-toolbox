@@ -67,10 +67,12 @@ export const TOGGLE = {
 
 /** 配置项 id 常量 */
 export const VALUE = {
-  /** 跳到下一项**之后**等多久再处理它（ms） */
+  /** 改完 `location.hash` 之后、开始等元素出现之前的固定 sleep（ms） */
   WAIT_BEFORE_MS: 'wait-before-ms',
-  /** 一项处理完、跳下一项**之前**停留多久（ms） */
+  /** 一项处理完（`ended` 之后）停留多久再重拉课程树（ms） */
   HOLD_AFTER_MS: 'hold-after-ms',
+  /** 除 API 请求本身之外，所有「等某个条件出现」的超时（ms） */
+  WAIT_TIMEOUT_MS: 'wait-timeout-ms',
   /** 大模型接口根地址（OpenAI Chat Completions 兼容），如 `https://api.openai.com/v1` */
   AI_BASE_URL: 'ai-base-url',
   /** 大模型 API Key */
@@ -129,7 +131,7 @@ export function registerUoocSettings(): void {
     siteId: SITE_ID,
     id: VALUE.WAIT_BEFORE_MS,
     label: '跳转后等待(ms)',
-    desc: '导航到某一项之后先等这么久，再开始处理它（给页面加载与视频缓冲留时间）',
+    desc: '改完地址栏 hash 后先等这么久，再开始等页面元素出现（给页面加载与视频缓冲留时间）',
     default: '5000',
     kind: 'number',
     group: GROUP.AUTOPLAY,
@@ -139,8 +141,18 @@ export function registerUoocSettings(): void {
     siteId: SITE_ID,
     id: VALUE.HOLD_AFTER_MS,
     label: '播完后停留(ms)',
-    desc: '一项处理完、跳下一项之前停留的时间（0 = 立刻跳）',
-    default: '3000',
+    desc: '视频播放结束（ended）后停留这么久，再去重拉课程树确认完成状态',
+    default: '5000',
+    kind: 'number',
+    group: GROUP.AUTOPLAY,
+  });
+
+  registerValue<string>({
+    siteId: SITE_ID,
+    id: VALUE.WAIT_TIMEOUT_MS,
+    label: '全局等待超时(ms)',
+    desc: '除取数请求外，所有「等某个东西出现」的超时上限（等元素、等待测验交卷……）',
+    default: '30000',
     kind: 'number',
     group: GROUP.AUTOPLAY,
   });
@@ -209,14 +221,24 @@ function readMs(id: string, fallbackMs: number): number {
   return num;
 }
 
-/** 跳到下一项**之后**等多久再处理它（ms） */
+/** 改完 `location.hash` 之后、开始等元素出现之前的固定 sleep（ms） */
 export function waitBeforeMs(): number {
   return readMs(VALUE.WAIT_BEFORE_MS, 5000);
 }
 
-/** 一项处理完、跳下一项**之前**停留多久（ms） */
+/** 视频 `ended` 之后、重拉课程树之前的停留（ms） */
 export function holdAfterMs(): number {
-  return readMs(VALUE.HOLD_AFTER_MS, 3000);
+  return readMs(VALUE.HOLD_AFTER_MS, 5000);
+}
+
+/**
+ * 除 API 请求本身之外，所有「等某个条件出现」的超时（ms）。
+ *
+ * 承载的场景：等任务点元素出现、等待视频 `ended`、等测验交卷后 `finished` 翻 1。
+ * **不要**把这个值用在 `request()` 上 —— 取数请求的超时是另一套（§E.6，单次 30 秒）。
+ */
+export function waitTimeoutMs(): number {
+  return readMs(VALUE.WAIT_TIMEOUT_MS, 30000);
 }
 
 /** 读一个字符串配置项并去掉首尾空白 */
