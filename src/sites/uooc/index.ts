@@ -35,6 +35,7 @@ import { UOOC_AUTOPLAY_TAB } from './tabs/autoplay.ts';
 import { UOOC_MONITOR_TAB } from './tabs/monitor.ts';
 import { UOOC_VIDEO_TAB } from './tabs/video.ts';
 import { startVideoAssist } from './video.ts';
+import { startVideoQuiz } from './video-quiz.ts';
 
 const log = scoped('site/uooc');
 
@@ -146,11 +147,13 @@ export const uoocAdapter: SiteAdapter = {
     }
 
     startVideoAssist();
+    // 视频随机小测：无条件自动作答（读 DOM 里的答案，用户 m06055 拍板不留开关）
+    startVideoQuiz();
     // 只装载、不启动：由用户在【连播】页点【开始连播】（用户 m04485 第二轮拍板）
     startAutoplay(ctx.panel);
     log.info(
       `UOOC 旧版课程页已启用：isFeaturePage=${String(ctx.isFeaturePage)}，` +
-        `路径=${location.pathname}，视频助手=已挂载，连播=已装载（等用户点开始）`,
+        `路径=${location.pathname}，视频助手=已挂载，小测助手=已挂载，连播=已装载（等用户点开始）`,
     );
   },
 };

@@ -282,8 +282,12 @@ function resourceRows(sectionLi: HTMLElement): HTMLElement[] {
 /**
  * 资源行 → 类型。
  *
- * 首选 `span.tag-source-ico` 的 `ng-if="source.type == NN"` —— 那是站点自己写的类型号；
- * 取不到再退回图标类名（`icon-video` 之类）。
+ * 首选 `span.tag-source-ico` 的 `ng-if="source.type == NN"` —— 那是站点自己写的类型号
+ * （字典见 `catalog.ts` 的 `SOURCE_TYPE`，已按 11 份采样核对过）。
+ *
+ * 取不到再退回图标类名，**类名取的是 2026-10-08 那批采样的实测值**
+ * （`icon-huixingzhen` / `icon-wendang1` / `icon-dingdanguanli` —— 站点用的是
+ * 阿里图标库那种没语义的中文拼音名，猜是猜不出来的）。
  */
 function kindOf(row: HTMLElement): SourceKind {
   const ico = row.querySelector('span.tag-source-ico');
@@ -293,11 +297,11 @@ function kindOf(row: HTMLElement): SourceKind {
     if (m !== null && m[1] !== undefined) return classifySource(Number(m[1]));
     for (const cls of [...ico.classList]) {
       if (!cls.startsWith('icon-')) continue;
-      if (cls.includes('video')) return 'video';
-      if (cls.includes('doc') || cls.includes('file') || cls.includes('attach')) return 'attach';
-      if (cls.includes('text') || cls.includes('word')) return 'text';
-      if (cls.includes('discuss') || cls.includes('talk') || cls.includes('note')) return 'discussion';
-      if (cls.includes('quiz') || cls.includes('task') || cls.includes('exam')) return 'quiz';
+      if (cls === 'icon-video') return 'video';
+      if (cls === 'icon-huixingzhen') return 'attach';
+      if (cls === 'icon-wendang1') return 'text';
+      if (cls === 'icon-discuss') return 'discussion';
+      if (cls === 'icon-dingdanguanli') return 'quiz';
     }
   }
   return 'unknown';
