@@ -1,25 +1,38 @@
 /**
- * UOOC 优课联盟适配器。
+ * UOOC 优课联盟适配器 —— **只做旧版课程页**（用户 m04485 的转向要求）。
  *
- * 阶段 3 进行中。**当前批次只做视频助手（U1 二倍速 / U2 静音）**；
- * 测验答案与 LLM 答题那几项见 docs/需求文档.md §2.1 的 U6–U9 与
- * docs/UOOC-AI方案-逆向笔记.md。
+ * ## 两版 URL 与本站的分工（需求细则 §A）
  *
- * 历史：本目录在阶段 2 曾长期是空壳，只声明站点域以便日志/状态页能显示「站点=uooc」。
+ * | | pathname | 本站做什么 |
+ * |---|---|---|
+ * | 旧版学习页 | `/home/learn/index` | **全部功能**：二倍速/静音/防失焦 + 连播 + AI 答题 |
+ * | 新版学习页 | `/home/learn/new/{cid}` | **只弹一次全屏提示**问要不要切旧版；点「否」后是个**空面板** |
+ * | 答题页 | `/exam/paper` | **不涉及** —— 旧版测验是**页内同源 iframe**（§A.4），本站不在顶级 `/exam/*` 上做任何事 |
  *
- * 分支说明：AI 答题方案在 `feat/uooc-ai`；旧方案（测验答案采集与回填）在
- * `feat/uooc-phase3`，其逆向结论留在那边的 `docs/UOOC-制作方案.md`，不在本分支。
+ * 判定**只看 `location.pathname` 前缀**，hash 不参与。
+ *
+ * ## 为什么删掉了「答题页」分支
+ *
+ * 旧实现的旧版流程是「连播整页跳到 `/exam/paper?tid=`，再靠 `ai/handoff.ts` 跨页面接力」。
+ * 实测与用户确认（§A.4）旧版点测验**不跳转** —— 主区域直接换成答题 iframe。
+ * 于是 `/exam/*` 作为**顶级页面**只属于新版流程，本站（只做旧版）不涉及；
+ * `handoff.ts` 与 `autoAnswerExamPage()` 整条链路一并删除。
+ *
+ * ## 新版页为什么「什么都不留」
+ *
+ * 用户 m04485 第二轮拍板：新版页点「否」之后**挂面板但完全不启动任何 UOOC 功能**
+ * （不起连播、不起视频助手、**不装接口嗅探**），面板里也不给任何「切到旧版」的入口
+ * —— 就是个空面板。提示每次打开都弹，不记忆。
  */
 
 import { scoped } from '../../common/core/log.ts';
-import { isEnabled } from '../../common/core/settings.ts';
-import type { SiteAdapter } from '../types.ts';
-import { autoAnswerExamPage } from './ai/index.ts';
+import type { PanelApi, SiteAdapter } from '../types.ts';
 import { startAutoplay } from './autoplay.ts';
 import { installUoocIntercept } from './intercept.ts';
-import { SITE_ID, TOGGLE, UOOC_TOGGLES, applyUoocSettings, registerUoocSettings } from './settings.ts';
+import { SITE_ID, UOOC_TOGGLES, applyUoocSettings, registerUoocSettings } from './settings.ts';
 import { UOOC_AI_TAB } from './tabs/ai.ts';
 import { UOOC_AUTOPLAY_TAB } from './tabs/autoplay.ts';
+import { UOOC_MONITOR_TAB } from './tabs/monitor.ts';
 import { UOOC_VIDEO_TAB } from './tabs/video.ts';
 import { startVideoAssist } from './video.ts';
 
@@ -39,37 +52,57 @@ const HOSTS: readonly string[] = ['uooc.net.cn', '*.uooc.net.cn'];
  * 语义：命中 → 悬浮窗自动展开。这里是**精确路径**，不要图省事留空
  * （留空 = 任意页面都自动展开，连门户首页都会弹面板）。
  *
- * 三处对应实测到的真实 URL：
- *   - `/home/learn/index#/2042342697/57920722/...` —— 旧版学习页（hash 路由）
- *   - `/home/learn/new/2042342697#/...`           —— 新版学习页
- *   - `/exam/paper?cid=2005836044&tid=153728628`  —— 答题页
- *
- * ⚠️ 更正：旧注释写「新版答题页 `/exam/983779533`，tid 直接写在路径里」，
- * **2025-xx 实测是 `/exam/paper?cid=&tid=`**（`tid` 取自目录资源的 `task_id`，
- * 见 `catalog.ts` 的 `examUrl()`）。这里两条 `/exam/*` 都能覆盖，不影响功能。
+ * 只有两版**课程页**：旧版要能用全部功能，新版要弹「切旧版」的提示。
+ * `/exam/*` 不再列 —— 见文件头「为什么删掉了答题页分支」。
  */
-const PAGES: readonly string[] = ['/home/learn/index*', '/home/learn/new/*', '/exam/*'];
+const PAGES: readonly string[] = ['/home/learn/index*', '/home/learn/new/*'];
 
-/** 视频助手只在学习页有意义（测验页没有播放器，挂着只是白跑观察器） */
-const LEARN_PATH_PREFIX = '/home/learn/';
+/** 旧版学习页前缀（实测 `/home/learn/index#/...`，hash 路由） */
+const OLD_LEARN_PATH = '/home/learn/index';
+/** 新版学习页前缀（实测 `/home/learn/new/2042342697#/...`） */
+const NEW_LEARN_PREFIX = '/home/learn/new/';
+
+/** 当前是不是新版课程页 */
+function isNewVersionPage(): boolean {
+  return location.pathname.startsWith(NEW_LEARN_PREFIX);
+}
+
+/** 当前是不是旧版课程页 */
+function isOldVersionPage(): boolean {
+  return location.pathname.startsWith(OLD_LEARN_PATH);
+}
 
 /**
- * 答题页前缀。
+ * 新版 URL → 旧版 URL：**只换 pathname 前缀，丢掉 `{cid}`，hash 与 search 一个字符都不动**。
  *
- * 答题页上**没有 SPA**（`/exam/paper?cid=&tid=` 是整页跳转过来的），所以这里
- * 既不起连播也不起视频助手，只把「自动作答」这一步接上 —— 连播那边整页跳过来
- * 就断了，接力全靠 `ai/handoff.ts` 那条交接条。
+ * ```
+ * /home/learn/new/2042342697#/1/2/3   →   /home/learn/index#/1/2/3
+ * ```
+ *
+ * ⚠️ **不依赖站点自己的那个「旧版」入口**（用户第二轮拍板：自己拼 URL，更有把握）。
+ * ⚠️ hash 为空（`/home/learn/new/2042342697` 后面什么都没有）→ 跳 `/home/learn/index`，
+ *    旧版首页会自己选课。
  */
-const EXAM_PATH_PREFIX = '/exam/';
+export function oldVersionUrl(href: string = location.href): string | null {
+  let u: URL;
+  try {
+    u = new URL(href);
+  } catch {
+    return null;
+  }
+  if (!u.pathname.startsWith(NEW_LEARN_PREFIX)) return null;
+  u.pathname = OLD_LEARN_PATH;
+  return u.toString();
+}
 
 export const uoocAdapter: SiteAdapter = {
   id: SITE_ID,
   name: 'UOOC 优课联盟',
   hosts: HOSTS,
   pages: PAGES,
-  tabs: [UOOC_VIDEO_TAB, UOOC_AUTOPLAY_TAB, UOOC_AI_TAB],
+  tabs: [UOOC_VIDEO_TAB, UOOC_AUTOPLAY_TAB, UOOC_AI_TAB, UOOC_MONITOR_TAB],
   /**
-   * 本站的设置**拆成了三个标签页**（视频 / 连播 / AI 作答），没有任何一个 id
+   * 本站的设置**拆成了多个标签页**（视频 / 连播 / AI 作答 / 监视），没有任何一个 id
    * 能代表全部 ⇒ 必须显式声明，否则公共【设置】页会把同一批开关再渲染一遍。
    * 详见 `src/sites/types.ts` 的 `settingsInOwnTabs`。
    */
@@ -84,6 +117,12 @@ export const uoocAdapter: SiteAdapter = {
   earlyInit() {
     registerUoocSettings();
 
+    // 新版页「什么都不留」（§A.2）⇒ 连嗅探都不装。
+    if (isNewVersionPage()) {
+      log.debug('新版课程页：不装接口嗅探（本次不启动任何 UOOC 功能）');
+      return;
+    }
+
     // ⚠️ 必须在这里装嗅探，不能挪到 init：
     // `earlyInit` 是 document-start，早于站点 Angular 启动；挪到 init 就会漏掉
     // 首屏那波 `getCatalogList`（`src/sites/types.ts:116-124` 有明文约束）。
@@ -95,32 +134,55 @@ export const uoocAdapter: SiteAdapter = {
   init(ctx) {
     applyUoocSettings();
 
-    const onLearnPage = location.pathname.startsWith(LEARN_PATH_PREFIX);
-    const onExamPage = location.pathname.startsWith(EXAM_PATH_PREFIX);
-    let autoplayMounted = false;
-    if (onLearnPage) {
-      startVideoAssist();
-      startAutoplay({ toast: (message, kind) => ctx.panel.toast(message, kind) });
-      autoplayMounted = true;
-    } else if (onExamPage) {
-      // 用户 m04227 选的是「只要 URL 带 tid 且 AI 开着就自动」⇒ 这里不做任何
-      // 「是不是从连播跳过来的」判断，触发条件就是这一个开关。
-      // 安全阀在 autoAnswerExamPage 里：没有【提交】按钮的卷子（已交过的复习页）
-      // 一律不填不动。
-      if (isEnabled(SITE_ID, TOGGLE.AI_ANSWER)) {
-        log.info('答题页：AI 作答开着，交给 ai/index.ts 自动接管');
-        void autoAnswerExamPage(ctx.panel);
-      } else {
-        log.debug('答题页，但「AI 作答」开关没开，不自动作答');
-      }
-    } else {
-      log.debug(`非学习页（${location.pathname}），本次不启动视频助手与连播`);
+    if (isNewVersionPage()) {
+      log.info('新版课程页：只弹「要不要切旧版」的提示，本次不启动任何 UOOC 功能');
+      void promptSwitchToOld(ctx.panel);
+      return;
     }
 
+    if (!isOldVersionPage()) {
+      log.debug(`非旧版课程页（${location.pathname}），本次不启动任何 UOOC 功能`);
+      return;
+    }
+
+    startVideoAssist();
+    // 只装载、不启动：由用户在【连播】页点【开始连播】（用户 m04485 第二轮拍板）
+    startAutoplay(ctx.panel);
     log.info(
-      `UOOC 适配器已启用：isFeaturePage=${String(ctx.isFeaturePage)}，` +
-        `路径=${location.pathname}，视频助手=${onLearnPage ? '已挂载' : '未挂载'}，` +
-        `连播=${autoplayMounted ? '已挂载' : '未挂载'}`,
+      `UOOC 旧版课程页已启用：isFeaturePage=${String(ctx.isFeaturePage)}，` +
+        `路径=${location.pathname}，视频助手=已挂载，连播=已装载（等用户点开始）`,
     );
   },
 };
+
+/**
+ * 新版课程页的全屏提示（§A.2）。
+ *
+ * 形态复用面板的确认框（`src/common/ui/widgets/confirm.ts` 的 `showConfirm`，
+ * 已是全屏遮罩 + 居中框，支持 Esc / 点遮罩取消）。
+ *
+ * **每次打开都弹，不记忆** —— 点「不用，我自己看」只对本次生效。
+ */
+async function promptSwitchToOld(host: PanelApi): Promise<void> {
+  const yes = await host.confirm({
+    title: '检测到新版课程页',
+    body: '本插件只适配旧版课程页，是否切换到旧版？',
+    confirmText: '切换到旧版',
+    cancelText: '不用，我自己看',
+  });
+
+  if (!yes) {
+    log.info('用户选择留在新版页 —— 面板挂空，不启动任何 UOOC 功能');
+    return;
+  }
+
+  const target = oldVersionUrl();
+  if (target === null) {
+    const msg = '拼不出旧版地址，请手动把地址栏的 /home/learn/new/<cid> 改成 /home/learn/index';
+    log.error(msg);
+    host.toast(msg, 'error');
+    return;
+  }
+  log.info(`切换到旧版：${target}`);
+  location.href = target;
+}

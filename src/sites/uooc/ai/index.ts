@@ -1,22 +1,27 @@
 /**
- * AI 答题的总装：拉题 → 问模型 → 回填 DOM → 交卷前确认 → 点站点自己的【提交】。
+ * AI 答题的总装。旧版课程页的测验是**页内同源 iframe**（需求细则 §C 修订，`a4536e4`），
+ * 所以这里不跳转、不需要 tid 交接 —— 拉到题、往 iframe 的 DOM 里填、点站点自己的【提交】。
  *
- * ## 完整时间线（需求细则 §D.1，用户 m01812 拍板）
+ * ## 完整时间线（需求细则 §C）
  *
  * ```
- * 脚本：拉题 → 定答案 → 真实回填 DOM → 弹全屏框「已填好 N 题，点【开始提交】」
- *   ↓ 用户点主按钮
- * 框消失 → 合成点击站点【提交】→ 阿里云验证码弹出 → 用户点验证码
- *   ↓
- * 站点自己 commit → 页面跳转 → toast「已提交」
+ * 脚本：拉题（getTaskPaper）
+ *   ↓ 逐题：问模型 → **一有答案立刻回填**（不等全部，用户 m04879 第 6 条）
+ *   ↓ 页面上已经有答案的题：不请求，标「跳过」（第 7 条）
+ *   ↓ 题号前铺【清除答案】、标题后铺【清除全部答案】（第 7 条）
+ *   ↓ 全屏框「已填好 N 题，点【开始提交】」
+ *   ↓ 用户点主按钮 → 框消失（先收遮罩！）→ 合成点击站点【提交】
+ *   ↓ 截获 POST /exam/commit
+ *        code == 1   → 通过，收工
+ *        code == 110 → **没通过**：按 `score_list` 挑低分题重答一轮（每题只再发 1 次请求，
+ *                      提示词里禁掉上一轮那个答案），再提交一次
  * ```
  *
  * ## ⚠️ 顺序不是随便排的：遮罩与验证码**不能共存**
  *
- * `sztb-modal-mask` 的 `z-index` 是 2147483002（`src/common/ui/style.css:472`），
+ * `sztb-modal-mask` 的 `z-index` 是 2147483002（`src/common/ui/style.css`），
  * 几乎顶到 2147483647；阿里云验证码弹窗挂在这之下。
- * 所以必须先收遮罩、**再**点提交 —— `showConfirm` 正好是「先 remove 遮罩再 resolve」
- * （`src/common/ui/widgets/confirm.ts:29,29-31`），这个顺序是它保证的。
+ * 所以必须先收遮罩、**再**点提交 —— `showConfirm` 正好是「先 remove 遮罩再 resolve」。
  * **别把「点提交」挪进确认回调里**，那样遮罩和验证码会同时存在，人点不到验证码。
  *
  * ## 为什么只填不保存
@@ -27,32 +32,42 @@
 
 import { scoped } from '../../../common/core/log.ts';
 import type { PanelApi } from '../../types.ts';
+import { clearCommit, waitCommit, type CommitResult } from '../intercept.ts';
 import {
+  clearQuestion,
   fillAnswers,
   findSubmitButton,
-  isAnswerBoxVisible,
-  waitForOptionInputs,
+  injectClearButtons,
+  isAnsweredInDom,
+  type ClearButtonsHandle,
   type FillTarget,
 } from './fill.ts';
-import { consumeHandoff, type QuizHandoff } from './handoff.ts';
 import { chatUrl, type LlmConfig } from './llm.ts';
 import { fetchPaper, isAnswerable, type ExamQuestion } from './paper.ts';
-import { answerQuestions, type AnswerOutcome } from './runner.ts';
+import { answerOne, answerQuestions, type AnswerOutcome } from './runner.ts';
+import { quizBegin, quizClear, quizEnd, quizPatch, quizPhase } from './monitor.ts';
 import { aiConcurrency, aiConfig } from '../settings.ts';
 
 const log = scoped('uooc/ai');
 
+/** 交卷后等站点回话的上限（用户还得手动点人机验证码，给足时间） */
+const SUBMIT_WAIT_MS = 5 * 60 * 1000;
+
 export interface AiQuizResult {
   /** 卷面一共几道题 */
   readonly total: number;
-  /** 参与自动作答的题数（排除填空等） */
-  readonly answerable: number;
+  /** 页面上本来就有答案、我们没请求的题数 */
+  readonly alreadyAnswered: number;
   /** 模型给出了答案的题数 */
   readonly answered: number;
   /** 成功回填进页面的题数 */
   readonly filled: number;
   /** 最后有没有点下去【提交】 */
   readonly submitted: boolean;
+  /** 站点对最后一次提交的判读（截获不到就是 `null`） */
+  readonly commit: CommitResult | null;
+  /** 重答了几道题（一轮，最多 1 次/题） */
+  readonly retried: number;
 }
 
 /** `A,C` → `['A','C']` */
@@ -63,18 +78,44 @@ export function lettersOf(answer: string): string[] {
     .filter((s) => s !== '');
 }
 
-/** 从当前地址取测验的 `tid`；取不到返回 null（由调用方提示用户） */
+/**
+ * 从一个地址里取测验的 `tid`；取不到返回 null。
+ *
+ * 实测有**两种形状**，都要认（`local/uooc-flow-index.txt` 里两种都出现过）：
+ *   - 路径形态 `/exam/736720049`   —— 旧版**页内 iframe** 走这条（用户 m05858 实测）
+ *   - 查询形态 `/exam/paper?cid=2042342697&tid=736720049` —— 整页跳转走这条
+ *
+ * ⚠️ 相对地址（iframe 的 `src` 常写成 `/exam/1208164042`）要以当前页为基准解析。
+ */
 export function tidFromLocation(href: string = location.href): string | null {
+  let u: URL;
   try {
-    const u = new URL(href);
-    const tid = u.searchParams.get('tid');
-    if (tid !== null && tid !== '') return tid;
-    // 新版路径形如 /exam/983779533
-    const m = /\/exam\/(\d{6,})/.exec(u.pathname);
-    return m?.[1] ?? null;
+    u = new URL(href, location.href);
   } catch {
     return null;
   }
+  const fromQuery = u.searchParams.get('tid');
+  if (fromQuery !== null && fromQuery !== '') return fromQuery;
+  const m = /^\/exam\/(\d{6,})\/?$/.exec(u.pathname);
+  return m !== null && m[1] !== undefined ? m[1] : null;
+}
+
+/**
+ * 当前所在页面上「那份试卷」的 `tid`。
+ *
+ * 旧版测验是**页内同源 iframe**（需求细则 §A.4），所以**先扫答题 iframe 的 `src`** ——
+ * 这就是 §A.4 那句「不需要交接」的真意：tid 白写在 iframe 地址里，
+ * 不用连播预先知道、也不用跨页面传递。扫不到再退一步看当前地址
+ * （手动打开整页答题页时走这条）。
+ */
+export function quizTidOnPage(): string | null {
+  for (const frame of document.querySelectorAll('iframe')) {
+    const src = frame.getAttribute('src') ?? '';
+    if (!src.includes('/exam/')) continue;
+    const tid = tidFromLocation(src);
+    if (tid !== null) return tid;
+  }
+  return tidFromLocation();
 }
 
 /** 把「没答出来」的原因汇总成一行，放进确认框与日志 */
@@ -88,6 +129,86 @@ function summarizeFailures(outcomes: readonly AnswerOutcome[]): string {
   const head = `有 ${bad.length} 道题没答出来`;
   if (reasons.size === 0) return `${head}（模型没给出能识别的答案格式）`;
   return `${head}：${[...reasons].join('；').slice(0, 200)}`;
+}
+
+/** 点站点【提交】并等它回话 */
+async function submitAndRead(host: PanelApi): Promise<{ submitted: boolean; commit: CommitResult | null }> {
+  // ⚠️ 到这里遮罩已经被 showConfirm 移除了，现在点提交，验证码才不会被我们自己的遮罩盖住。
+  const btn = findSubmitButton();
+  if (btn === null) {
+    const msg = '页面上找不到【提交】按钮，请自己点一下（答案已经填好了）';
+    log.error(msg);
+    host.toast(msg, 'warn');
+    return { submitted: false, commit: null };
+  }
+  // 丢掉上一条结果，否则 waitCommit 会立刻返回旧的那份响应
+  clearCommit();
+  quizPhase('submitting');
+  log.info('已合成点击站点【提交】，接下来请手动完成人机验证码');
+  host.toast('已点提交，请完成人机验证码', 'info');
+  btn.click();
+  const commit = await waitCommit(SUBMIT_WAIT_MS);
+  if (commit === null) log.warn('没截获到交卷响应（可能你还没点完验证码，或站点换了接口）');
+  else log.info(`交卷判读：${commit.verdict}，得分 ${commit.score}/${commit.passScore}，msg=${commit.message}`);
+  return { submitted: true, commit };
+}
+
+/**
+ * 从 `score_list` 里挑出「低分题」并重答一轮。
+ *
+ * 低分 = 该题得分 < 该题满分（满分取卷面 `score` 字段）。拿不到 `score_list`
+ * 就**一道都不重答**（宁可少做，不可乱做 —— 重答要花用户的 API 额度）。
+ *
+ * @param previous 上一轮实际提交的答案（`qid → 'A,C'`），用来写进提示词做排除
+ */
+async function retryLowScore(
+  commit: CommitResult,
+  questions: readonly ExamQuestion[],
+  previous: Map<string, string>,
+  cfg: LlmConfig,
+): Promise<{ retried: number; filled: number }> {
+  const lows: ExamQuestion[] = [];
+  for (const q of questions) {
+    const got = commit.scoreList[q.id];
+    if (got === undefined) continue;
+    const full = Number(q.score);
+    const score = Number(got);
+    if (Number.isFinite(full) && Number.isFinite(score) && score < full) lows.push(q);
+  }
+  if (lows.length === 0) {
+    log.info('这次没过，但 score_list 里挑不出低分题（或没带分数），不重答');
+    return { retried: 0, filled: 0 };
+  }
+
+  quizPhase('retrying', `未通过（得分 ${commit.score} / 门槛 ${commit.passScore}），重答 ${lows.length} 道低分题`);
+  log.info(`未通过，重答 ${lows.length} 道低分题：${lows.map((q) => q.id).join(', ')}`);
+
+  let filled = 0;
+  for (const q of lows) {
+    const exclude = previous.get(q.id) ?? '';
+    quizPatch(q.id, { status: 'pending', note: '重答中…' });
+    const o = await answerOne(q, cfg, {
+      onDebug: (m) => log.debug(m),
+      onWarn: (m) => log.warn(m),
+      ...(exclude === '' ? {} : { exclude }),
+      maxRequests: 1,
+    });
+    quizPatch(q.id, {
+      status: o.answer === '' ? 'failed' : 'answered',
+      answer: o.answer,
+      requests: o.requests,
+      samples: o.samples,
+      note: o.note ?? '',
+    });
+    if (o.answer === '') continue;
+    const target: FillTarget = { qid: q.id, kind: q.kind, letters: lettersOf(o.answer) };
+    const r = fillAnswers([target]);
+    if (r.filled.length > 0) {
+      filled += 1;
+      previous.set(q.id, o.answer);
+    }
+  }
+  return { retried: lows.length, filled };
 }
 
 /**
@@ -106,6 +227,7 @@ export async function runQuizAnswer(tid: string, host: PanelApi): Promise<AiQuiz
     return null;
   }
   log.info(`开始 AI 作答：tid=${tid}，接口=${chatUrl(cfg.baseUrl)}，模型=${cfg.model}`);
+  quizClear();
 
   let paper;
   try {
@@ -117,57 +239,117 @@ export async function runQuizAnswer(tid: string, host: PanelApi): Promise<AiQuiz
     return null;
   }
 
-  const answerable: ExamQuestion[] = paper.questions.filter((q) => isAnswerable(q.kind));
-  const skipped = paper.questions.length - answerable.length;
-  log.info(
-    `拿到 ${paper.questions.length} 道题（可自动作答 ${answerable.length} 道，跳过 ${skipped} 道填空/主观题）`,
+  const all = paper.questions;
+  const already = all.filter((q) => q.studentAnswer.length > 0 || isAnsweredInDom(q.id));
+  const alreadyIds = new Set(already.map((q) => q.id));
+  const todo = all.filter((q) => !alreadyIds.has(q.id) && isAnswerable(q.kind));
+  const skippedKind = all.filter((q) => !alreadyIds.has(q.id) && !isAnswerable(q.kind)).length;
+
+  quizBegin(
+    tid,
+    all.map((q) => ({ id: q.id, typeText: q.typeText, hasAnswer: alreadyIds.has(q.id) })),
   );
-  if (answerable.length === 0) {
-    host.toast('这份卷子没有可自动作答的题目', 'warn');
-    return null;
+  for (const q of already) quizPatch(q.id, { status: 'skipped', note: '页面上已有答案，不重复请求' });
+
+  log.info(
+    `拿到 ${all.length} 道题：页面上已有答案 ${already.length} 道（跳过），` +
+      `可自动作答 ${todo.length} 道，跳过 ${skippedKind} 道填空/主观题`,
+  );
+
+  /** 我们实际填进去/提交的答案（重答时要拿它做排除） */
+  const answers = new Map<string, string>();
+  /** 没答出来的那几道（确认框里点名） */
+  const failures: AnswerOutcome[] = [];
+  let filled = 0;
+
+  let buttons: ClearButtonsHandle = injectClearButtons({
+    onClearOne: () => undefined,
+    onClearAll: () => undefined,
+  });
+  const refreshButtons = (): void => {
+    buttons.refresh(new Set(answers.keys()));
+  };
+
+  if (todo.length > 0) {
+    const concurrency = aiConcurrency();
+    quizPhase('answering', `并发 ${concurrency}`);
+    log.info(`开始问模型（并发 ${concurrency}）…`);
+    await answerQuestions(todo, {
+      cfg,
+      concurrency,
+      onDebug: (m) => log.debug(m),
+      onWarn: (m) => log.warn(m),
+      onProgress: (ev) => {
+        const { question, outcome } = ev;
+        log.info(
+          `[${ev.index + 1}/${ev.total}] ${question.typeText} ${question.id} → ${
+            outcome.answer === '' ? '未答出' : outcome.answer
+          }（${outcome.requests} 次请求）`,
+        );
+        // 逐题回填：一有答案立刻填这一题，不等整卷（用户 m04879 第 6 条）
+        if (outcome.answer === '') {
+          failures.push(outcome);
+          quizPatch(question.id, {
+            status: 'failed',
+            requests: outcome.requests,
+            samples: outcome.samples,
+            note: outcome.error === '' ? '模型没给出可识别的答案' : outcome.error,
+          });
+          return;
+        }
+        const report = fillAnswers([
+          { qid: question.id, kind: question.kind, letters: lettersOf(outcome.answer) },
+        ]);
+        const ok = report.filled.length > 0;
+        if (ok) {
+          filled += 1;
+          answers.set(question.id, outcome.answer);
+        }
+        quizPatch(question.id, {
+          status: ok ? 'answered' : 'failed',
+          answer: outcome.answer,
+          requests: outcome.requests,
+          samples: outcome.samples,
+          note: ok ? (outcome.note ?? '') : '模型答出来了，但页面里点不动这一题',
+        });
+        refreshButtons();
+      },
+    });
   }
 
-  const concurrency = aiConcurrency();
-  log.info(`开始问模型（并发 ${concurrency}）…`);
-  const outcomes = await answerQuestions(answerable, {
-    cfg,
-    concurrency,
-    onDebug: (m) => log.debug(m),
-    onWarn: (m) => log.warn(m),
-    onProgress: (ev) => {
-      const { question, outcome } = ev;
-      log.info(
-        `[${ev.index + 1}/${ev.total}] ${question.typeText} ${question.id} → ${
-          outcome.answer === '' ? '未答出' : outcome.answer
-        }（${outcome.requests} 次请求）`,
-      );
+  // 清除按钮：点一下就把那一题的 DOM 答案清空（走 Angular ngModel，见 fill.ts）
+  buttons.remove();
+  buttons = injectClearButtons({
+    onClearOne: (qid) => {
+      const q = all.find((x) => x.id === qid);
+      const how = clearQuestion(qid, q?.kind ?? 'other');
+      answers.delete(qid);
+      refreshButtons();
+      log.info(`清除第 ${qid} 题的答案（${how}）`);
+    },
+    onClearAll: () => {
+      for (const q of all) {
+        clearQuestion(q.id, q.kind);
+        answers.delete(q.id);
+      }
+      refreshButtons();
+      log.info('清除全部答案');
     },
   });
+  refreshButtons();
 
-  const targets: FillTarget[] = [];
-  for (let i = 0; i < outcomes.length; i += 1) {
-    const o = outcomes[i];
-    const q = answerable[i];
-    if (o === undefined || q === undefined || o.answer === '') continue;
-    targets.push({ qid: q.id, kind: q.kind, letters: lettersOf(o.answer) });
-  }
-
-  // 回填前先确认页面上的题确实是这一批（题号对不上就不填，宁可不动）
-  const report = fillAnswers(targets);
-  log.info(
-    `回填结果：成功 ${report.filled.length} 题，页面没找到 ${report.missing.length} 题，点不动 ${report.failed.length} 题`,
-  );
-
-  const failure = summarizeFailures(outcomes);
+  const failure = summarizeFailures(failures);
   const bodyLines = [
-    `卷面 ${paper.questions.length} 道题：模型作答 ${targets.length} 道，已填入页面 ${report.filled.length} 道。`,
+    `卷面 ${all.length} 道题：页面上本来就有答案 ${already.length} 道，模型作答并填入 ${filled} 道。`,
   ];
-  if (skipped > 0) bodyLines.push(`跳过 ${skipped} 道（填空/主观题暂不支持自动作答）。`);
-  if (report.missing.length > 0) bodyLines.push(`有 ${report.missing.length} 道在页面上没找到对应选项，未填入。`);
+  if (skippedKind > 0) bodyLines.push(`跳过 ${skippedKind} 道（填空/主观题）。`);
+  if (filled < todo.length) bodyLines.push(`有 ${todo.length - filled} 道没填进去（见【监视】页的逐题表）。`);
   if (failure !== '') bodyLines.push(failure);
   bodyLines.push('');
   bodyLines.push('点【开始提交】后脚本会点站点的提交按钮，接着会弹人机验证码，需要你手动点一下。');
+  bodyLines.push('没通过的话，脚本会按分数挑低分题重答一轮（每题只再问 1 次），然后自动再提交一次。');
 
+  quizPhase('filling', `已填入 ${filled} 道，等你确认提交`);
   const confirmed = await host.confirm({
     title: '答案已填好，确认提交？',
     body: bodyLines.join('\n'),
@@ -178,182 +360,53 @@ export async function runQuizAnswer(tid: string, host: PanelApi): Promise<AiQuiz
 
   if (!confirmed) {
     log.info('用户选择「再等等」，不提交。答案已填在页面上，你可以自己改');
+    quizEnd('用户取消了提交，答案已填在页面上');
     return {
-      total: paper.questions.length,
-      answerable: answerable.length,
-      answered: targets.length,
-      filled: report.filled.length,
+      total: all.length,
+      alreadyAnswered: already.length,
+      answered: answers.size,
+      filled,
       submitted: false,
+      commit: null,
+      retried: 0,
     };
   }
 
-  // ⚠️ 到这里遮罩已经被 showConfirm 移除了（confirm.ts:29），
-  //    现在点提交，验证码才不会被我们自己的遮罩盖住。
-  const btn = findSubmitButton();
-  if (btn === null) {
-    const msg = '页面上找不到【提交】按钮，请自己点一下（答案已经填好了）';
-    log.error(msg);
-    host.toast(msg, 'warn');
+  buttons.remove();
+  const first = await submitAndRead(host);
+  let commit = first.commit;
+  let retried = 0;
+
+  // 没通过 → 挑低分题重答一轮（只此一轮，避免无底洞）
+  if (commit !== null && commit.verdict === 'fail' && first.submitted) {
+    const r = await retryLowScore(commit, all, answers, cfg);
+    retried = r.retried;
+    filled += r.filled;
+    if (r.retried > 0) {
+      const again = await submitAndRead(host);
+      commit = again.commit ?? commit;
+    }
+  }
+
+  if (commit !== null) {
+    quizEnd(
+      commit.verdict === 'pass'
+        ? `已通过（得分 ${commit.score}）`
+        : commit.verdict === 'fail'
+          ? `仍未通过：${commit.message}`
+          : `提交完成，但读不懂站点回话：${commit.message}`,
+    );
   } else {
-    log.info('已合成点击站点【提交】，接下来请手动完成人机验证码');
-    host.toast('已点提交，请完成人机验证码', 'info');
-    btn.click();
+    quizEnd('已点提交，但没截获到站点回话（可能验证码还没点完）');
   }
 
   return {
-    total: paper.questions.length,
-    answerable: answerable.length,
-    answered: targets.length,
-    filled: report.filled.length,
-    submitted: btn !== null,
+    total: all.length,
+    alreadyAnswered: already.length,
+    answered: answers.size,
+    filled,
+    submitted: first.submitted,
+    commit,
+    retried,
   };
-}
-
-// ------------------------------------------------------------------ 答题页入口
-
-/** 交卷要等多久才放弃自动返回（用户还得手动点人机验证码，给足时间） */
-const SUBMIT_WAIT_MS = 5 * 60 * 1000;
-
-/** 等「已交卷」的结果 —— 三种都要区分开，因为它们的处置完全不同 */
-export type SubmitWait =
-  /** 站点自己把页面跳走了，**脚本别再插一脚** */
-  | 'left'
-  /** 看出来了：卷子已经交上去 */
-  | 'done'
-  /** 等超时，判不出来 */
-  | 'timeout';
-
-/**
- * 等「这一份卷子已经交上去了」这件事发生。
- *
- * 判据（按可靠性排序）：
- *  1. `location.pathname` 已经不在 `/exam/` 下 ⇒ 站点自己跳走了，返回 `left`；
- *  2. 【提交】按钮（`button.btn.btn-danger`，旧版整颗由 `vm.paper.can_do` 控制显隐）
- *     **消失**，并且答案解析区 `div.answerBox` **亮起来**
- *     （见 `fill.ts` 的 `isAnswerBoxVisible`，出处是已完成的实测快照）⇒ `done`；
- *  3. 超时 ⇒ `timeout`。
- *
- * ⚠️ 判据 2 是从实测快照里推出来的，**还没在真实交卷现场验证过**。
- *    它只决定「要不要自动跳回课程页」—— 判错最多是**不跳**，不会损坏任何东西。
- *    若实测不符，**只改这一个函数**。
- */
-export function waitForSubmitted(
-  timeoutMs: number = SUBMIT_WAIT_MS,
-  intervalMs = 1000,
-): Promise<SubmitWait> {
-  return new Promise((resolve) => {
-    const deadline = Date.now() + timeoutMs;
-    const tick = (): void => {
-      if (!location.pathname.startsWith('/exam/')) {
-        resolve('left');
-        return;
-      }
-      if (findSubmitButton() === null && isAnswerBoxVisible()) {
-        resolve('done');
-        return;
-      }
-      if (Date.now() >= deadline) {
-        resolve('timeout');
-        return;
-      }
-      window.setTimeout(tick, intervalMs);
-    };
-    tick();
-  });
-}
-
-export interface ExamAutoResult {
-  readonly tid: string;
-  /** `runQuizAnswer` 的结果；没跑到那一步就为 null */
-  readonly quiz: AiQuizResult | null;
-  /** 答完之后有没有把当前页换回课程页 */
-  readonly returned: boolean;
-}
-
-/**
- * 答题页的自动作答入口 —— 由站点适配器在 `/exam/*` 页面上调用。
- *
- * ## 为什么答题页要单独一个入口
- *
- * 答题页是**整页跳转**过来的（不是 SPA 里的 hash 导航），学习页连同连播循环
- * 一起已经卸载了。所以「连播 → 答题 → 回课程页」这条链是**两个页面实例**接力：
- * 学习页跳转前用 `saveHandoff()` 记一笔（`handoff.ts`），这里 `consumeHandoff()`
- * 取出来，答完再跳回去。
- *
- * ## 两道闸（用户 m04227 选的是「只要 URL 带 tid 且 AI 开着就自动」）
- *
- *  1. **等卷子渲染出来**（`waitForOptionInputs`）—— AngularJS + 旧版 iframe 都是异步的，
- *     脚本一进页面就回填必然整卷 `missing`；
- *  2. **页面上得有【提交】按钮**（`findSubmitButton`）—— 它同时是「这份卷子还能不能交」
- *     的现场证据。已交过的卷子（复习页）没有它 ⇒ **不填、不交、不动**，
- *     这也是「URL 带 tid 就自动」这个宽松触发条件的安全阀。
- *
- * @param host 面板 API（toast / confirm 都用它）
- * @param tidArg 显式指定 tid；不传就从地址里取
- */
-export async function autoAnswerExamPage(
-  host: PanelApi,
-  tidArg?: string,
-): Promise<ExamAutoResult | null> {
-  const tid = tidArg ?? tidFromLocation();
-  if (tid === null) {
-    log.warn('答题页地址里找不到 tid，不做自动作答');
-    return null;
-  }
-
-  const handoff: QuizHandoff | null = consumeHandoff(tid);
-  log.info(
-    `答题页自动作答：tid=${tid}` +
-      (handoff === null ? '（没有交接条，答完留在本页）' : `，答完回课程页 ${handoff.courseUrl}`),
-  );
-
-  if (!(await waitForOptionInputs())) {
-    const msg = '答题页等了 20 秒还没渲染出选项，放弃自动作答（题型结构可能变了）';
-    log.error(msg);
-    host.toast(msg, 'warn');
-    return { tid, quiz: null, returned: false };
-  }
-
-  if (findSubmitButton() === null) {
-    // 没有提交按钮 = 卷子已经交过了（或者这一版按钮换了选择器）。
-    // 往已交的卷子上填答案是纯副作用，所以这里**直接不动**。
-    const msg = '页面上没有【提交】按钮：这份卷子可能已经交过了，不做自动作答';
-    log.warn(msg);
-    host.toast(msg, 'warn');
-    return { tid, quiz: null, returned: false };
-  }
-
-  let quiz: AiQuizResult | null;
-  try {
-    quiz = await runQuizAnswer(tid, host);
-  } catch (err) {
-    // runQuizAnswer 号称不抛；真抛了也必须留下痕迹，不能静默
-    const msg = `自动作答意外出错：${err instanceof Error ? err.message : String(err)}`;
-    log.error(msg);
-    host.toast(msg, 'error');
-    return { tid, quiz: null, returned: false };
-  }
-
-  if (quiz === null || !quiz.submitted) {
-    // 拉题失败，或用户在确认框里选了「再等等」⇒ 停在这里，不跳回课程页。
-    // 交接条已经在 consumeHandoff 里消费掉了，不会留下「下次还被带回去」的隐患。
-    return { tid, quiz, returned: false };
-  }
-
-  if (handoff === null) return { tid, quiz, returned: false };
-
-  const signal = await waitForSubmitted();
-  if (signal !== 'done') {
-    log.warn(
-      signal === 'left'
-        ? '站点自己已经把页面跳走了，脚本不再插手'
-        : `等了 ${SUBMIT_WAIT_MS / 60_000} 分钟没看出「已交卷」，不自动跳回课程页；交完卷自己回课程页即可`,
-    );
-    return { tid, quiz, returned: false };
-  }
-
-  log.info(`已交卷，把当前页换回课程页继续连播：${handoff.courseUrl}`);
-  host.toast('已交卷，正在回到课程页继续连播', 'success');
-  location.href = handoff.courseUrl;
-  return { tid, quiz, returned: true };
 }

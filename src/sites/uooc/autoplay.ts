@@ -1,806 +1,760 @@
 /**
- * UOOC 自动连播（U3）。
+ * UOOC **旧版**课程页的自动连播 —— **全程模拟用户点击，实时从 DOM 取下一步该点哪儿**。
  *
- * 需求细则见 `docs/UOOC-连播与答题-需求细则.md` A 节；本文件是它的实现。
+ * ## 与旧实现的关系
  *
- * === 与参考脚本（`local/reference/UOOC assistant.js`）的关键差异 ===
+ * 旧实现是「请求驱动」的：先用 `getCatalogList` / `getUnitLearn` 把整棵树拉下来，
+ * 自己算出下一个叶子，再合成 URL 跳过去（还要靠 `handoff` 把 tid 交接给答题页）。
+ * 用户 m04485 明确否掉了这条路：**忘掉各种检测方案、接续方案，全程模拟用户点击，
+ * 一个一个点开**；点开之后再看当前页是什么，据此决定下一步。
  *
- * 参考脚本的连播是**纯 DOM 爬树**：`video.onended = findNextVideo`，然后靠 `search(mode.NEXT_VIDEO)`
- * 逐层点开目录、`waitForExpand` 250ms 轮询、`toNextListAfterList` 往外爬，找 `FIRST_VIDEO`/`NEXT_VIDEO`。
- * 它只找「下一个视频」，**完全不处理附件/文本/讨论/测验**，而且深度绑定站点的类名。
+ * 所以这一版：
+ *  - **不发任何自己的请求**（目录/资源清单全部从 DOM 读）；
+ *  - **不拼 URL、不交接**（点 `div.basic` 就走，`href` 只作兜底）；
+ *  - 起点是站点自己标出的当前项（`.active`），**没有 `.active` 就停下等用户点**，
+ *    绝不自己猜「第一个未完成的」。
  *
- * 我们的做法是 **API 驱动**：拿 `getCatalogList` 的树 + `getUnitLearn` 的资源，自己算队列，
- * 跳转靠**改 `location.hash`**（用户 m00513 拍板 ①A）。理由：
- *   - 与站点自己的 `ui-sref` 走同一条 ui-router 通道，效果等价；
- *   - 不依赖 DOM 是否渲染（旧版 `ul.rank-3` 上挂着 `ng-if="stateParams.sectionId == ..."`，
- *     跨节时 DOM 里压根没有目标元素）；
- *   - 不受新旧版类名差异影响（旧版 `div.resourcelist` / 新版 `div.level_3_resourcelist`）。
+ * ## 目录 DOM 的三条硬约束（`local/capture/uooc-domskel-旧.txt` + `dom-uooc-catalog-旧.txt`）
  *
- * === 队列来源（用户 m00513 拍板 ②A）===
+ * 1. **懒渲染**：`ul.rank-2`（小节）只在「当前章」下渲染，`div.resourcelist`（资源）
+ *    只在「当前节」下渲染 ⇒ **想点下一章必须先把它点开、等 DOM 出来**。
+ * 2. `.active` 是站点给的当前项信号（章 / 节 / 资源三层都有），**这就是唯一的真相来源**。
+ * 3. `complete` 只在 `source.finished == 1 && source.is_task == 1` 时挂 ⇒
+ *    普通视频可能**永远没有**完成标记，所以「看得到 `.complete` 就跳过、
+ *    看不到就老老实实播到底」（用户拍板）。
  *
- * **拦截为主，超时兜底**：先等站点自己发 `getCatalogList`（`intercept.ts`），
- * 等不到就自己补发一次同源 GET。
+ * ## 怎么知道一个资源是什么类型
  *
- * === 已知未完成 ===
+ * 资源行里有一颗类型图标：`<span class="tag-source-ico iconfont icon-video"
+ * ng-if="source.type == 10">`（`dom-uooc-catalog-旧.txt:142`）。
+ * **`ng-if` 里的 `source.type == NN` 就是站点自己的类型号**，比猜图标类名可靠得多；
+ * 图标类名只作兜底。类型号到 `SourceKind` 的映射走 `catalog.ts` 的 `classifySource`。
  *
- * - 测验（`type 80`）未完成 + 开了「AI 答题」时：直接暂停。AI 答题是 U6–U9，用户 m00368 明确推迟。
- * - 新版课程页点测验会开新标签页，需求细则 A.4 要求「改成当前标签页换地址」——还没做。
- * - 暂停后目前只能靠 `window.__szuUoocAutoplay.resume()` 恢复，没有面板按钮（待与用户确认形态）。
+ * ## 点开之后再看
+ *
+ * 点开一个资源后，`div.showViewer` 里会出现实际内容：
+ *  - 有 `<video>` ⇒ 视频，**听 `ended` 事件**（用户拍板，不轮询时长）；
+ *  - 有带 `tid` 的 `<iframe>` ⇒ 测验（旧版测验是**页内同源 iframe**，不跳转），
+ *    交给 `ai/index.ts` 的 `runQuizAnswer`；
+ *  - 其它 ⇒ 等 `holdAfterMs()` 就走。
  */
 
-import { request } from '../../common/core/http.ts';
 import { scoped } from '../../common/core/log.ts';
 import { isEnabled } from '../../common/core/settings.ts';
-import { read, write } from '../../common/core/storage.ts';
-import { pageOrSelf } from '../../common/utils/page.ts';
-import {
-  type CatalogLeaf,
-  type UnitSource,
-  catalogListUrl,
-  classifySource,
-  courseIdFromLocation,
-  currentChainFromHash,
-  examUrl,
-  findLeafIndex,
-  flattenLeaves,
-  parseCatalogTree,
-  parseUnitSources,
-  sourceHash,
-  unitLearnUrl,
-} from './catalog.ts';
-import { saveHandoff } from './ai/handoff.ts';
-import {
-  peekCatalog,
-  peekUnitLearn,
-  primeCatalog,
-  primeUnitLearn,
-  waitCatalog,
-  waitUnitLearn,
-} from './intercept.ts';
+import type { PanelApi } from '../types.ts';
+import { quizTidOnPage, runQuizAnswer } from './ai/index.ts';
+import { classifySource, type SourceKind } from './catalog.ts';
+import { setCourseProgress } from './ai/monitor.ts';
 import { SITE_ID, TOGGLE, holdAfterMs, waitBeforeMs } from './settings.ts';
 
 const log = scoped('uooc/autoplay');
 
-/**
- * 目录的兜底触发点：**页面 `load` 之后再等这么久**，站点仍未发 `getCatalogList` 才自己补发。
- *
- * 为什么不按「装载后 N 秒」算：实测站点那发 XHR 是在 Angular 启动之后才出去的
- * （document-start 装载 → 站点发目录 ≈ 5 秒后），任何固定短超时都会抢先补发，
- * 结果每次开课都白打一发 35KB，"拦截为主"退化成"补发为主"。
- */
-const FALLBACK_AFTER_LOAD_MS = 2000;
-/** 兜底硬上限：页面始终不 load、站点也始终不发时，最后一道保险 */
-const CATALOG_HARD_TIMEOUT_MS = 30000;
-/** 等站点自己发 `getUnitLearn` 的上限；超时自己补发 */
-const UNIT_INTERCEPT_TIMEOUT_MS = 3000;
-/** 切到视频后，检查「是不是已经播完了」的延迟 */
-const VIDEO_END_CHECK_MS = 1500;
-/**
- * `ended` 去重窗口：部分播放器在片尾会连发两条 `ended`，只认第一条。
- * 窗口开得比 `VIDEO_END_CHECK_MS` 大一点，免得两条路径各推一次。
- */
-const ENDED_DEDUPE_MS = 1000;
+// ------------------------------------------------------------- 常量
 
-/** 面板能力（从 `SiteInitContext.panel` 取） */
-export interface AutoplayHost {
-  toast(message: string, kind?: 'info' | 'warn' | 'error' | 'success'): void;
+/** 点完导航类节点（章 / 节）后等 DOM 跟上的上限 */
+const NAV_WAIT_MS = 6000;
+/** 点完资源后等内容区出现东西的上限 */
+const VIEW_WAIT_MS = 8000;
+/** 视频保底超时：算出来的剩余时长之外再宽这么多 */
+const VIDEO_SLACK_MS = 10 * 60 * 1000;
+const VIDEO_MIN_MS = 5 * 60 * 1000;
+const VIDEO_MAX_MS = 6 * 60 * 60 * 1000;
+
+/** 目录根（`div.panel > div.panel-catalog > ul.rank-1`） */
+const CATALOG_ROOT_SEL = 'div.panel-catalog ul.rank-1';
+/** 内容区（视频 / iframe 都挂在这里面） */
+const VIEWER_SEL = 'div.showViewer';
+
+// ------------------------------------------------------------- 对外接口
+
+export interface AutoplayStatus {
+  readonly running: boolean;
+  /** 状态行文字（【连播】页实时显示这个） */
+  readonly text: string;
 }
 
-/** 对外暴露的遥控手柄（挂到 window 上，方便用户手测/救急） */
-export interface AutoplayHandle {
-  resume(): void;
-  next(): void;
-  stop(): void;
-  status(): { running: boolean; paused: boolean; cursor: number; total: number };
-}
+type Listener = () => void;
+const listeners = new Set<Listener>();
 
-/** 手柄挂到 `window` 上用的键名 */
-export const AUTOPLAY_HANDLE_KEY = '__szuUoocAutoplay';
+let host: PanelApi | null = null;
+let running = false;
+let statusText = '已停止';
+/** 每次 start/stop 换一个 token，旧循环靠它自杀 */
+let token: { cancelled: boolean } | null = null;
 
-/** 附件标签页的打开结果：`ctrl` 合成 Ctrl+左键（未确认）、`gm` 走 Tampermonkey、`failed` 明确失败 */
-export type TabOpenResult = 'ctrl' | 'gm' | 'failed';
-
-/** 给「合成 Ctrl+左键」留多久才认定它没开出来（无实测依据，先拍一个） */
-const CTRL_CLICK_FALLBACK_MS = 1200;
-
-/**
- * 合成一次「Ctrl+左键」点击。
- *
- * Chrome 把带 `ctrlKey` 的链接点击解释成「在**后台**新标签页打开」—— 这正是我们要的，
- * 也是用户 m01510 点名的方案。
- *
- * ⚠️ 两个已知风险，写在这里免得下次又踩：
- *  1. 程序化的 `<a target="_blank">` 点击**不带用户手势**时，会被弹窗拦截器**静默**吃掉
- *     （不抛异常、不报错）—— 本文件下面的 `openInBackgroundTab` 注释里就记着一次实测。
- *     合成事件不是可信事件、同样吃不到用户手势，所以这一级**可能根本没开出来**，
- *     而从调用方的返回值上看不出来。
- *  2. 即使开出来了，附件 URI 在浏览器里会落到 Office 那边（实测 `view.officeapps.live.com`），
- *     抢不抢前台由对方决定，我们这边管不着。
- * ⇒ 因此它只是**一级尝试**，后面还有 GM 兜底，**不能当成结果**。
- */
-function synthesizeCtrlClick(url: string): boolean {
-  try {
-    const a = document.createElement('a');
-    a.href = url;
-    a.target = '_blank';
-    a.rel = 'noopener noreferrer';
-    a.style.display = 'none';
-    document.body.appendChild(a);
-    a.dispatchEvent(
-      new MouseEvent('click', {
-        bubbles: true,
-        cancelable: true,
-        ctrlKey: true, // Windows / Linux
-        metaKey: true, // macOS 的 Cmd+左键
-        view: window,
-      }),
-    );
-    a.remove();
-    return true;
-  } catch (err) {
-    log.warn(`合成 Ctrl+左键失败：${String(err)}`);
-    return false;
-  }
-}
-
-/** 走 Tampermonkey 的 `GM_openInTab`（不受弹窗拦截影响，header 里已 `@grant`） */
-function openViaGm(url: string): boolean {
-  const g = globalThis as Record<string, unknown>;
-  const gmOpen = g['GM_openInTab'];
-  if (typeof gmOpen !== 'function') return false;
-  try {
-    (gmOpen as (u: string, o?: unknown) => unknown)(url, {
-      active: false, // 后台打开，不抢当前课程页的焦点
-      insert: false, // 挂到窗口末尾，别插在当前标签页旁边
-      setParent: true,
-    });
-    return true;
-  } catch (err) {
-    log.warn(`GM_openInTab 不可用：${String(err)}`);
-    return false;
-  }
-}
-
-/**
- * 「合成 Ctrl+左键」那一级**无法自证**，所以到点无条件用 GM 再兜一次。
- * 这一步是**为了验证**而存在的：
- *  - 看到**两个**标签页 ⇒ Ctrl+左键生成了，把 `scheduleGmFallback` 整个删掉即可；
- *  - 只看到**一个**、且课程页仍被挤到后台 ⇒ 这条路走不通，换方案（见开发文档 §7）。
- */
-function scheduleGmFallback(url: string): void {
-  window.setTimeout(() => {
-    if (openViaGm(url)) {
-      log.debug('已用 GM_openInTab 兜底（看到两个标签页 = Ctrl+左键生效了）');
-    }
-  }, CTRL_CLICK_FALLBACK_MS);
-}
-
-/**
- * 打开一个后台标签页。
- *
- * ⚠️ 这个函数**不许谎报成功**。早先的版本只要 `a.click()` 不抛异常就 `return true`，
- * 真机冒烟里明明一个标签页都没开出来、日志却写着「OK」—— 因为不带用户手势的程序化
- * `a.click()` 开 `target="_blank"` 会被弹窗拦截器**静默**拦掉（不抛异常、不报错），
- * 和 `sites/bkxk/page-realm.ts:4-8` 记的那个坑是同一类。
- *
- * 当前策略（用户 m01510 指定）：**先合成 Ctrl+左键**，1.2 秒后 GM 兜底；
- * 只有合成直接抛异常才同步走 GM。返回值如实反映走的是哪一级，不反映"是否真的开出来了"。
- */
-function openInBackgroundTab(url: string): TabOpenResult {
-  if (url === '') return 'failed';
-
-  if (synthesizeCtrlClick(url)) {
-    scheduleGmFallback(url);
-    return 'ctrl';
-  }
-
-  if (openViaGm(url)) return 'gm';
-  return 'failed';
-}
-
-/**
- * 启动自动连播。
- *
- * @returns 卸载函数
- */
-export function startAutoplay(host: AutoplayHost): () => void {
-  let stopped = false;
-  let paused = false;
-  let phase: 'idle' | 'video' | 'delay' = 'idle';
-  let delayTimer: number | null = null;
-  let checkTimer: number | null = null;
-
-  /**
-   * 「当前这一项已经布好 ended 陷阱」。
-   *
-   * 为什么需要它：早先的版本拿 `phase === 'video'` 当「能不能处理 ended」的判据，
-   * 结果凡是 phase 不是播放态的情形（已经 `finish()` 过、上一次 `next()` 还没走完、
-   * 页面才刚 boot）都会让 ended **被静默丢弃**——不报错、不打日志，
-   * 用户看到的就是「视频播完了但一动不动」。
-   *
-   * 现在改成显式布防：只有 `act()` 判定「这一项是视频」时才布防，`next()` 立刻撤防。
-   */
-  let endedArmed = false;
-  /** 上一次因 ended 推进的时刻，用于压制播放器连发的重复事件 */
-  let lastAdvanceAt = 0;
-
-  let cid = '';
-  let leaves: CatalogLeaf[] = [];
-  let cursor = 0;
-  let currentLeaf: CatalogLeaf | null = null;
-  let currentSources: UnitSource[] = [];
-  let subIndex = 0;
-
-  // ---------------------------------------------------------- 资源获取
-
-  async function sourcesOf(leaf: CatalogLeaf): Promise<UnitSource[]> {
-    const key = String(leaf.nodeId);
-
-    const primed = peekUnitLearn(key);
-    if (primed !== null) return parseUnitSources(primed);
-
-    const captured = await waitUnitLearn(key, UNIT_INTERCEPT_TIMEOUT_MS);
-    if (captured !== null) return parseUnitSources(captured);
-
-    // 兜底：自己补发一次同源 GET
-    log.debug(`未截获 getUnitLearn（${key}），主动补发`);
+function notify(): void {
+  for (const fn of [...listeners]) {
     try {
-      const res = await request({
-        url: unitLearnUrl(cid, leaf),
-        responseType: 'json',
-        timeoutMs: 15000,
-      });
-      if (res.status === 200 && res.json !== undefined) {
-        primeUnitLearn(key, res.json);
-        return parseUnitSources(res.json);
-      }
-      log.warn(`补发 getUnitLearn 失败（${key}）：HTTP ${res.status}`);
-    } catch (err) {
-      log.warn(`补发 getUnitLearn 异常（${key}）：${String(err)}`);
+      fn();
+    } catch {
+      /* 订阅者自己出错不影响连播 */
     }
-    return [];
   }
+}
 
-  /**
-   * 等目录：**先让站点自己发**。
-   *
-   * 兜底不由「装载后 N 秒」触发，而由「页面 load 之后 2 秒」触发 ——
-   * 站点自己的 `getCatalogList` 一向是在页面（Angular）起来之后才出去的，
-   * 用固定短超时去等，必然是我们先补发，拦截形同虚设。
-   */
-  async function loadCatalog(): Promise<CatalogLeaf[] | null> {
-    const primed = peekCatalog(cid);
-    if (primed !== null) return flattenLeaves(parseCatalogTree(primed));
+function setStatus(text: string): void {
+  statusText = text;
+  notify();
+}
 
-    const body = await catalogWhenSiteGivesUp();
-    if (body === null) return null;
-    return flattenLeaves(parseCatalogTree(body));
+export function autoplayStatus(): AutoplayStatus {
+  return { running, text: statusText };
+}
+
+/** 订阅状态变化，返回退订函数 */
+export function subscribeAutoplay(fn: Listener): () => void {
+  listeners.add(fn);
+  return () => {
+    listeners.delete(fn);
+  };
+}
+
+/**
+ * 装载：把 `host`（面板 API）存下来，返回卸载函数。
+ *
+ * **不会自动开始连播** —— 由用户在【连播】页点【开始连播】（用户 m04485 第二轮拍板：
+ * 原来的「自动连播」复选框换成两个按钮）。
+ */
+export function startAutoplay(api: PanelApi): () => void {
+  host = api;
+  log.debug('连播已装载（等待用户点【开始连播】）');
+  return () => {
+    autoplayStop();
+    host = null;
+    listeners.clear();
+  };
+}
+
+/** 【开始连播】 */
+export function autoplayStart(): void {
+  if (running) return;
+  if (host === null) {
+    log.warn('还没装载就点了【开始连播】，忽略');
+    return;
   }
+  const root = catalogRoot();
+  if (root === null) {
+    const msg = '当前页面上找不到课程目录，无法连播（要先打开旧版课程页）';
+    log.error(msg);
+    host.toast(msg, 'error');
+    setStatus(msg);
+    return;
+  }
+  running = true;
+  const t = { cancelled: false };
+  token = t;
+  setStatus('连播中：正在定位当前项…');
+  log.info('连播开始');
+  void loop(t);
+}
 
-  /** 截获与补发的赛跑：谁先拿到目录谁赢；补发失败则继续等站点的，直到硬上限 */
-  function catalogWhenSiteGivesUp(): Promise<unknown | null> {
-    return new Promise((resolve) => {
-      let settled = false;
-      let armTimer = 0;
-      let hardTimer = 0;
+/** 【停止连播】—— 立刻停（用户拍板） */
+export function autoplayStop(): void {
+  if (!running && token === null) return;
+  running = false;
+  if (token !== null) token.cancelled = true;
+  token = null;
+  setStatus('已停止');
+  setCourseProgress(null);
+  log.info('连播已停止');
+  notify();
+}
 
-      const done = (body: unknown | null): void => {
-        if (settled) return;
-        settled = true;
-        window.clearTimeout(armTimer);
-        window.clearTimeout(hardTimer);
-        window.removeEventListener('load', arm);
-        resolve(body);
-      };
+// ------------------------------------------------------------- 小工具
 
-      const arm = (): void => {
-        armTimer = window.setTimeout(() => {
-          void (async () => {
-            log.debug(`页面已 load 且站点仍未发 getCatalogList（${cid}），主动补发`);
-            try {
-              const res = await request({
-                url: catalogListUrl(cid),
-                responseType: 'json',
-                timeoutMs: 20000,
-              });
-              if (res.status === 200 && res.json !== undefined) {
-                primeCatalog(cid, res.json);
-                done(res.json);
-                return;
-              }
-              log.warn(`补发 getCatalogList 失败：HTTP ${res.status}`);
-            } catch (err) {
-              log.warn(`补发 getCatalogList 异常：${String(err)}`);
-            }
-            // 补发没成，继续等站点自己那发（硬上限兜底）
-          })();
-        }, FALLBACK_AFTER_LOAD_MS);
-      };
-
-      // 站点自己发的
-      void waitCatalog(cid, CATALOG_HARD_TIMEOUT_MS).then((body) => {
-        if (body !== null) done(body);
-      });
-
-      if (document.readyState === 'complete') arm();
-      else window.addEventListener('load', arm, { once: true });
-
-      hardTimer = window.setTimeout(() => done(null), CATALOG_HARD_TIMEOUT_MS);
+/** 可被【停止连播】打断的等待 */
+function sleep(ms: number, t: { cancelled: boolean }): Promise<void> {
+  return new Promise((resolve) => {
+    if (t.cancelled) {
+      resolve();
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      window.clearTimeout(timer);
+      resolve();
+    }, ms);
+    const off = subscribeAutoplay(() => {
+      if (!t.cancelled) return;
+      off();
+      window.clearTimeout(timer);
+      resolve();
     });
+  });
+}
+
+/** 等到 `pred()` 为真；超时返回 false。可被【停止连播】打断。 */
+async function waitFor(
+  pred: () => boolean,
+  timeoutMs: number,
+  t: { cancelled: boolean },
+  intervalMs = 200,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (t.cancelled) return false;
+    if (pred()) return true;
+    if (Date.now() >= deadline) return false;
+    await sleep(intervalMs, t);
   }
+}
 
-  // ---------------------------------------------------------- 流程控制
+function textOf(node: Element | null): string {
+  return (node?.textContent ?? '').replace(/\s+/g, ' ').trim();
+}
 
-  function clearTimers(): void {
-    if (delayTimer !== null) {
-      window.clearTimeout(delayTimer);
-      delayTimer = null;
+function isComplete(el: Element): boolean {
+  return el.classList.contains('complete');
+}
+
+function isActive(el: Element): boolean {
+  return el.classList.contains('active');
+}
+
+/** 章 / 节 / 资源的「点这一颗」：先 click，点不动再用自带 href 兜底 */
+async function clickNav(el: HTMLElement, t: { cancelled: boolean }): Promise<boolean> {
+  const before = location.hash;
+  try {
+    el.click();
+  } catch (err) {
+    log.warn('click 抛异常', err instanceof Error ? err.message : String(err));
+  }
+  if (before !== location.hash) return true;
+  // 兜底：自带 href（章 / 节的 div.basic 上有，资源行上没有）
+  const href = el.getAttribute('href');
+  if (href !== null && href !== '' && href !== before) {
+    log.debug(`click 没换 hash，改用 href 兜底：${href}`);
+    location.hash = href;
+    await sleep(120, t);
+    return location.hash !== before;
+  }
+  return false;
+}
+
+// ------------------------------------------------------------- 目录 DOM
+
+function catalogRoot(): HTMLElement | null {
+  return document.querySelector<HTMLElement>(CATALOG_ROOT_SEL);
+}
+
+/** `ul.rank-1 > li.catalogItem`（章） */
+function chapterLis(root: HTMLElement): HTMLElement[] {
+  return [...root.children].filter(
+    (n): n is HTMLElement => n instanceof HTMLElement && n.classList.contains('catalogItem'),
+  );
+}
+
+/** 章标题那颗（`li > div.basic.chapter`） */
+function chapterTitle(li: HTMLElement): HTMLElement | null {
+  return li.querySelector<HTMLElement>(':scope > div.basic.chapter');
+}
+
+/** 章的展开区（`li > ul.rank-2`）—— 懒渲染，没用过就是 null */
+function chapterBody(li: HTMLElement): HTMLElement | null {
+  return li.querySelector<HTMLElement>(':scope > ul.rank-2');
+}
+
+/** `ul.rank-2 > li`（小节） */
+function sectionLis(chapterLi: HTMLElement): HTMLElement[] {
+  const body = chapterBody(chapterLi);
+  if (body === null) return [];
+  return [...body.children].filter((n): n is HTMLElement => n instanceof HTMLElement);
+}
+
+/** 小节标题那颗（`li > div.basic`） */
+function sectionTitle(li: HTMLElement): HTMLElement | null {
+  return li.querySelector<HTMLElement>(':scope > div.basic');
+}
+
+/** 小节的资源区（`li > div.resourcelist`）—— 懒渲染 */
+function resourceList(sectionLi: HTMLElement): HTMLElement | null {
+  return sectionLi.querySelector<HTMLElement>(':scope > div.resourcelist');
+}
+
+/** 资源行（`div.resourcelist > div.basic`，ng-repeat=source） */
+function resourceRows(sectionLi: HTMLElement): HTMLElement[] {
+  const list = resourceList(sectionLi);
+  if (list === null) return [];
+  return [...list.children].filter(
+    (n): n is HTMLElement => n instanceof HTMLElement && n.classList.contains('basic'),
+  );
+}
+
+/**
+ * 资源行 → 类型。
+ *
+ * 首选 `span.tag-source-ico` 的 `ng-if="source.type == NN"` —— 那是站点自己写的类型号；
+ * 取不到再退回图标类名（`icon-video` 之类）。
+ */
+function kindOf(row: HTMLElement): SourceKind {
+  const ico = row.querySelector('span.tag-source-ico');
+  if (ico !== null) {
+    const ngIf = ico.getAttribute('ng-if') ?? '';
+    const m = /source\.type\s*==\s*(\d+)/.exec(ngIf);
+    if (m !== null && m[1] !== undefined) return classifySource(Number(m[1]));
+    for (const cls of [...ico.classList]) {
+      if (!cls.startsWith('icon-')) continue;
+      if (cls.includes('video')) return 'video';
+      if (cls.includes('doc') || cls.includes('file') || cls.includes('attach')) return 'attach';
+      if (cls.includes('text') || cls.includes('word')) return 'text';
+      if (cls.includes('discuss') || cls.includes('talk') || cls.includes('note')) return 'discussion';
+      if (cls.includes('quiz') || cls.includes('task') || cls.includes('exam')) return 'quiz';
     }
-    if (checkTimer !== null) {
-      window.clearTimeout(checkTimer);
-      checkTimer = null;
+  }
+  return 'unknown';
+}
+
+/** 资源行的显示名（`span.tag-source-name`） */
+function rowName(row: HTMLElement): string {
+  return textOf(row.querySelector('span.tag-source-name')) || textOf(row);
+}
+
+/** 当前项在哪：章 / 节 / 资源的下标（没有就是 -1） */
+interface Pos {
+  readonly chapterIdx: number;
+  readonly sectionIdx: number;
+  readonly resourceIdx: number;
+}
+
+function posOf(root: HTMLElement): Pos {
+  const chs = chapterLis(root);
+  let chapterIdx = -1;
+  for (let i = 0; i < chs.length; i += 1) {
+    const li = chs[i];
+    if (li === undefined) continue;
+    const title = chapterTitle(li);
+    // 章是「当前」有两种表现：标题带 active，或者它的展开区在（站点只渲染当前章）
+    if ((title !== null && isActive(title)) || chapterBody(li) !== null) chapterIdx = i;
+  }
+  if (chapterIdx < 0) return { chapterIdx: -1, sectionIdx: -1, resourceIdx: -1 };
+
+  const chapLi = chs[chapterIdx];
+  if (chapLi === undefined) return { chapterIdx: -1, sectionIdx: -1, resourceIdx: -1 };
+  const secs = sectionLis(chapLi);
+  let sectionIdx = -1;
+  for (let i = 0; i < secs.length; i += 1) {
+    const li = secs[i];
+    if (li === undefined) continue;
+    const title = sectionTitle(li);
+    if ((title !== null && isActive(title)) || resourceList(li) !== null) sectionIdx = i;
+  }
+  if (sectionIdx < 0) return { chapterIdx, sectionIdx: -1, resourceIdx: -1 };
+
+  const secLi = secs[sectionIdx];
+  if (secLi === undefined) return { chapterIdx, sectionIdx: -1, resourceIdx: -1 };
+  const rows = resourceRows(secLi);
+  let resourceIdx = -1;
+  for (let i = 0; i < rows.length; i += 1) {
+    const r = rows[i];
+    if (r !== undefined && isActive(r)) resourceIdx = i;
+  }
+  return { chapterIdx, sectionIdx, resourceIdx };
+}
+
+/** 状态行文字：`第 3 章 第 2 节「第一章测验」` */
+function describe(root: HTMLElement, pos: Pos): string {  const chs = chapterLis(root);
+  const chapLi = chs[pos.chapterIdx];
+  const chap = textOf(chapLi !== undefined ? chapterTitle(chapLi) : null);
+  const parts: string[] = [];
+  if (chap !== '') parts.push(chap);
+  if (chapLi !== undefined && pos.sectionIdx >= 0) {
+    const secLi = sectionLis(chapLi)[pos.sectionIdx];
+    const sec = textOf(secLi !== undefined ? sectionTitle(secLi) : null);
+    if (sec !== '') parts.push(sec);
+  }
+  if (chapLi !== undefined && pos.sectionIdx >= 0) {
+    const secLi = sectionLis(chapLi)[pos.sectionIdx];
+    if (secLi !== undefined && pos.resourceIdx >= 0) {
+      const row = resourceRows(secLi)[pos.resourceIdx];
+      if (row !== undefined) {
+        const name = rowName(row);
+        if (name !== '') parts.push(`「${name}」`);
+      }
     }
   }
+  return parts.join(' ');
+}
 
-  function finish(reason: string): void {
-    phase = 'idle';
-    clearTimers();
-    log.info(`连播结束：${reason}`);
-    host.toast(`连播结束：${reason}`, 'info');
-  }
+// ------------------------------------------------------------- 内容区
 
-  function pause(reason: string): void {
-    paused = true;
-    phase = 'idle';
-    clearTimers();
-    log.info(`连播暂停：${reason}`);
-    host.toast(`连播已暂停：${reason}（${AUTOPLAY_HANDLE_KEY}.resume() 可恢复）`, 'warn');
-  }
-
-  /** 推进到下一项 */
-  function next(): void {
-    if (stopped) return;
-    endedArmed = false; // 离开当前项，立刻撤防
-    subIndex++;
-    if (subIndex >= currentSources.length) {
-      cursor++;
-      currentLeaf = null;
-      currentSources = [];
-      subIndex = 0;
-    }
-    void step();
-  }
-
+interface Viewer {
+  readonly video: HTMLVideoElement | null;
+  /** 内容区里有 iframe（未必是试卷） */
+  readonly hasFrame: boolean;
   /**
-   * 一项处理完、跳下一项之前先停留 `{播完后停留}`。
-   *
-   * 与 `scheduleDelay()` 的区别只是**读哪个设置**，但两者语义完全不同，别合并：
-   *   - `scheduleDelay()`（跳转后等待）：刚导航到某一项，等页面就绪；
-   *   - `scheduleHold()` （播完后停留）：这一项已经做完了，缓缓再跳走。
+   * 答题 iframe 在不在 —— 这是旧版测验的判据（需求细则 §B.5）：
+   * `iframe[src*="/exam/"]`。
    */
-  function scheduleHold(): void {
-    const ms = holdAfterMs();
-    if (ms <= 0) {
-      next();
+  readonly hasQuizFrame: boolean;
+}
+
+function viewerOf(): Viewer {
+  const box = document.querySelector<HTMLElement>(VIEWER_SEL) ?? document.body;
+  const video = box.querySelector<HTMLVideoElement>('video');
+  const frames = [...box.querySelectorAll<HTMLIFrameElement>('iframe')];
+  const hasQuizFrame = frames.some((f) => (f.getAttribute('src') ?? '').includes('/exam/'));
+  return { video, hasFrame: frames.length > 0, hasQuizFrame };
+}
+
+/** 等视频播完（听 `ended`）。返回是否真的播完了 */
+function waitVideoEnd(video: HTMLVideoElement, t: { cancelled: boolean }): Promise<boolean> {
+  return new Promise((resolve) => {
+    if (video.ended) {
+      resolve(true);
       return;
     }
-    phase = 'delay';
-    log.debug(`播完，停留 ${ms}ms 后继续`);
-    delayTimer = window.setTimeout(() => {
-      delayTimer = null;
-      phase = 'idle';
-      next();
-    }, ms);
-  }
+    const rate = video.playbackRate > 0 ? video.playbackRate : 1;
+    const remaining = Number.isFinite(video.duration) ? (video.duration - video.currentTime) / rate : 0;
+    const budget = Math.min(VIDEO_MAX_MS, Math.max(VIDEO_MIN_MS, remaining * 1000 + VIDEO_SLACK_MS));
 
-  /** 等 `{跳转后等待}` 后推进 */
-  function scheduleDelay(): void {
-    const ms = waitBeforeMs();
-    phase = 'delay';
-    log.debug(`等待 ${ms}ms 后继续`);
-    delayTimer = window.setTimeout(() => {
-      delayTimer = null;
-      phase = 'idle';
-      next();
-    }, ms);
-  }
-
-  function navigateTo(hash: string): void {
-    if (location.hash === hash) return;
-    log.debug(`跳转 ${hash}`);
-    location.hash = hash;
-  }
-
-  /**
-   * 跳转前在右上角提示一次（用户 m01302 需求 1）。
-   *
-   * 用 `PanelApi.toast`（`ToastStack` 本来就固定在 `top:10px / right:10px`），
-   * 不新造组件。文案带进度 `N/总数`，和日志的「开始播放：」那条互相印证。
-   */
-  function announce(action: '播放' | '打开' | '跳转', src: UnitSource): void {
-    host.toast(`即将${action}（${cursor + 1}/${leaves.length}）：${src.title}`, 'info');
-  }
-
-  /** 处理当前叶子里的一个资源 */
-  async function act(leaf: CatalogLeaf, src: UnitSource): Promise<void> {
-    const kind = classifySource(src.type);
-
-    if (kind === 'quiz') {
-      if (src.finished) {
-        log.debug(`测验已完成，跳过（${src.title}）`);
-        scheduleDelay();
-        return;
-      }
-      if (isEnabled(SITE_ID, TOGGLE.AI_ANSWER)) {
-        if (src.taskId === null) {
-          // 没有 task_id 就拼不出答题页地址，只能交给用户
-          log.warn(`测验没有 task_id，进不去答题页：${src.title}`);
-          pause(`测验「${src.title}」没有 task_id，进不去答题页，请手动完成`);
-          return;
-        }
-        // ⚠️ 答题页**不在 SPA 里**，是整页跳转（`/exam/paper?cid=&tid=`）⇒ 这里用
-        //    `location.href` 而不是 `navigateTo()`（那个只改 hash）。
-        //    页面一卸载，本循环就没了；答完要靠答题页那边接力（见 ai/handoff.ts）。
-        //    用户 m04227 拍板：整页换成答题页，答完再换成课程页。
-        saveHandoff(String(src.taskId));
-        announce('打开', src);
-        log.info(`AI 作答：整页前往答题页 tid=${src.taskId}（${src.title}）`);
-        location.href = examUrl(cid, src.taskId);
-        // 不 schedule：页面马上卸载。万一是被 beforeunload 拦住了，
-        // 连播会停在这一项（停着比乱走安全，用户看一眼就知道跳转没成功）。
-        return;
-      }
-      if (isEnabled(SITE_ID, TOGGLE.SKIP_QUIZ)) {
-        // 「跳过测验」= 不自动进入：连播不导航过去，直接路过（用户 m01877 拍板）
-        log.info(`跳过未完成的测验：${src.title}`);
-        scheduleDelay();
-        return;
-      }
-      pause(`遇到未完成的测验「${src.title}」，请手动完成`);
-      return;
-    }
-
-    if (kind === 'discussion' && !isEnabled(SITE_ID, TOGGLE.SKIP_DISCUSSION)) {
-      pause(`遇到讨论「${src.title}」，请手动完成后恢复`);
-      return;
-    }
-
-    if (kind === 'video') {
-      announce('播放', src);
-      navigateTo(sourceHash(cid, leaf, src.id));
-      phase = 'video';
-      endedArmed = true; // 布防：这一项是视频，等它的 ended
-      log.info(`开始播放：${leaf.titles.join(' / ')} / ${src.title}`);
-      // 兜底：万一这条视频已经播完了（目录里 finished=1 且定位在片尾），`ended` 不会再来
-      checkTimer = window.setTimeout(() => {
-        checkTimer = null;
-        if (stopped || paused || phase !== 'video') return;
-        const v = document.querySelector('video');
-        if (v !== null && v.ended) {
-          log.debug('视频已在片尾，直接推进');
-          phase = 'idle';
-          scheduleHold();
-        }
-      }, VIDEO_END_CHECK_MS);
-      return;
-    }
-
-    if (kind === 'attach') {
-      // 「跳过附件」= 不打开文件，**但仍然导航到该小节**（用户 m01816 需求 2 原话）。
-      // 导航这一步不能省：连播走过某个小节本身就是「这一项处理过了」的证据，
-      // 而且用户要的正是「小节照走、文件别开」。
-      const skipOpen = isEnabled(SITE_ID, TOGGLE.SKIP_ATTACHMENT);
-      announce(skipOpen ? '跳转' : '打开', src);
-      navigateTo(sourceHash(cid, leaf, src.id));
-      if (skipOpen) {
-        log.info(`附件只路过，不打开文件：${src.title}`);
-        scheduleDelay();
-        return;
-      }
-      const doc = src.documents[0];
-      const uri = doc === undefined ? '' : doc.uri;
-      const name = doc === undefined ? src.title : doc.title;
-      if (uri !== '') {
-        const how = openInBackgroundTab(uri);
-        if (how === 'ctrl') {
-          log.info(`打开附件（合成 Ctrl+左键，后台标签页）：${name}`);
-          log.debug('1.2 秒后会用 GM_openInTab 兜一次；看到两个标签页就说明 Ctrl+左键生效了');
-        } else if (how === 'gm') {
-          log.info(`打开附件（GM_openInTab 后台标签页）：${name}`);
-        } else {
-          log.warn(`附件打开失败：${name}`);
-          host.toast(`附件「${name}」打开失败，请手动查看`, 'warn');
-        }
-      } else {
-        log.warn(`附件没有 document[].uri（${src.title}）`);
-      }
-      scheduleDelay();
-      return;
-    }
-
-    if (kind === 'unknown') log.debug(`未知资源类型 ${src.type}，按文本处理（${src.title}）`);
-
-    if (kind === 'text' && isEnabled(SITE_ID, TOGGLE.SKIP_TEXT)) {
-      // 「跳过文本」= 不停留：仍然导航过去（不然这一项等于没走过），但不等待。
-      // 与「跳过附件」的差别就在这 —— 附件是「不开文件」，文本是「不占时间」。
-      announce('跳转', src);
-      navigateTo(sourceHash(cid, leaf, src.id));
-      log.debug(`文本不停留：${src.title}`);
-      next();
-      return;
-    }
-
-    // 附件（未跳过时）/ 文本 / 讨论（跳过时）/ 未知类型：都是「跳过去 → 等一会儿 → 下一项」
-    announce('跳转', src);
-    navigateTo(sourceHash(cid, leaf, src.id));
-    scheduleDelay();
-  }
-
-  /** 主循环：跳到「第一个有资源的项」并处理它 */
-  async function step(): Promise<void> {
-    for (;;) {
-      if (stopped || paused) return;
-
-      const leaf = leaves[cursor];
-      if (leaf === undefined) {
-        finish('已到目录末尾');
-        return;
-      }
-
-      // 不设范围上限：跨章一直播下去，走到目录末尾才停（用户 m00971 拍板移除「连播范围」）
-
-      if (currentLeaf !== leaf) {
-        const sources = await sourcesOf(leaf);
-        if (stopped || paused) return;
-        currentLeaf = leaf;
-        currentSources = sources.filter((s) => classifySource(s.type) !== 'unknown');
-        subIndex = 0;
-        // 记住进度：刷新后哪怕 hash 被站点规整掉，也能接着播（见 resolveCursor）
-        write(cursorKey(), leaf.nodeId);
-      }
-
-      if (subIndex >= currentSources.length) {
-        // 空叶子（实测存在，如 733704712 → data: []）或本叶子已走完
-        if (currentSources.length === 0) log.debug(`跳过无资源的叶子 ${leaf.nodeId} ${leaf.title}`);
-        cursor++;
-        currentLeaf = null;
-        currentSources = [];
-        subIndex = 0;
-        continue;
-      }
-
-      const src = currentSources[subIndex];
-      if (src === undefined) {
-        cursor++;
-        currentLeaf = null;
-        currentSources = [];
-        subIndex = 0;
-        continue;
-      }
-
-      await act(leaf, src);
-      return;
-    }
-  }
-
-  // ---------------------------------------------------------- 媒体事件
-
-  const onEnded = (ev: Event): void => {
-    const el = ev.target;
-    if (el === null || (el as Element).tagName !== 'VIDEO') return;
-    if (stopped || paused) return;
-
-    // 三重护栏，都是「宁可不动，也不要乱跳」：
-    if (!endedArmed) {
-      // 当前项不是视频（文本 / 附件 / 测验的等待期），或这一条已经推进过了
-      log.debug('忽略未布防的 ended（当前项不是视频）');
-      return;
-    }
-    if (!(el as HTMLVideoElement).isConnected) {
-      // 播放器已经被换掉，这是旧元素迟到的 ended
-      log.debug('忽略已脱离文档的 ended（播放器被换掉了）');
-      return;
-    }
-    const now = Date.now();
-    if (now - lastAdvanceAt < ENDED_DEDUPE_MS) {
-      log.debug('忽略重复的 ended');
-      return;
-    }
-
-    endedArmed = false;
-    lastAdvanceAt = now;
-    clearTimers();
-    phase = 'idle';
-    log.info('视频播放完毕，准备进入下一项');
-    scheduleHold();
-  };
-
-  // ---------------------------------------------------------- 启动
-
-  function boot(): void {
-    const hashAtBoot = location.hash;
-    const found = courseIdFromLocation(location.pathname, hashAtBoot);
-    if (found === null) {
-      log.warn(`拿不到课程 id，连播不启动（pathname=${location.pathname}，hash=${hashAtBoot}）`);
-      return;
-    }
-    cid = found;
-
-    void (async () => {
-      const list = await loadCatalog();
-      if (stopped) return;
-      if (list === null || list.length === 0) {
-        host.toast('连播启动失败：没拿到课程目录', 'error');
-        return;
-      }
-      leaves = list;
-
-      const { index, by } = resolveCursor(hashAtBoot);
-      cursor = index;
-
-      // ⚠️ 这条日志是起点 bug 的取证口（用户 m01302 拍板 A；2026-10 m03919 又修过一次）：
-      // 两个时刻的 hash 原文 + 最终对齐方式 + 进度统计，下次复现直接看这一行就够。
-      log.info(
-        `连播已启动：cid=${cid}，叶子 ${leaves.length} 个（未完成 ${countUnfinished()} 个），` +
-          `从第 ${cursor + 1} 个开始（装载时 hash=${show(hashAtBoot)}；对齐=${by}；` +
-          `目录到货时 hash=${show(location.hash)}）`,
-      );
-      host.toast('自动连播已启动', 'info');
-      void step();
-    })();
-  }
-
-  function show(hash: string): string {
-    return hash === '' ? '（空）' : hash;
-  }
-
-  /** 上次连播停在哪个叶子 —— **按课程分键**，换课程不会串 */
-  function cursorKey(): string {
-    return `uooc:autoplay:cursor:${cid}`;
-  }
-
-  /**
-   * 对齐「这次该从哪个叶子开始」。
-   *
-   * 2026-10 修 BUG（用户 m03875 报「打开已经学了一部分的课程，连播还是从头开始」，
-   * m03919 拍板「站点 learning 优先」）：原来的第 1 顺位是**装载时的 hash**，
-   * 而站点自己会把 hash 落在第 1 章第 1 节 ⇒ hash 一有值就直接返回，
-   * 后面几级（包括「学到哪了」）**一次都没轮到上场**。
-   *
-   * 现在的优先级：
-   * 1. **站点说用户正在这条链上**（`learning=1`，见 `catalog.ts` 的 `CatalogLeaf.learning`）
-   *    且这条链上有没学完的 → 取链上第一个 `finished !== 1`；
-   *    链上全都学完了 → 取链上第一个（别把用户甩到别处去）；
-   * 2. **装载时的 hash** —— 用户自己点进来的位置，最可信的「显式导航」；
-   * 3. **目录到货时的 hash** —— 站点可能在 Angular 起来后才把 hash 写上去（t≈5s）；
-   * 4. **记住的叶子** —— 附件那条 URL 末尾 `sourceId` 恒为 0
-   *    （`catalog.ts` 早就标注「没验证过站点自己是不是也用 0」），站点可能不认、
-   *    把 hash 规整掉，这时只能靠上一次连播的记忆兜底；
-   * 5. **第一个没学完的叶子** —— 什么线索都没有，至少别从「已完成」的那条开始；
-   * 6. 全都没有，才从第 1 个开始。
-   */
-  function resolveCursor(hashAtBoot: string): { index: number; by: string } {
-    const byHash = (hash: string): number => {
-      const chain = currentChainFromHash(hash);
-      return chain === null ? -1 : findLeafIndex(leaves, chain);
+    let done = false;
+    const finish = (ok: boolean): void => {
+      if (done) return;
+      done = true;
+      window.clearTimeout(timer);
+      video.removeEventListener('ended', onEnded);
+      video.removeEventListener('error', onError);
+      off();
+      resolve(ok);
     };
+    const onEnded = (): void => finish(true);
+    const onError = (): void => finish(false);
+    const timer = window.setTimeout(() => finish(video.ended), budget);
+    const off = subscribeAutoplay(() => {
+      if (t.cancelled) finish(false);
+    });
+    video.addEventListener('ended', onEnded);
+    video.addEventListener('error', onError);
+    if (t.cancelled) finish(false);
+  });
+}
 
-    // 1. 站点记的「你正学到这儿」
-    const onPath = leaves.findIndex((leaf) => leaf.learning === 1);
-    if (onPath >= 0) {
-      const firstUnfinished = firstUnfinishedFrom(onPath);
-      if (firstUnfinished >= 0) {
-        return {
-          index: firstUnfinished,
-          by: `站点 learning 链上的第一个未完成（${firstUnfinished + 1}）`,
-        };
+// ------------------------------------------------------------- 主循环
+
+/**
+ * 一直走到「没有下一项」或用户点【停止连播】。
+ *
+ * 每一步都**重新读 DOM**：不缓存下标、不预知下一课。原因见文件头「懒渲染」那条 ——
+ * 站点永远只渲染当前章的小节与当前节的资源，任何提前算好的路线都会在点击后失效。
+ */
+async function loop(t: { cancelled: boolean }): Promise<void> {
+  let clickFails = 0;
+  while (running && !t.cancelled) {
+    const root = catalogRoot();
+    if (root === null) {
+      await halt(t, '找不到课程目录 DOM（div.panel-catalog ul.rank-1），连播停止');
+      return;
+    }
+
+    const pos = posOf(root);
+    publishCourseProgress(root, pos);
+    if (pos.chapterIdx < 0) {
+      // 用户 m04485 第四轮拍板：没有当前项就**停下等他点**，不自己猜第一个未完成的
+      await halt(t, '目录里没有「当前项」标记 —— 请你先点开一节，脚本会跟着你走');
+      return;
+    }
+
+    const chapLi = chapterLis(root)[pos.chapterIdx];
+    if (chapLi === undefined) {
+      await halt(t, '目录结构变了，连播停止');
+      return;
+    }
+
+    // 当前章要展开（懒渲染：不点开就没有小节可读）
+    if (chapterBody(chapLi) === null) {
+      setStatus(`连播中：正在展开 ${textOf(chapterTitle(chapLi))}`);
+      await clickNav(chapterTitle(chapLi) ?? chapLi, t);
+      await waitFor(() => chapterBody(chapLi) !== null, NAV_WAIT_MS, t);
+      continue;
+    }
+
+    const secs = sectionLis(chapLi);
+    if (pos.sectionIdx < 0) {
+      // 章开了但没选中节：找第一个未完成小节
+      const next = secs.findIndex((li) => {
+        if (li.hasAttribute(SKIP_ATTR)) return false;
+        const title = sectionTitle(li);
+        return title === null || !isComplete(title);
+      });
+      if (next < 0) {
+        if (!(await goNextChapter(root, pos.chapterIdx, t))) return;
+        continue;
       }
-      // 链上全学完了：不回头，从链尾之后接着找没学完的（「学到第 4 章、第 4 章已清空」
-      // 这种情形该去第 5 章，而不是把第 4 章第 1 个再放一遍）
-      const chainEnd = lastOnChainFrom(onPath);
-      const after = firstUnfinishedFrom(chainEnd + 1);
-      if (after >= 0) {
-        return { index: after, by: `站点 learning 链已学完，往后第一个未完成（${after + 1}）` };
+      const target = sectionTitle(secs[next] ?? (undefined as never));
+      setStatus(`连播中：正在进入 ${describe(root, { ...pos, sectionIdx: next, resourceIdx: -1 })}`);
+      if (!(await clickNav(target ?? (secs[next] as HTMLElement), t))) {
+        const failed = secs[next];
+        if (failed !== undefined) failed.setAttribute(SKIP_ATTR, '1');
+        clickFails += 1;
+        log.warn('节点不动，标记跳过');
+        if (clickFails > 3) await halt(t, '连续几次都点不动目录，连播停止');
+        continue;
       }
-      return { index: onPath, by: `站点 learning 链（${onPath + 1}，整门课都已学完）` };
+      await sleep(waitBeforeMs(), t);
+      continue;
     }
 
-    // 2./3. hash
-    const atBoot = byHash(hashAtBoot);
-    if (atBoot >= 0) return { index: atBoot, by: '装载时 hash' };
-
-    const atNow = byHash(location.hash);
-    if (atNow >= 0) return { index: atNow, by: '到货时 hash' };
-
-    // 4. 上次连播记住的叶子
-    const saved = read<number | null>(cursorKey(), null);
-    if (saved !== null) {
-      const at = leaves.findIndex((leaf) => leaf.nodeId === saved);
-      if (at >= 0) return { index: at, by: `记住的叶子 ${saved}` };
+    const secLi = secs[pos.sectionIdx];
+    if (secLi === undefined) {
+      if (!(await goNextChapter(root, pos.chapterIdx, t))) return;
+      continue;
     }
 
-    // 5. 第一个没学完的叶子
-    const unfinished = firstUnfinishedFrom(0);
-    if (unfinished >= 0) return { index: unfinished, by: '第一个未完成的叶子' };
-
-    return { index: 0, by: '没有可用线索，从第 1 个开始' };
-  }
-
-  /**
-   * 从 `from` 起（含）往后找第一个「还没学完且在同一个 learning 链上」的叶子。
-   *
-   * 「同一个链」= 该叶子的 `learning` 也是 1（`flattenLeaves` 已把链标记铺到每个叶子上）。
-   * `from` 本身不在 learning 链上时（第 5 顺位那次调用），退化成「从 `from` 起第一个未完成」。
-   * 找不到返回 -1。已学完 = `finished === 1`。
-   */
-  function firstUnfinishedFrom(from: number): number {
-    const start = leaves[from];
-    if (start === undefined) return -1;
-    const requireSameChain = start.learning === 1;
-    for (let i = from; i < leaves.length; i += 1) {
-      const leaf = leaves[i];
-      if (leaf === undefined) continue;
-      if (requireSameChain && leaf.learning !== 1) break;
-      if (leaf.finished !== 1) return i;
+    // 本节资源要渲染（同样懒渲染）
+    if (resourceList(secLi) === null) {
+      setStatus(`连播中：正在展开 ${describe(root, pos)}`);
+      await clickNav(sectionTitle(secLi) ?? secLi, t);
+      await waitFor(() => resourceList(secLi) !== null, NAV_WAIT_MS, t);
+      continue;
     }
-    return -1;
+
+    const rows = resourceRows(secLi);
+    // 找本节下一个「还没完成」的资源（从当前项之后开始）
+    let nextIdx = -1;
+    for (let i = pos.resourceIdx + 1; i < rows.length; i += 1) {
+      const r = rows[i];
+      if (r === undefined) continue;
+      if (r.hasAttribute(SKIP_ATTR)) continue;
+      if (isComplete(r)) continue;
+      nextIdx = i;
+      break;
+    }
+
+    if (nextIdx < 0) {
+      // 本节到底了 → 下一节
+      const after = secs.findIndex((li) => li === secLi);
+      const nextSec = secs.findIndex(
+        (li, i) => i > after && !li.hasAttribute(SKIP_ATTR) && !isComplete(sectionTitle(li) ?? li),
+      );
+      if (nextSec >= 0) {
+        const target = sectionTitle(secs[nextSec] ?? (undefined as never));
+        setStatus(`连播中：正在进入 ${describe(root, { ...pos, sectionIdx: nextSec, resourceIdx: -1 })}`);
+        if (!(await clickNav(target ?? (secs[nextSec] as HTMLElement), t))) {
+          const failed = secs[nextSec];
+          if (failed !== undefined) failed.setAttribute(SKIP_ATTR, '1');
+          log.warn('下一节点不动，标记跳过');
+        }
+        await sleep(waitBeforeMs(), t);
+        continue;
+      }
+      if (!(await goNextChapter(root, pos.chapterIdx, t))) return;
+      continue;
+    }
+
+    // 处理当前项（如果站点当前位置就是我们要处理的这一项，先把它播完）
+    const cur = pos.resourceIdx >= 0 ? rows[pos.resourceIdx] : undefined;
+    const target = rows[nextIdx] ?? (undefined as never);
+    setStatus(`连播中：${describe(root, { ...pos, resourceIdx: nextIdx })}`);
+
+    if (cur !== undefined && cur === target) {
+      // 已经在这一项上（比如用户自己点开、或上一轮点完停在这）→ 直接处理，不再点
+      await handleCurrent(target, t);
+      continue;
+    }
+
+    const ok = await clickNav(target, t);
+    if (!ok) {
+      clickFails += 1;
+      log.warn(`点不动这一项，跳过：${rowName(target)}`);
+      // 点不动就跳过：下一轮从 pos.resourceIdx+1 重新找，所以给这一行打个跳过标记
+      await skipOne(t);
+      if (clickFails > 20) await halt(t, '连续点不动太多次，连播停止');
+      continue;
+    }
+    clickFails = 0;
+    await sleep(waitBeforeMs(), t);
+    await handleCurrent(target, t);
+  }
+}
+
+/**
+ * 把「当前位置 index / 总数」写进监视页（需求细则拍板口径：当前位置 index / 总数）。
+ *
+ * 粒度取能确定的最细一层：有当前资源就报「本节第几个资源 / 本节资源数」，
+ * 有当前节就报「本章第几节 / 本章节数」，否则报「第几章 / 总章数」。
+ */
+function publishCourseProgress(root: HTMLElement, pos: Pos): void {
+  const chs = chapterLis(root);
+  const chapLi = chs[pos.chapterIdx];
+  const label = describe(root, pos);
+  if (chapLi !== undefined && pos.sectionIdx >= 0) {
+    const secLi = sectionLis(chapLi)[pos.sectionIdx];
+    if (secLi !== undefined && pos.resourceIdx >= 0) {
+      const rows = resourceRows(secLi);
+      setCourseProgress({ index: pos.resourceIdx + 1, total: rows.length, label });
+      return;
+    }
+    setCourseProgress({ index: pos.sectionIdx + 1, total: sectionLis(chapLi).length, label });
+    return;
+  }
+  if (pos.chapterIdx >= 0) {
+    setCourseProgress({ index: pos.chapterIdx + 1, total: chs.length, label });
+  }
+}
+
+/** 点不动时的「跳过一位」：临时给这一行打一个跳过标记，下轮 findIndex 就会越过它 */
+const SKIP_ATTR = 'data-sztb-skip';
+async function skipOne(t: { cancelled: boolean }): Promise<void> {
+  const root = catalogRoot();
+  if (root === null) return;
+  const pos = posOf(root);
+  if (pos.chapterIdx < 0 || pos.sectionIdx < 0 || pos.resourceIdx < 0) {
+    await sleep(300, t);
+    return;
+  }
+  const chapLi = chapterLis(root)[pos.chapterIdx];
+  if (chapLi === undefined) return;
+  const secLi = sectionLis(chapLi)[pos.sectionIdx];
+  if (secLi === undefined) return;
+  const rows = resourceRows(secLi);
+  const idx = pos.resourceIdx + 1;
+  const row = rows[idx];
+  if (row !== undefined) {
+    row.setAttribute(SKIP_ATTR, '1');
+    log.debug(`标记跳过：${rowName(row)}`);
+  }
+  await sleep(200, t);
+}
+
+/** 展开并进入下一章；没有下一章就收工。返回是否还要继续 */
+async function goNextChapter(
+  root: HTMLElement,
+  chapterIdx: number,
+  t: { cancelled: boolean },
+): Promise<boolean> {
+  const chs = chapterLis(root);
+  // 下一章要跳过被标记过点不动的（点不动就跳过，不重试不暂停）
+  let nextLi: HTMLElement | undefined;
+  for (let i = chapterIdx + 1; i < chs.length; i += 1) {
+    const li = chs[i];
+    if (li === undefined) continue;
+    if (li.hasAttribute(SKIP_ATTR)) continue;
+    nextLi = li;
+    break;
+  }
+  if (nextLi === undefined) {
+    // 后面的章都被跳过标记占了 → 也当走到头
+    const anyLeft = chs.slice(chapterIdx + 1).some((li) => !li.hasAttribute(SKIP_ATTR));
+    if (!anyLeft) {
+      await halt(t, '已经是最后一章最后一节，连播结束');
+      return false;
+    }
+    nextLi = chs[chapterIdx + 1];
+  }
+  if (nextLi === undefined) {
+    await halt(t, '已经是最后一章最后一节，连播结束');
+    return false;
+  }
+  const title = chapterTitle(nextLi);
+  setStatus(`连播中：正在进入下一章 ${textOf(title)}`);
+  const ok = await clickNav(title ?? nextLi, t);
+  if (!ok) {
+    log.warn(`下一章点不动，跳过去：${textOf(title)}`);
+    nextLi.setAttribute(SKIP_ATTR, '1');
+  }
+  await waitFor(() => chapterBody(nextLi) !== null, NAV_WAIT_MS, t);
+  await sleep(waitBeforeMs(), t);
+  return true;
+}
+
+/** 处理「站点当前就停在这一项上」的那一项 */
+async function handleCurrent(row: HTMLElement, t: { cancelled: boolean }): Promise<void> {
+  if (isComplete(row)) {
+    log.debug('这一项站点标了完成，跳过');
+    return;
+  }
+  const kind = kindOf(row);
+  const name = rowName(row);
+  setStatus(`连播中：正在处理「${name}」（${KIND_TEXT[kind]}）`);
+
+  // 等内容区出现东西（点完导航到渲染之间有延迟）
+  await waitFor(() => viewerReady(), VIEW_WAIT_MS, t);
+  const v = viewerOf();
+
+  if (v.video !== null || kind === 'video') {
+    if (v.video === null) {
+      log.warn(`看着像视频但没找到 <video>，等一会儿就往下走：「${name}」`);
+      await sleep(holdAfterMs(), t);
+      return;
+    }
+    const done = await waitVideoEnd(v.video, t);
+    log.info(`视频「${name}」${done ? '已播完' : '没等到播完（被停止或出错）'}`);
+    if (t.cancelled || !running) return;
+    await sleep(holdAfterMs(), t);
+    return;
   }
 
-  /** `from` 所在的 learning 链的最后一个下标（`from` 不在链上时就是 `from` 自己） */
-  function lastOnChainFrom(from: number): number {
-    if (leaves[from]?.learning !== 1) return from;
-    let end = from;
-    while (leaves[end + 1]?.learning === 1) end += 1;
-    return end;
+  if (kind === 'quiz' || v.hasQuizFrame) {
+    // tid 白写在答题 iframe 的地址里（`/exam/1208164042`），不需要任何交接
+    const tid = quizTidOnPage();
+    if (tid === null) {
+      log.warn(`走到测验「${name}」但 iframe 地址里读不出 tid，停下等你`);
+      await halt(t, `走到测验「${name}」但读不出 tid，连播停下等你`);
+      return;
+    }
+    if (isEnabled(SITE_ID, TOGGLE.SKIP_QUIZ)) {
+      await halt(t, `走到测验「${name}」，【跳过测验】开着，连播停下等你`);
+      return;
+    }
+    if (!isEnabled(SITE_ID, TOGGLE.AI_ANSWER)) {
+      await halt(t, `走到测验「${name}」，AI 答题没开，连播停下等你`);
+      return;
+    }
+    if (host === null) return;
+    setStatus(`连播中：正在作答「${name}」`);
+    log.info(`测验「${name}」→ tid=${tid}，交给 AI 作答`);
+    await runQuizAnswer(tid, host);
+    await sleep(holdAfterMs(), t);
+    return;
   }
 
-  /** 日志用：还有几个叶子没学完（站点没给 `finished` 的按「没学完」算） */
-  function countUnfinished(): number {
-    return leaves.reduce((n, leaf) => (leaf.finished === 1 ? n : n + 1), 0);
+  // 附件 / 文本 / 讨论 / 认不出来 —— 按各自的「跳过」开关决定停不停
+  if (kind === 'attach' && isEnabled(SITE_ID, TOGGLE.SKIP_ATTACHMENT)) {
+    log.debug(`跳过附件「${name}」`);
+    return;
   }
-
-  function uninstall(): void {
-    if (stopped) return;
-    stopped = true;
-    paused = false;
-    clearTimers();
-    document.removeEventListener('ended', onEnded, true);
-    const g = pageOrSelf();
-    if (g[AUTOPLAY_HANDLE_KEY] === handle) delete g[AUTOPLAY_HANDLE_KEY];
+  if (kind === 'text' && isEnabled(SITE_ID, TOGGLE.SKIP_TEXT)) {
+    log.debug(`跳过文本「${name}」`);
+    return;
   }
-
-  const handle: AutoplayHandle = {
-    resume() {
-      if (stopped) return;
-      paused = false;
-      log.info('连播已恢复');
-      host.toast('连播已恢复', 'info');
-      void step();
-    },
-    next() {
-      if (stopped) return;
-      paused = false;
-      clearTimers();
-      next();
-    },
-    stop() {
-      uninstall();
-    },
-    status() {
-      return { running: !stopped, paused, cursor, total: leaves.length };
-    },
-  };
-
-  document.addEventListener('ended', onEnded, true);
-  // 必须挂在**页面 realm**：脚本在 Tampermonkey 沙箱里跑，往沙箱 globalThis 上挂
-  // 页面那边一个字节都看不见（同 src/sites/bkxk/page-realm.ts:4-8 记录的教训）。
-  pageOrSelf()[AUTOPLAY_HANDLE_KEY] = handle;
-
-  if (isEnabled(SITE_ID, TOGGLE.AUTO_NEXT)) {
-    boot();
+  if (kind === 'discussion' && isEnabled(SITE_ID, TOGGLE.SKIP_DISCUSSION)) {
+    log.debug(`跳过讨论「${name}」，不等待`);
+    return;
+  }
+  if (v.hasFrame) {
+    log.warn(`这一项是个 iframe 但没有 tid，认不出来是什么，等一会儿就往下走：「${name}」`);
   } else {
-    log.debug('自动连播开关未开，只挂手柄不启动');
+    log.warn(`认不出这一项是什么（类型 ${kind}），等一会儿就往下走：「${name}」`);
   }
+  if (kind === 'unknown') setStatus(`连播中：认不出「${name}」，稍等就继续`);
+  await sleep(holdAfterMs(), t);
+}
 
-  return uninstall;
+/** 内容区有东西了吗（视频 / iframe / 有文字） */
+function viewerReady(): boolean {
+  const box = document.querySelector<HTMLElement>(VIEWER_SEL);
+  if (box === null) return false;
+  if (box.querySelector('video') !== null) return true;
+  if (box.querySelector('iframe') !== null) return true;
+  return textOf(box).length > 0;
+}
+
+const KIND_TEXT: Record<SourceKind, string> = {
+  video: '视频',
+  attach: '附件',
+  text: '文本',
+  discussion: '讨论',
+  quiz: '测验',
+  unknown: '认不出来',
+};
+
+/** 停下（不改 `running`，只报告并终止这一轮循环） */
+async function halt(t: { cancelled: boolean }, reason: string): Promise<void> {
+  t.cancelled = true;
+  running = false;
+  token = null;
+  setStatus(`已停止 —— ${reason}`);
+  setCourseProgress(null);
+  log.warn(reason);
+  host?.toast(reason, 'warn');
+  notify();
 }

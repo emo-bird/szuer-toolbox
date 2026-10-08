@@ -61,10 +61,74 @@ export function matchLearnApi(rawUrl: string): LearnApi | null {
   return null;
 }
 
+// ------------------------------------------------------------- 交卷响应
+
+/**
+ * 一次交卷（`POST /exam/commit`）的判读结果。
+ *
+ * 判据出自用户 m04880 给的真实响应：
+ * - `code == 1` → 通过；
+ * - `code == 110` → **没通过**，`msg` 里带「您的得分是8,测验分数至少要达到50分」，
+ *   `data.score_list` 是 `{ <qid>: <得分> }`、另有 `data.score` / `data.pass_score`；
+ * - 其它 code / 解析不出 → 一律 `unknown`，**不擅自判定**（不重答、不重复提交）。
+ */
+export type CommitVerdict = 'pass' | 'fail' | 'unknown';
+
+export interface CommitResult {
+  readonly verdict: CommitVerdict;
+  /** `data.score`（原样字符串，可能是 ''） */
+  readonly score: string;
+  /** `data.pass_score`（原样字符串，可能是 ''） */
+  readonly passScore: string;
+  /** `data.score_list`：`{ qid: 该题得分 }`，拿不到就是空对象 */
+  readonly scoreList: Readonly<Record<string, string>>;
+  /** 站点给的话（`msg`），失败时用来给用户看 */
+  readonly message: string;
+  /** 原始响应体，排查用 */
+  readonly raw: unknown;
+}
+
+/** 一个 URL 是不是交卷接口 */
+export function matchCommitApi(rawUrl: string): boolean {
+  return (rawUrl.split('#')[0] ?? '').includes('/exam/commit');
+}
+
+function asRecord(v: unknown): Record<string, unknown> {
+  return v !== null && typeof v === 'object' ? (v as Record<string, unknown>) : {};
+}
+
+function pickString(o: Record<string, unknown>, key: string): string {
+  const v = o[key];
+  if (typeof v === 'string') return v;
+  if (typeof v === 'number') return String(v);
+  return '';
+}
+
+/** 把站点给的响应体翻成 `CommitResult`（纯函数，便于单测与排查） */
+export function readCommit(body: unknown): CommitResult {
+  const top = asRecord(body);
+  const data = asRecord(top['data']);
+  const rawList = asRecord(data['score_list']);
+  const scoreList: Record<string, string> = {};
+  for (const [k, v] of Object.entries(rawList)) scoreList[k] = typeof v === 'string' ? v : String(v);
+  const code = typeof top['code'] === 'number' ? top['code'] : Number(pickString(top, 'code'));
+  return {
+    verdict: code === 1 ? 'pass' : code === 110 ? 'fail' : 'unknown',
+    score: pickString(data, 'score'),
+    passScore: pickString(data, 'pass_score'),
+    scoreList,
+    message: pickString(top, 'msg'),
+    raw: body,
+  };
+}
+
 // ------------------------------------------------------------- 落地仓库
 
 let lastCatalog: { cid: string; body: unknown } | null = null;
 const unitBodies = new Map<string, unknown>();
+
+let lastCommit: CommitResult | null = null;
+let commitWaiters: Array<(v: CommitResult | null) => void> = [];
 
 type Waiter<T> = (value: T | null) => void;
 
@@ -141,13 +205,60 @@ export function resetInterceptStore(): void {
   unitBodies.clear();
   catalogWaiters = [];
   unitWaiters.clear();
+  lastCommit = null;
+  commitWaiters = [];
+}
+
+// ------------------------------------------------------------- 交卷仓库
+
+/** 把一份交卷响应喂进仓库（截获到） */
+export function primeCommit(body: unknown): CommitResult {
+  const result = readCommit(body);
+  lastCommit = result;
+  const pending = commitWaiters;
+  commitWaiters = [];
+  for (const fn of pending) fn(result);
+  return result;
+}
+
+/**
+ * 丢掉上一次交卷结果。
+ *
+ * ⚠️ 点【提交】**之前**必须调一次：否则用户答完第一份没通过、我们再提交时，
+ * `waitCommit` 会立刻返回**上一次**那份响应（仓库里还存着），
+ * 结果就是「刚点下去就报告说没通过」——而且分数还是旧的。
+ */
+export function clearCommit(): void {
+  lastCommit = null;
+}
+
+/**
+ * 等站点自己发的那一发 `POST /exam/commit` 的响应。
+ *
+ * ⚠️ 只等**站点自己发的**：我们自己的 `http.ts` 请求带 `__szuSkip`，
+ * 在 `installFetch` / `installXhr` 里就被挡掉了（提交是用户点按钮触发的，
+ * 站点用 Angular 自己的 `$http` 发出去，正好会被截获）。
+ */
+export function waitCommit(timeoutMs: number): Promise<CommitResult | null> {
+  if (lastCommit !== null) return Promise.resolve(lastCommit);
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (v: CommitResult | null): void => {
+      if (done) return;
+      done = true;
+      resolve(v);
+    };
+    commitWaiters.push(finish);
+    setTimeout(() => finish(null), timeoutMs);
+  });
 }
 
 // ------------------------------------------------------------- 装钩子
 
 function dispatch(rawUrl: string, text: string): void {
-  const api = matchLearnApi(rawUrl);
-  if (api === null) return;
+  const isCommit = matchCommitApi(rawUrl);
+  const api = isCommit ? null : matchLearnApi(rawUrl);
+  if (!isCommit && api === null) return;
   let body: unknown;
   try {
     body = JSON.parse(text);
@@ -155,13 +266,21 @@ function dispatch(rawUrl: string, text: string): void {
     log.warn('截获到的响应不是 JSON，已忽略', rawUrl);
     return;
   }
-  if (api.kind === 'catalog') {
+  if (isCommit) {
+    const result = primeCommit(body);
+    log.debug('截获交卷响应', `${result.verdict} / 得分 ${result.score}`);
+  } else if (api !== null && api.kind === 'catalog') {
     log.debug('截获 getCatalogList', api.cid);
     primeCatalog(api.cid, body);
-  } else {
+  } else if (api !== null) {
     log.debug('截获 getUnitLearn', api.catalogId);
     primeUnitLearn(api.catalogId, body);
   }
+}
+
+/** 这个 URL 值得挂监听吗（学习页两接口 + 交卷） */
+function shouldSniff(rawUrl: string): boolean {
+  return matchLearnApi(rawUrl) !== null || matchCommitApi(rawUrl);
 }
 
 const XHR_URL_KEY = '__szuUoocUrl';
@@ -184,7 +303,7 @@ function installXhr(realm: Record<string, unknown>): boolean {
 
   proto['send'] = function (this: Record<string, unknown>, ...args: unknown[]) {
     const url = this[XHR_URL_KEY];
-    if (typeof url === 'string' && matchLearnApi(url) !== null) {
+    if (typeof url === 'string' && shouldSniff(url)) {
       const self = this;
       (self['addEventListener'] as (t: string, fn: () => void) => void).call(self, 'load', () => {
         try {
@@ -223,7 +342,7 @@ function installFetch(realm: Record<string, unknown>): boolean {
     } catch {
       /* 忽略 */
     }
-    if (url === '' || matchLearnApi(url) === null) return p;
+    if (url === '' || !shouldSniff(url)) return p;
 
     p.then((res) => {
       try {

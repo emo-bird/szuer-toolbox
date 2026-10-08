@@ -61,8 +61,6 @@ export const TOGGLE = {
   MUTE: 'mute',
   /** 🟢 防失焦暂停（U4） */
   KEEP_PLAYING: 'keep-playing',
-  /** 🟠 自动连播（U3） */
-  AUTO_NEXT: 'auto-next',
   /** 🟢 附件只路过，不打开文件（仍导航到该小节）—— 用户 m01816 需求 2 */
   SKIP_ATTACHMENT: 'skip-attachment',
   /** 🟢 文本不停留：导航过去后不等待，直接下一项 */
@@ -119,14 +117,6 @@ export const UOOC_TOGGLES: readonly SiteToggleDef[] = [
     group: GROUP.VIDEO,
   },
   {
-    id: TOGGLE.AUTO_NEXT,
-    label: '自动连播',
-    desc: '播完自动打开目录里的下一个视频',
-    risk: 'trace',
-    default: false,
-    group: GROUP.AUTOPLAY,
-  },
-  {
     id: TOGGLE.SKIP_ATTACHMENT,
     label: '跳过附件',
     desc: '不打开附件文件（仍导航到该小节）。打开时会尝试在后台标签页里打开',
@@ -162,9 +152,9 @@ export const UOOC_TOGGLES: readonly SiteToggleDef[] = [
     id: TOGGLE.AI_ANSWER,
     label: 'AI 答题',
     desc:
-      '连播遇到未完成的测验就整页跳到答题页，脚本拉题问模型并回填；' +
+      '连播遇到测验脚本就在页内答题 iframe 里拉题问模型、逐题回填；' +
       '提交前会弹确认框，人机验证码要你手动点一下',
-    risk: 'trace',
+    risk: 'irreversible',
     default: false,
     group: GROUP.AI,
   },

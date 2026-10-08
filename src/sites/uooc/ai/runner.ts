@@ -31,6 +31,29 @@ export interface AnswerOutcome {
   readonly samples: readonly (string | null)[];
   /** 最后一次出错的原因（没有错则是空串） */
   readonly error: string;
+  /** 给监视页看的备注（目前只有重答模式会用：模型没听排除 / 重答成功） */
+  readonly note?: string;
+}
+
+/** `answerOne` 的运行参数 */
+export interface AnswerOneOptions {
+  readonly onDebug?: (m: string) => void;
+  readonly onWarn?: (m: string) => void;
+  /**
+   * 上一轮这道题的错误答案 —— 写进提示词里禁止模型再给这一个。
+   * **只要传了就进入「重答模式」**（见 `maxRequests`）。
+   */
+  readonly exclude?: string;
+  /**
+   * 最多请求几次。默认 `MAX_SAMPLES`（4，多数投票）；
+   * **重答模式传 1**（用户口径：重答只发 1 次请求）。
+   */
+  readonly maxRequests?: number;
+  /**
+   * 重答模式下，若模型没听排除（返回的答案仍等于 `exclude`），
+   * 是否再补 **1** 次。默认 true；补发也只允许一次，防死循环。
+   */
+  readonly extraOnUnchanged?: boolean;
 }
 
 export interface AnswerProgress {
@@ -67,29 +90,54 @@ export function shuffledTemplates(): PromptTemplate[] {
 /**
  * 答一道题。返回 `AnswerOutcome`，**不抛异常** ——
  * 一道题失败不该拖垮整份卷子，剩下的题照答，失败的在日志和确认框里点名。
+ *
+ * ## 两种模式
+ *
+ * - **首答**（不传 `exclude`）：抽 `MAX_SAMPLES`（4）套不同模板各问一次，
+ *   `majority` 一旦能定案就提前返回。
+ * - **重答**（传了 `exclude`，需求细则 §C.5.1）：上一轮这题答错了，只**再发 1 次**
+ *   请求，并在提示词里禁掉上一轮那个答案（多选禁的是「组合」不是单个字母）。
+ *   若模型没听（返回的仍是那个答案），默认再补 **1** 次 —— 补发也最多一次，防死循环。
  */
 export async function answerOne(
   question: ExamQuestion,
   cfg: LlmConfig,
-  hook: { onDebug?: (m: string) => void; onWarn?: (m: string) => void } = {},
+  opts: AnswerOneOptions = {},
 ): Promise<AnswerOutcome> {
+  const exclude = opts.exclude ?? '';
+  const retryMode = exclude !== '';
   const pool = shuffledTemplates();
   const samples: (string | null)[] = [];
   const decided: string[] = [];
   let requests = 0;
   let lastError = '';
+  let note: string | undefined;
 
-  const max = Math.min(MAX_SAMPLES, pool.length);
-  for (let round = 0; round < max; round += 1) {
+  // 重答：只发 1 次；首答：最多 MAX_SAMPLES 次多数投票
+  const hardMax = retryMode
+    ? Math.max(1, Math.min(2, opts.maxRequests ?? 1))
+    : Math.min(MAX_SAMPLES, pool.length);
+  // 重答默认允许「模型没听 → 补 1 次」
+  const extraOnUnchanged = retryMode ? (opts.extraOnUnchanged ?? true) : false;
+  const deliver = (answer: string): AnswerOutcome => ({
+    qid: question.id,
+    answer,
+    requests,
+    samples,
+    error: lastError,
+    ...(note !== undefined ? { note } : {}),
+  });
+
+  for (let round = 0; round < hardMax; round += 1) {
     const template = pool.pop();
     if (template === undefined) break;
     requests += 1;
     let text = '';
     try {
-      text = await chat(cfg, buildPrompt([question], template));
+      text = await chat(cfg, buildPrompt([question], template, exclude === '' ? undefined : exclude));
     } catch (err) {
       lastError = err instanceof Error ? err.message : String(err);
-      hook.onWarn?.(`第 ${requests} 次请求失败（模板 ${template.label}）：${lastError}`);
+      opts.onWarn?.(`第 ${requests} 次请求失败（模板 ${template.label}）：${lastError}`);
       // 解析失败与请求失败都不计入样本，但**要消耗一次机会**，
       // 否则接口一直 500 时这道题会无限重试。
       samples.push(null);
@@ -98,19 +146,37 @@ export async function answerOne(
 
     const parsed = parseAnswers(text, [question.kind])[0] ?? null;
     samples.push(parsed);
-    hook.onDebug?.(
+    opts.onDebug?.(
       `模板「${template.label}」→ ${parsed === null ? '解析不出答案' : parsed}（原始回答：${text.trim().slice(0, 60)}）`,
     );
     if (parsed === null) continue;
 
+    if (retryMode) {
+      // 重答：不等投票 —— 拿到就是这轮的定稿（除非它跟被排除的一模一样）
+      if (parsed !== exclude) {
+        note = '重答：已给出与上一轮不同的答案';
+        return deliver(parsed);
+      }
+      note = '重答：模型仍给出上一轮的答案';
+      if (extraOnUnchanged && requests < 2) {
+        // 再给它一次机会（只在 hardMax 允许第二轮时才有效）
+        continue;
+      }
+      return deliver(parsed);
+    }
+
     decided.push(parsed);
     const verdict = majority(decided);
-    if (verdict.decided) {
-      return { qid: question.id, answer: verdict.answer, requests, samples, error: lastError };
-    }
+    if (verdict.decided) return deliver(verdict.answer);
   }
 
-  return { qid: question.id, answer: '', requests, samples, error: lastError };
+  // 全部机会用尽：重答模式至少要吐出最后一次样本（哪怕是重复答案），
+  // 否则「模型没听」会变成「这题没答案」，反而丢掉一个可能对的结果。
+  if (retryMode) {
+    const last = samples.filter((s): s is string => s !== null).pop();
+    if (last !== undefined) return deliver(last);
+  }
+  return deliver('');
 }
 
 /**

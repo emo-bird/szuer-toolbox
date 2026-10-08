@@ -541,3 +541,40 @@
     transparent 82%
   );
 }
+
+/* ---- 监视页（UOOC【监视】标签页）：进度条 + 逐题表格 ---- */
+
+.sztb-bar {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--sztb-bg-alt);
+  border: 1px solid var(--sztb-border);
+  overflow: hidden;
+}
+
+.sztb-bar-fill {
+  height: 100%;
+  background: var(--sztb-accent);
+  transition: width 0.2s ease;
+}
+
+.sztb-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.sztb-table th,
+.sztb-table td {
+  padding: 3px 6px;
+  border-bottom: 1px solid var(--sztb-border);
+  text-align: left;
+  vertical-align: top;
+  word-break: break-all;
+}
+
+.sztb-table th {
+  color: var(--sztb-text-dim);
+  font-weight: 600;
+  white-space: nowrap;
+}

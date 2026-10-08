@@ -152,22 +152,21 @@ describe('sites 真实注册表 —— 与 userscript header 的 @match 对齐',
     }
   });
 
-  it('UOOC 适配器只声明学习页与测验页 ⇒ 其余页面注入但不自动展开', () => {
+  it('UOOC 适配器只声明两版课程页 ⇒ 其余页面注入但不自动展开', () => {
     bootReal();
     const uooc = allAdapters().find((a) => a.id === 'uooc');
     assert(uooc !== undefined, 'uooc 适配器应已注册');
-    // 阶段 3 起 UOOC 有真功能了，`pages` 必须收紧，否则全站自动弹面板
-    assertEqual(uooc!.pages.length, 3, 'UOOC 的功能页清单应已收紧为 3 条路径通配');
+    // 站点只做旧版课程页（新版页只弹「切旧版」提示），功能页清单必须收紧，
+    // 否则全站自动弹面板。
+    assertEqual(uooc!.pages.length, 2, 'UOOC 的功能页清单应已收紧为 2 条路径通配');
 
     // 功能页：注入 + 自动展开
     for (const href of [
       'https://www.uooc.net.cn/home/learn/index',
       // 旧版学习页把「第几章/第几节」放在 hash 里，必须照样命中
       'https://www.uooc.net.cn/home/learn/index#/2042342697/1/1/1629578551',
+      // 新版课程页要弹「要不要切旧版」的提示，所以也必须自动展开
       'https://www.uooc.net.cn/home/learn/new/2042342697',
-      'https://www.uooc.net.cn/exam/983779533',
-      'https://www.uooc.net.cn/exam/paper?cid=2042342697&tid=736720049',
-      'https://www.uooc.net.cn/exam/faceRecognition/type/record?t=1',
     ]) {
       const r = resolve(new URL(href));
       assertEqual(r.inject, true, `${href} 应注入`);
@@ -176,10 +175,18 @@ describe('sites 真实注册表 —— 与 userscript header 的 @match 对齐',
     }
 
     // 非功能页：仍然注入（悬浮球），但不自动展开
+    //
+    // ⚠️ 三条 `/exam/*` 是 2026-xx 从「功能页」挪过来的：旧版测验是**页内同源 iframe**
+    // （需求细则 §A.4），不在顶级页面上做事；`/exam/*` 作为顶级页面只属于新版流程，
+    // 而本站只做旧版。答题 iframe 里的 DOM 由 `autoplay.ts` 在主页面里直接操作，
+    // 不需要在本站自己的适配器里再声明一次。
     for (const href of [
       'https://www.uooc.net.cn/league/union',
       'https://www.uooc.net.cn/home/course/list',
       'https://www.uooc.net.cn/home/member/user',
+      'https://www.uooc.net.cn/exam/983779533',
+      'https://www.uooc.net.cn/exam/paper?cid=2042342697&tid=736720049',
+      'https://www.uooc.net.cn/exam/faceRecognition/type/record?t=1',
     ]) {
       const r = resolve(new URL(href));
       assertEqual(r.inject, true, `${href} 仍应注入（悬浮球）`);
@@ -227,10 +234,10 @@ describe('sites 真实注册表 —— 站点设置标签页归属', () => {
     assertEqual(hasOwnSettingsTab('uooc'), true, '公共设置页据此跳过 uooc');
   });
 
-  it('UOOC 的三个设置页 id 都带 uooc: 前缀', () => {
+  it('UOOC 的四个设置页 id 都带 uooc: 前缀', () => {
     bootReal();
     const uooc = allAdapters().find((a) => a.id === 'uooc');
-    assertEqual(uooc!.tabs.length, 3, 'UOOC 应为 视频 / 连播 / AI 作答 三个标签页');
+    assertEqual(uooc!.tabs.length, 4, 'UOOC 应为 视频 / 连播 / AI 作答 / 监视 四个标签页');
     for (const tab of uooc!.tabs) {
       assert(tab.id.startsWith('uooc:'), `站点标签页 id 应带前缀，实际=${tab.id}`);
     }

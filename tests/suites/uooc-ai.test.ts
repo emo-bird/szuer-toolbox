@@ -25,7 +25,7 @@ import {
 import { isAnswerable, kindOf, type QuestionKind } from '../../src/sites/uooc/ai/paper.ts';
 import { SHARED_INSTRUCTION, TEMPLATES, buildPrompt } from '../../src/sites/uooc/ai/prompts.ts';
 import { chatUrl, extractContent } from '../../src/sites/uooc/ai/llm.ts';
-import { HANDOFF_TTL_MS, clearHandoff, consumeHandoff, saveHandoff } from '../../src/sites/uooc/ai/handoff.ts';
+
 import type { ExamQuestion } from '../../src/sites/uooc/ai/paper.ts';
 
 describe('uooc/ai · 题型判定', () => {
@@ -241,6 +241,7 @@ describe('uooc/ai · 提示词', () => {
       { key: 'B', text: '上海' },
     ],
     score: '5.00',
+    studentAnswer: [],
   };
 
   it('五套模板齐、id 唯一、都有正文', () => {
@@ -301,49 +302,5 @@ describe('uooc/ai · 模型接口', () => {
     assertEqual(extractContent({}), null);
     assertEqual(extractContent(null), null);
     assertEqual(extractContent('not json'), null);
-  });
-});
-
-describe('uooc/ai · 交接条', () => {
-  it('存了能取回，且只能取一次', () => {
-    clearHandoff();
-    saveHandoff('123', 'https://www.uooc.net.cn/home/learn/index?cid=9');
-    const got = consumeHandoff('123');
-    assert(got !== null, '第一次应该拿得到');
-    assertEqual(got!.tid, '123');
-    assertEqual(got!.courseUrl, 'https://www.uooc.net.cn/home/learn/index?cid=9');
-    assertEqual(consumeHandoff('123'), null, '同一份交接条不能被消费两次');
-  });
-
-  it('tid 对不上就取不到（免得把自己开的测验丢回旧课程页）', () => {
-    clearHandoff();
-    saveHandoff('123', 'https://www.uooc.net.cn/home/learn/index?cid=9');
-    assertEqual(consumeHandoff('456'), null);
-  });
-
-  it('过期就取不到', () => {
-    clearHandoff();
-    const before = Date.now();
-    saveHandoff('123', 'https://www.uooc.net.cn/home/learn/index?cid=9');
-    assertEqual(consumeHandoff('123', before + HANDOFF_TTL_MS + 1000), null);
-  });
-
-  it('没过期就取得到（边界内）', () => {
-    clearHandoff();
-    const before = Date.now();
-    saveHandoff('123', 'https://www.uooc.net.cn/home/learn/index?cid=9');
-    assert(consumeHandoff('123', before + HANDOFF_TTL_MS - 1000) !== null, 'TTL 内不该被判过期');
-  });
-
-  it('clear 之后取不到', () => {
-    clearHandoff();
-    saveHandoff('123', 'https://www.uooc.net.cn/home/learn/index?cid=9');
-    clearHandoff();
-    assertEqual(consumeHandoff('123'), null);
-  });
-
-  it('没存过就取不到（不是无限期沿用上次）', () => {
-    clearHandoff();
-    assertEqual(consumeHandoff('123'), null);
   });
 });

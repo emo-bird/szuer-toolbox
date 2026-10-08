@@ -168,21 +168,16 @@ export function fillAnswers(targets: readonly FillTarget[]): FillReport {
 }
 
 /**
- * 答题页【提交】按钮的选择器，**按版本分开写**（两版不是同一个元素，都在实测快照里出现过）：
+ * 答题页【提交】按钮的选择器。
  *
- *  - 旧版 `/exam/paper?cid=&tid=`：`button.btn.btn-danger`，`ng-click="vm.commitTask()"`，
- *    外面套 `ng-if="vm.paper.can_do"`；
- *  - 新版 `/exam/{tid}`：`div.btn.btn-warning`，`ng-click="vm.doCommitTask()"`，
- *    `ng-disabled="!vcode_params.captchaVerifyParam"`（要先过验证码才点得动）。
+ * 旧版 `/exam/paper?cid=&tid=`：`button.btn.btn-danger`，`ng-click="vm.commitTask()"`，
+ * 外面套 `ng-if="vm.paper.can_do"`。
  *
- * `[ng-click*="commitTask"]` 同时覆盖 `vm.commitTask()` 与 `vm.doCommitTask()`，
- * 但不写裸的 `div.btn.btn-warning` —— 页面上可能有别的警告按钮，宁可返回 null
- * 让调用方提示用户自己点（现在的兜底就是这么做的）。
+ * 本站只做旧版，所以只留这一个（新版那颗 `div.btn.btn-warning` 已随转向一起移除）。
+ * 不写裸的 `div.btn.btn-warning` —— 页面上可能有别的警告按钮，宁可返回 null
+ * 让调用方提示用户自己点。
  */
-const SUBMIT_SELECTORS: readonly string[] = [
-  'button.btn.btn-danger',
-  'div.btn.btn-warning[ng-click*="commitTask"]',
-];
+const SUBMIT_SELECTORS: readonly string[] = ['button.btn.btn-danger'];
 
 /**
  * 答题页的【提交】按钮。
@@ -268,4 +263,288 @@ export function isAnswerBoxVisible(top: Document = document): boolean {
     if (el !== null && isVisible(el)) return true;
   }
   return false;
+}
+
+// ================================================================== 已答 / 清除（m04879）
+
+/** 这道题在 DOM 上已经勾了答案吗（`student_answer` 之外的第二道判据） */
+export function isAnsweredInDom(qid: string, top: Document = document): boolean {
+  for (const el of inputsFor(collectRoots(top), qid)) {
+    if (el.checked) return true;
+  }
+  return false;
+}
+
+/** 这道题的选项控件还在不在（不在 ⇒ 卷子没渲染完 / 这题不可答） */
+export function hasInputsFor(qid: string, top: Document = document): boolean {
+  return inputsFor(collectRoots(top), qid).length > 0;
+}
+
+/** Angular `ngModel` 控制器里我们用到的那两个方法 */
+interface NgModelLike {
+  $setViewValue?: (value: unknown) => void;
+  $render?: () => void;
+}
+
+/**
+ * 取这个元素身上的 Angular `ngModel` 控制器。
+ *
+ * ⚠️ 必须用**元素自己所在窗口**的 `angular`：旧版试卷在 `top > frame[0]` 的
+ * iframe 里，拿顶层的 `window.angular` 去 `angular.element(iframe里的元素)`
+ * 是不认的。所以这里从 `el.ownerDocument.defaultView` 取。
+ */
+function ngModelOf(el: Element): NgModelLike | null {
+  const win = el.ownerDocument?.defaultView as
+    | (Window & { angular?: unknown })
+    | null;
+  const angular = (win?.angular ?? null) as {
+    element?: (e: Element) => { controller?: (name: string) => unknown };
+  } | null;
+  if (angular === null || typeof angular.element !== 'function') return null;
+  try {
+    const ctrl = angular.element(el).controller?.('ngModel') as NgModelLike | null;
+    return ctrl ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** 题型对应的「空值」（`ngModel.$setViewValue` 用什么把它清掉） */
+function emptyValueFor(kind: QuestionKind): unknown {
+  if (kind === 'multi') return [];
+  if (kind === 'blank' || kind === 'other') return '';
+  return undefined; // 单选 / 判断：radio 无法靠点击取消，只能把模型清成 undefined
+}
+
+/**
+ * 清空一道题（需求细则 §C.4.1）。
+ *
+ * **走 Angular `ngModel.$setViewValue`，不走点击** —— 单选 radio 点第二下
+ * 不是取消而是「重选同一项」，靠点击根本清不掉。
+ *
+ * 万一页面上没有 Angular（理论上不会），退化成直接把 DOM 的属性写回未选态
+ * 并派发 `change`：至少让用户看到清掉了（此时与站点 scope 的同步可能不准，
+ * 调用方应当 toast 提醒一句）。
+ *
+ * @returns `'ngModel'` = 走通了 / `'dom'` = 退化了 / `'missing'` = 找不到这道题
+ */
+export function clearQuestion(
+  qid: string,
+  kind: QuestionKind,
+  top: Document = document,
+): 'ngModel' | 'dom' | 'missing' {
+  const inputs = inputsFor(collectRoots(top), qid);
+  if (inputs.length === 0) return 'missing';
+
+  const empty = emptyValueFor(kind);
+  let viaModel = false;
+  for (const el of inputs) {
+    const ctrl = ngModelOf(el);
+    if (ctrl === null || typeof ctrl.$setViewValue !== 'function') continue;
+    try {
+      ctrl.$setViewValue(empty);
+      ctrl.$render?.();
+      viaModel = true;
+    } catch {
+      // 换下一个 input
+    }
+  }
+  if (viaModel) return 'ngModel';
+
+  for (const el of inputs) {
+    try {
+      el.checked = false;
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    } catch {
+      // 忽略
+    }
+  }
+  return 'dom';
+}
+
+/** 卷面上的一道题：题号元素 + 题目容器 + 反查出来的题目 id */
+export interface QuestionAnchor {
+  /** 题号文本，例如 `"1."` */
+  readonly label: string;
+  /** 题号元素（`div.index`）—— 小按钮插在它**前面** */
+  readonly indexEl: HTMLElement;
+  /** 题目容器（`div.queContainer`） */
+  readonly container: HTMLElement;
+  /** 题目 id（从容器里的 `input[name]` 反查；已交卷的卷子上可能是 null） */
+  readonly qid: string | null;
+}
+
+/**
+ * 找出卷面上每一道题的位置。
+ *
+ * 实测结构（`local/capture/dom-uooc-exam-旧-未完成-单选-多选-验证码.txt`
+ * 的路径签名聚合）：
+ * ```
+ * div.queContainer > div.index            （题号，样例文本 "1."）
+ * div.queContainer > div.queBox > div.smallTest > input[name="<qid>"]
+ * div.queContainer > div.scores > label.ng-binding  （"( 4.00 分 )"）
+ * ```
+ * 不用位置选择器（第几个 `queContainer`）—— 题号分组顺序会变。
+ */
+export function findQuestionAnchors(top: Document = document): QuestionAnchor[] {
+  const out: QuestionAnchor[] = [];
+  for (const doc of collectRoots(top)) {
+    let list: Element[];
+    try {
+      list = Array.from(doc.querySelectorAll('div.queContainer'));
+    } catch {
+      continue;
+    }
+    for (const c of list) {
+      if (!(c instanceof HTMLElement)) continue;
+      const indexEl = c.querySelector('div.index');
+      if (!(indexEl instanceof HTMLElement)) continue;
+      const input = c.querySelector('input[name]');
+      out.push({
+        label: (indexEl.textContent ?? '').trim(),
+        indexEl,
+        container: c,
+        qid: input?.getAttribute('name') ?? null,
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * 找「试卷标题」那个元素 —— 【清除全部答案】按钮挂它后面。
+ *
+ * ⚠️ **没有实证**：手上的 3 份旧版答题页采样
+ * （`local/capture/dom-uooc-exam-旧-*.txt`）里都没有标题元素，
+ * 只有侧边栏的章节名（`div.queList-title`）。
+ * 所以这里按候选选择器依次试，全都没有就退回「第一道题容器的父节点」。
+ * 拿到真实采样后**只改这一个函数**。
+ */
+const PAPER_TITLE_SELECTORS: readonly string[] = [
+  'div.paperTitle',
+  'div.paper-title',
+  'div.examTitle',
+  'h1.paperTitle',
+  'h3.paperTitle',
+];
+
+function findPaperTitleAnchor(top: Document): HTMLElement | null {
+  for (const doc of collectRoots(top)) {
+    for (const sel of PAPER_TITLE_SELECTORS) {
+      let el: Element | null = null;
+      try {
+        el = doc.querySelector(sel);
+      } catch {
+        continue;
+      }
+      if (el instanceof HTMLElement && isVisible(el)) return el;
+    }
+  }
+  const first = findQuestionAnchors(top)[0];
+  return first?.container.parentElement ?? null;
+}
+
+/** 注入按钮用的标记，重刷时先按它清干净 */
+const CLEAR_MARK = 'data-sztb-uooc-clear';
+
+/** 小按钮统一样式（内联，免得依赖面板的 CSS 打进 iframe） */
+const CLEAR_BTN_STYLE =
+  'margin:0 6px 0 0;padding:1px 8px;font-size:12px;line-height:18px;' +
+  'border:1px solid #d9d9d9;border-radius:3px;background:#fff;color:#c0392b;' +
+  'cursor:pointer;vertical-align:middle;';
+
+function makeClearButton(text: string, title: string, onClick: () => void): HTMLButtonElement {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.textContent = text;
+  btn.title = title;
+  btn.setAttribute('style', CLEAR_BTN_STYLE);
+  btn.setAttribute(CLEAR_MARK, 'one');
+  btn.addEventListener('click', (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    onClick();
+  });
+  return btn;
+}
+
+/** 已经插进去的清除按钮全拔掉 */
+function removeClearButtons(top: Document): void {
+  for (const doc of collectRoots(top)) {
+    let list: Element[];
+    try {
+      list = Array.from(doc.querySelectorAll(`[${CLEAR_MARK}]`));
+    } catch {
+      continue;
+    }
+    for (const el of list) el.remove();
+  }
+}
+
+export interface ClearButtonsHandle {
+  /** 重新按当前「哪些题已有答案」铺一遍按钮；返回铺了几颗 */
+  refresh(answered: ReadonlySet<string>): number;
+  /** 全部拔掉 */
+  remove(): void;
+}
+
+/**
+ * 往卷面上注入清除按钮（需求细则 §C.4.1）：
+ *  - **已有答案的题**：题号（`div.index`）**前面**插一颗【清除答案】；
+ *  - **试卷标题后面**插一颗【清除全部答案】。
+ *
+ * 为什么不一次性插完：答案会随「逐题回填」「清除」变化 ⇒ 每次变化后调
+ * `refresh(answered)` 重铺一遍（先拔旧的再插新的，天然幂等）。
+ */
+export function injectClearButtons(opts: {
+  /** 点【清除答案】时回调，参数是题目 id */
+  readonly onClearOne: (qid: string) => void;
+  /** 点【清除全部答案】时回调 */
+  readonly onClearAll: () => void;
+  readonly top?: Document;
+  /** 控件失效时禁用（正在请求中） */
+  readonly disabled?: boolean;
+}): ClearButtonsHandle {
+  const top = opts.top ?? document;
+
+  return {
+    refresh(answered: ReadonlySet<string>): number {
+      removeClearButtons(top);
+
+      if (opts.disabled === true) return 0;
+
+      let count = 0;
+      for (const a of findQuestionAnchors(top)) {
+        const qid = a.qid;
+        if (qid === null) continue;
+        if (!answered.has(qid)) continue;
+        const btn = makeClearButton('清除答案', `清空第 ${a.label} 题的答案`, () => {
+          opts.onClearOne(qid);
+        });
+        try {
+          a.indexEl.parentElement?.insertBefore(btn, a.indexEl);
+          count++;
+        } catch {
+          // 插不进去就算了，不要因此中断
+        }
+      }
+
+      const title = findPaperTitleAnchor(top);
+      if (title !== null) {
+        const btn = makeClearButton('清除全部答案', '清空整张卷子的答案', () => {
+          opts.onClearAll();
+        });
+        try {
+          title.insertAdjacentElement('afterend', btn);
+          count++;
+        } catch {
+          // 同上
+        }
+      }
+      return count;
+    },
+    remove(): void {
+      removeClearButtons(top);
+    },
+  };
 }

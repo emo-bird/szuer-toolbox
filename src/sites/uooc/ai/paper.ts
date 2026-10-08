@@ -33,6 +33,13 @@ export interface ExamQuestion {
   readonly stem: string;
   readonly options: readonly ExamOption[];
   readonly score: string;
+  /**
+   * 你这道题**已经填过的答案**（`student_answer`）。
+   *
+   * 实测：未作答时是**空数组** `[]`；作答后站点往数组里放字母（填空题放文本）。
+   * 非空 ⇒ 这道题**不请求 LLM**，直接算「已答」（需求细则 §C.2 / §C.4.1）。
+   */
+  readonly studentAnswer: readonly string[];
 }
 
 /** 能自动作答的题型（其余题型跳过，不会让整份卷子失败） */
@@ -81,6 +88,30 @@ function asString(v: unknown): string {
   return v === null || v === undefined ? '' : String(v);
 }
 
+/**
+ * `question` **可能带 HTML**（实测 tid=736720049 的填空题是
+ * `<p><span style="…">…</span></p>`，tid=291597830 的单选题却是纯文本）
+ * ⇒ 有标签就剥掉再给模型，否则提示词里全是噪音。
+ */
+export function stripHtml(s: string): string {
+  if (!s.includes('<')) return s;
+  return s
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/\u00a0/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** `student_answer` 归一成字符串数组：空 ⇒ `[]` */
+function toStudentAnswer(raw: unknown): string[] {
+  if (Array.isArray(raw)) {
+    return raw.map((x) => asString(x).trim()).filter((s) => s !== '');
+  }
+  const s = asString(raw).trim();
+  return s === '' ? [] : [s];
+}
+
 /** 把 `getTaskPaper` 的一条 question 转成我们的模型；字段缺失时返回 null 而不是抛异常 */
 export function toExamQuestion(raw: unknown): ExamQuestion | null {
   if (raw === null || typeof raw !== 'object') return null;
@@ -92,9 +123,10 @@ export function toExamQuestion(raw: unknown): ExamQuestion | null {
     id,
     kind: kindOf(typeText, asString(o['type'])),
     typeText,
-    stem: asString(o['question']),
+    stem: stripHtml(asString(o['question'])),
     options: toOptions(o['options']),
     score: asString(o['score']),
+    studentAnswer: toStudentAnswer(o['student_answer']),
   };
 }
 

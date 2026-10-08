@@ -35,7 +35,8 @@ export const SHARED_INSTRUCTION = [
   '3. 多选题写多个字母，用英文逗号分隔，按字母升序，如 A,C。',
   '4. 判断题写 A（正确）或 B（错误）。',
   '5. 填空题写答案原文，不要写字母；一道题有多个空时，按空序用竖线 | 分隔。',
-  '6. 不要输出解释、标题、空行、代码块或任何多余字符。',
+  '6. 如果你能联网搜索，请先检索相关资料再作答；不能联网就直接按已有知识作答。',
+  '7. 不要输出解释、标题、空行、代码块或任何多余字符。',
   '',
 ].join('\n');
 
@@ -82,12 +83,30 @@ function renderOptions(q: ExamQuestion): string {
  *
  * 题号**从 1 开始、按传入顺序**——这是解析器的对齐依据，
  * 所以调用方必须用同一份数组（长度、顺序都不能变）去解析结果。
+ *
+ * `exclude` 只在**重答**时给（需求细则 §C.5.1）：上一轮这道题的答案被判错，
+ * 这轮要明确禁止模型再吐同一个 ——
+ *  - 单选 / 判断：禁掉那个字母；
+ *  - **多选：禁掉「那个字母组合」而不是单个选项**（用户原话：组合里可能混着对的，
+ *    禁单个字母会误伤正确项）⇒ 要求给一个**不同的组合**（可为其子集，但不能全同）；
+ *  - 填空 / 主观题：禁掉上一轮那一整句。
  */
 export function buildPrompt(
   questions: readonly ExamQuestion[],
   template: PromptTemplate,
+  exclude?: string,
 ): string {
-  const lines: string[] = [template.body, '', SHARED_INSTRUCTION, '题目：'];
+  const lines: string[] = [template.body, '', SHARED_INSTRUCTION];
+  if (exclude !== undefined && exclude !== '') {
+    lines.push(
+      '',
+      '补充要求（很重要）：',
+      `本题上一轮给出的答案「${exclude}」已被判定为错误，请给出与它**不同**的答案。`,
+      '如果这道题是多选题，请给出一个与它不同的字母组合 —— 可以是它的子集，',
+      '但不能与它完全相同。不要重复同一个答案。',
+    );
+  }
+  lines.push('题目：');
   questions.forEach((q, i) => {
     // 题型名一并给模型：它自己知道「多选题要写 A,C」，不给反而容易只写一个字母
     const tag = q.typeText === '' ? '' : `[${q.typeText}] `;

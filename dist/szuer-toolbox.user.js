@@ -52,12 +52,12 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-07T16:18:34.766Z（构建号 77） */
+/* 构建信息：2026-10-08T10:50:20.387Z（构建号 78） */
 
 "use strict";
 (() => {
   // src/common/ui/style.css
-  var style_default = '/* ============================================================\n   深大人工具箱 —— 悬浮窗基础样式\n   本文件被 esbuild 以 --loader:.css=text 打成字符串，\n   运行时整段塞进 shadow root 的 <style>。\n   因为处在 Shadow DOM 内，天然不受宿主页面 CSS 影响，\n   反向也绝不会污染宿主页面。\n   ============================================================ */\n\n:host,\n.sztb-root {\n  --sztb-accent: #1e6fff;\n  --sztb-accent-hover: #175be0;\n  --sztb-bg: #ffffff;\n  --sztb-bg-alt: #f5f6f8;\n  --sztb-border: #e3e5e9;\n  --sztb-text: #1f2329;\n  --sztb-text-dim: #8a9099;\n  --sztb-danger: #e5484d;\n  --sztb-warn: #f5a623;\n  --sztb-ok: #30a46c;\n\n  all: initial;\n  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;\n  font-size: 13px;\n  line-height: 1.5;\n  color: var(--sztb-text);\n  box-sizing: border-box;\n}\n\n.sztb-root *,\n.sztb-root *::before,\n.sztb-root *::after {\n  box-sizing: border-box;\n}\n\n/* ---------------------------------------------------------- 悬浮球 */\n.sztb-ball {\n  position: fixed;\n  z-index: 2147483000;\n  width: 44px;\n  height: 44px;\n  border-radius: 50%;\n  background: var(--sztb-accent);\n  color: #fff;\n  display: none;\n  align-items: center;\n  justify-content: center;\n  font-size: 15px;\n  font-weight: 600;\n  cursor: grab;\n  user-select: none;\n  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.22);\n  transition: transform 0.15s ease, background 0.15s ease;\n}\n\n.sztb-root[data-collapsed="true"] .sztb-ball {\n  display: flex;\n}\n\n.sztb-ball:hover {\n  background: var(--sztb-accent-hover);\n  transform: scale(1.06);\n}\n\n.sztb-ball:active {\n  cursor: grabbing;\n}\n\n/* ---------------------------------------------------------- 面板 */\n.sztb-panel {\n  position: fixed;\n  z-index: 2147483001;\n  display: flex;\n  flex-direction: column;\n  background: var(--sztb-bg);\n  border: 1px solid var(--sztb-border);\n  border-radius: 10px;\n  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);\n  overflow: hidden;\n  min-width: 260px;\n  min-height: 180px;\n}\n\n.sztb-root[data-collapsed="true"] .sztb-panel {\n  display: none;\n}\n\n/* ---------------------------------------------------------- 标题栏 */\n.sztb-head {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  padding: 8px 10px;\n  background: var(--sztb-bg-alt);\n  border-bottom: 1px solid var(--sztb-border);\n  cursor: move;\n  user-select: none;\n  flex: 0 0 auto;\n}\n\n.sztb-title {\n  flex: 1 1 auto;\n  font-weight: 600;\n  font-size: 13px;\n  white-space: nowrap;\n  overflow: hidden;\n  text-overflow: ellipsis;\n}\n\n.sztb-site {\n  color: var(--sztb-text-dim);\n  font-weight: 400;\n}\n\n.sztb-iconbtn {\n  flex: 0 0 auto;\n  width: 22px;\n  height: 22px;\n  padding: 0;\n  border: none;\n  border-radius: 5px;\n  background: transparent;\n  color: var(--sztb-text-dim);\n  font-size: 14px;\n  line-height: 1;\n  cursor: pointer;\n}\n\n.sztb-iconbtn:hover {\n  background: rgba(0, 0, 0, 0.07);\n  color: var(--sztb-text);\n}\n\n/* ---------------------------------------------------------- 标签栏 */\n.sztb-tabbar {\n  display: flex;\n  flex-wrap: wrap;\n  gap: 2px;\n  padding: 6px 8px 0;\n  border-bottom: 1px solid var(--sztb-border);\n  background: var(--sztb-bg);\n  flex: 0 0 auto;\n}\n\n.sztb-tab {\n  padding: 5px 10px;\n  border: none;\n  border-bottom: 2px solid transparent;\n  background: transparent;\n  color: var(--sztb-text-dim);\n  font-size: 12.5px;\n  cursor: pointer;\n  border-radius: 6px 6px 0 0;\n  white-space: nowrap;\n}\n\n.sztb-tab:hover {\n  color: var(--sztb-text);\n  background: var(--sztb-bg-alt);\n}\n\n.sztb-tab[aria-selected="true"] {\n  color: var(--sztb-accent);\n  border-bottom-color: var(--sztb-accent);\n  font-weight: 600;\n}\n\n/**\n * 站点组与公共组之间的分组竖线。\n *\n * - `align-self: center` 而不是 `stretch`：标签按钮自带上下内边距，\n *   竖线只有它们高度的一部分才像「分组线」而不是「分割框」。\n * - 用固定 px 高度（约标签按钮高度的 60%）而不是百分比：\n *   `flex-wrap` 换行后每行的行高由内容决定，百分比会跟着抖。\n * - `flex: 0 0 auto` 防止它在窄面板里被压扁。\n * - 标签栏本身有 `gap: 2px`，所以左右各留 4px 即可得到 6px 的视觉间距。\n */\n.sztb-tab-sep {\n  align-self: center;\n  flex: 0 0 auto;\n  width: 1px;\n  height: 14px;\n  margin: 0 4px;\n  background: var(--sztb-border);\n}\n\n/* ---------------------------------------------------------- 内容区 */\n.sztb-body {\n  flex: 1 1 auto;\n  overflow: auto;\n  padding: 10px;\n}\n\n.sztb-pane {\n  display: none;\n  flex-direction: column;\n  gap: 8px;\n}\n\n.sztb-pane[data-active="true"] {\n  display: flex;\n}\n\n/* ---------------------------------------------------------- 表单控件 */\n.sztb-row {\n  display: flex;\n  align-items: flex-start;\n  gap: 8px;\n  padding: 7px 8px;\n  border-radius: 6px;\n}\n\n.sztb-row:hover {\n  background: var(--sztb-bg-alt);\n}\n\n.sztb-row input[type="checkbox"] {\n  flex: 0 0 auto;\n  margin: 2px 0 0;\n  width: 15px;\n  height: 15px;\n  accent-color: var(--sztb-accent);\n  cursor: pointer;\n}\n\n.sztb-row-main {\n  flex: 1 1 auto;\n  min-width: 0;\n}\n\n.sztb-row-label {\n  display: block;\n  font-size: 13px;\n  cursor: pointer;\n}\n\n.sztb-row-desc {\n  display: block;\n  color: var(--sztb-text-dim);\n  font-size: 12px;\n  margin-top: 1px;\n  word-break: break-word;\n}\n\n.sztb-risk {\n  display: inline-block;\n  margin-left: 6px;\n  padding: 0 5px;\n  border-radius: 4px;\n  font-size: 11px;\n  font-weight: 600;\n  vertical-align: 1px;\n}\n\n.sztb-risk[data-risk="trace"] {\n  background: rgba(245, 166, 35, 0.16);\n  color: #b3730a;\n}\n\n.sztb-risk[data-risk="irreversible"] {\n  background: rgba(229, 72, 77, 0.14);\n  color: var(--sztb-danger);\n}\n\n.sztb-field {\n  display: flex;\n  flex-direction: column;\n  gap: 3px;\n  margin-bottom: 10px;\n  padding: 0 8px;\n}\n\n.sztb-field-label {\n  font-size: 13px;\n  color: var(--sztb-text);\n}\n\n/* 配置项提示：单独一行，紧跟在标签下面（不塞进输入框里） */\n.sztb-field-desc {\n  font-size: 12px;\n  line-height: 1.45;\n  color: var(--sztb-text-dim);\n  word-break: break-word;\n}\n\n.sztb-input,\n.sztb-select {\n  width: 100%;\n  padding: 5px 8px;\n  border: 1px solid var(--sztb-border);\n  border-radius: 6px;\n  font-size: 13px;\n  font-family: inherit;\n  color: var(--sztb-text);\n  background: var(--sztb-bg);\n  box-sizing: border-box;\n}\n\n.sztb-input:focus,\n.sztb-select:focus {\n  outline: none;\n  border-color: var(--sztb-accent);\n}\n\n/* 空值时显示的灰色默认值 */\n.sztb-input::placeholder {\n  color: var(--sztb-text-dim);\n  opacity: 0.8;\n}\n\n.sztb-select {\n  cursor: pointer;\n}\n\n/* 校验提示：校验通过时用 hidden 收起来，不占高度 */\n.sztb-field-hint {\n  font-size: 12px;\n  line-height: 1.45;\n  color: #b3730a;\n}\n\n.sztb-field-hint[hidden] {\n  display: none;\n}\n\n.sztb-field[data-invalid="true"] .sztb-input,\n.sztb-field[data-invalid="true"] .sztb-select {\n  border-color: #d9a340;\n}\n\n.sztb-btn {\n  padding: 5px 12px;\n  border: 1px solid var(--sztb-border);\n  border-radius: 6px;\n  background: var(--sztb-bg);\n  color: var(--sztb-text);\n  font-size: 12.5px;\n  font-family: inherit;\n  cursor: pointer;\n}\n\n.sztb-btn:hover {\n  background: var(--sztb-bg-alt);\n}\n\n.sztb-btn[data-variant="primary"] {\n  background: var(--sztb-accent);\n  border-color: var(--sztb-accent);\n  color: #fff;\n}\n\n.sztb-btn[data-variant="primary"]:hover {\n  background: var(--sztb-accent-hover);\n}\n\n.sztb-btn[data-variant="danger"] {\n  background: var(--sztb-danger);\n  border-color: var(--sztb-danger);\n  color: #fff;\n}\n\n.sztb-group-title {\n  margin: 10px 0 2px;\n  font-size: 12px;\n  font-weight: 600;\n  color: var(--sztb-text-dim);\n}\n\n.sztb-group-title:first-child {\n  margin-top: 0;\n}\n\n.sztb-empty {\n  padding: 16px 8px;\n  text-align: center;\n  color: var(--sztb-text-dim);\n  font-size: 12.5px;\n}\n\n/* 段首说明文字：站点自己的设置标签页用它交代门禁规则 */\n.sztb-note {\n  margin: 0 0 8px;\n  padding: 7px 9px;\n  border-left: 2px solid var(--sztb-border);\n  border-radius: 0 5px 5px 0;\n  background: var(--sztb-bg-alt);\n  color: var(--sztb-text-dim);\n  font-size: 12px;\n  line-height: 1.6;\n}\n\n/* ---------------------------------------------------------- 日志面板 */\n.sztb-log {\n  font-family: Consolas, "Cascadia Mono", monospace;\n  font-size: 11.5px;\n  line-height: 1.6;\n  white-space: pre-wrap;\n  word-break: break-all;\n  margin: 0;\n  flex: 1 1 auto;\n}\n\n.sztb-log-line[data-level="warn"] {\n  color: #b3730a;\n}\n\n.sztb-log-line[data-level="error"] {\n  color: var(--sztb-danger);\n}\n\n.sztb-log-line[data-level="debug"] {\n  color: var(--sztb-text-dim);\n}\n\n.sztb-toolbar {\n  display: flex;\n  gap: 6px;\n  flex: 0 0 auto;\n  align-items: center;\n}\n\n/* ---------------------------------------------------------- Toast */\n.sztb-toasts {\n  position: fixed;\n  z-index: 2147483003;\n  display: flex;\n  flex-direction: column;\n  gap: 6px;\n  align-items: flex-end;\n  pointer-events: none;\n}\n\n.sztb-toast {\n  max-width: 260px;\n  padding: 7px 11px;\n  border-radius: 7px;\n  background: rgba(31, 35, 41, 0.94);\n  color: #fff;\n  font-size: 12.5px;\n  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.24);\n  animation: sztb-toast-in 0.16s ease;\n  word-break: break-word;\n}\n\n.sztb-toast[data-kind="error"] {\n  background: var(--sztb-danger);\n}\n\n.sztb-toast[data-kind="warn"] {\n  background: #b3730a;\n}\n\n.sztb-toast[data-kind="success"] {\n  background: var(--sztb-ok);\n}\n\n@keyframes sztb-toast-in {\n  from {\n    opacity: 0;\n    transform: translateY(-6px);\n  }\n  to {\n    opacity: 1;\n    transform: none;\n  }\n}\n\n/* ---------------------------------------------------------- 确认框 */\n.sztb-modal-mask {\n  position: fixed;\n  inset: 0;\n  z-index: 2147483002;\n  background: rgba(0, 0, 0, 0.35);\n  display: flex;\n  align-items: center;\n  justify-content: center;\n}\n\n.sztb-modal {\n  width: 300px;\n  max-width: calc(100vw - 32px);\n  background: var(--sztb-bg);\n  border-radius: 10px;\n  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);\n  overflow: hidden;\n}\n\n.sztb-modal-title {\n  padding: 12px 14px 0;\n  font-weight: 600;\n  font-size: 13.5px;\n}\n\n.sztb-modal-title[data-danger="true"] {\n  color: var(--sztb-danger);\n}\n\n.sztb-modal-body {\n  padding: 8px 14px 14px;\n  font-size: 12.5px;\n  color: var(--sztb-text-dim);\n  white-space: pre-wrap;\n  word-break: break-word;\n}\n\n.sztb-modal-foot {\n  display: flex;\n  justify-content: flex-end;\n  gap: 8px;\n  padding: 10px 14px;\n  background: var(--sztb-bg-alt);\n  border-top: 1px solid var(--sztb-border);\n}\n\n/* ------------------------------------------ 登录态失效（全屏提示） */\n/* 比确认框更重：遮罩再深一点、层级再高一点（万一确认框正开着） */\n.sztb-auth-mask {\n  z-index: 2147483003;\n  background: rgba(0, 0, 0, 0.45);\n}\n\n/* 正文比确认框长，放宽一行；窄屏仍受 max-width 约束 */\n.sztb-auth-box {\n  width: 360px;\n}\n\n/* ---------------------------------------------------------- 缩放手柄 */\n.sztb-resize {\n  position: absolute;\n  right: 0;\n  bottom: 0;\n  width: 14px;\n  height: 14px;\n  cursor: nwse-resize;\n  background: linear-gradient(\n    135deg,\n    transparent 0 50%,\n    var(--sztb-border) 50% 60%,\n    transparent 60% 72%,\n    var(--sztb-border) 72% 82%,\n    transparent 82%\n  );\n}\n';
+  var style_default = '/* ============================================================\n   深大人工具箱 —— 悬浮窗基础样式\n   本文件被 esbuild 以 --loader:.css=text 打成字符串，\n   运行时整段塞进 shadow root 的 <style>。\n   因为处在 Shadow DOM 内，天然不受宿主页面 CSS 影响，\n   反向也绝不会污染宿主页面。\n   ============================================================ */\n\n:host,\n.sztb-root {\n  --sztb-accent: #1e6fff;\n  --sztb-accent-hover: #175be0;\n  --sztb-bg: #ffffff;\n  --sztb-bg-alt: #f5f6f8;\n  --sztb-border: #e3e5e9;\n  --sztb-text: #1f2329;\n  --sztb-text-dim: #8a9099;\n  --sztb-danger: #e5484d;\n  --sztb-warn: #f5a623;\n  --sztb-ok: #30a46c;\n\n  all: initial;\n  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;\n  font-size: 13px;\n  line-height: 1.5;\n  color: var(--sztb-text);\n  box-sizing: border-box;\n}\n\n.sztb-root *,\n.sztb-root *::before,\n.sztb-root *::after {\n  box-sizing: border-box;\n}\n\n/* ---------------------------------------------------------- 悬浮球 */\n.sztb-ball {\n  position: fixed;\n  z-index: 2147483000;\n  width: 44px;\n  height: 44px;\n  border-radius: 50%;\n  background: var(--sztb-accent);\n  color: #fff;\n  display: none;\n  align-items: center;\n  justify-content: center;\n  font-size: 15px;\n  font-weight: 600;\n  cursor: grab;\n  user-select: none;\n  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.22);\n  transition: transform 0.15s ease, background 0.15s ease;\n}\n\n.sztb-root[data-collapsed="true"] .sztb-ball {\n  display: flex;\n}\n\n.sztb-ball:hover {\n  background: var(--sztb-accent-hover);\n  transform: scale(1.06);\n}\n\n.sztb-ball:active {\n  cursor: grabbing;\n}\n\n/* ---------------------------------------------------------- 面板 */\n.sztb-panel {\n  position: fixed;\n  z-index: 2147483001;\n  display: flex;\n  flex-direction: column;\n  background: var(--sztb-bg);\n  border: 1px solid var(--sztb-border);\n  border-radius: 10px;\n  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);\n  overflow: hidden;\n  min-width: 260px;\n  min-height: 180px;\n}\n\n.sztb-root[data-collapsed="true"] .sztb-panel {\n  display: none;\n}\n\n/* ---------------------------------------------------------- 标题栏 */\n.sztb-head {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  padding: 8px 10px;\n  background: var(--sztb-bg-alt);\n  border-bottom: 1px solid var(--sztb-border);\n  cursor: move;\n  user-select: none;\n  flex: 0 0 auto;\n}\n\n.sztb-title {\n  flex: 1 1 auto;\n  font-weight: 600;\n  font-size: 13px;\n  white-space: nowrap;\n  overflow: hidden;\n  text-overflow: ellipsis;\n}\n\n.sztb-site {\n  color: var(--sztb-text-dim);\n  font-weight: 400;\n}\n\n.sztb-iconbtn {\n  flex: 0 0 auto;\n  width: 22px;\n  height: 22px;\n  padding: 0;\n  border: none;\n  border-radius: 5px;\n  background: transparent;\n  color: var(--sztb-text-dim);\n  font-size: 14px;\n  line-height: 1;\n  cursor: pointer;\n}\n\n.sztb-iconbtn:hover {\n  background: rgba(0, 0, 0, 0.07);\n  color: var(--sztb-text);\n}\n\n/* ---------------------------------------------------------- 标签栏 */\n.sztb-tabbar {\n  display: flex;\n  flex-wrap: wrap;\n  gap: 2px;\n  padding: 6px 8px 0;\n  border-bottom: 1px solid var(--sztb-border);\n  background: var(--sztb-bg);\n  flex: 0 0 auto;\n}\n\n.sztb-tab {\n  padding: 5px 10px;\n  border: none;\n  border-bottom: 2px solid transparent;\n  background: transparent;\n  color: var(--sztb-text-dim);\n  font-size: 12.5px;\n  cursor: pointer;\n  border-radius: 6px 6px 0 0;\n  white-space: nowrap;\n}\n\n.sztb-tab:hover {\n  color: var(--sztb-text);\n  background: var(--sztb-bg-alt);\n}\n\n.sztb-tab[aria-selected="true"] {\n  color: var(--sztb-accent);\n  border-bottom-color: var(--sztb-accent);\n  font-weight: 600;\n}\n\n/**\n * 站点组与公共组之间的分组竖线。\n *\n * - `align-self: center` 而不是 `stretch`：标签按钮自带上下内边距，\n *   竖线只有它们高度的一部分才像「分组线」而不是「分割框」。\n * - 用固定 px 高度（约标签按钮高度的 60%）而不是百分比：\n *   `flex-wrap` 换行后每行的行高由内容决定，百分比会跟着抖。\n * - `flex: 0 0 auto` 防止它在窄面板里被压扁。\n * - 标签栏本身有 `gap: 2px`，所以左右各留 4px 即可得到 6px 的视觉间距。\n */\n.sztb-tab-sep {\n  align-self: center;\n  flex: 0 0 auto;\n  width: 1px;\n  height: 14px;\n  margin: 0 4px;\n  background: var(--sztb-border);\n}\n\n/* ---------------------------------------------------------- 内容区 */\n.sztb-body {\n  flex: 1 1 auto;\n  overflow: auto;\n  padding: 10px;\n}\n\n.sztb-pane {\n  display: none;\n  flex-direction: column;\n  gap: 8px;\n}\n\n.sztb-pane[data-active="true"] {\n  display: flex;\n}\n\n/* ---------------------------------------------------------- 表单控件 */\n.sztb-row {\n  display: flex;\n  align-items: flex-start;\n  gap: 8px;\n  padding: 7px 8px;\n  border-radius: 6px;\n}\n\n.sztb-row:hover {\n  background: var(--sztb-bg-alt);\n}\n\n.sztb-row input[type="checkbox"] {\n  flex: 0 0 auto;\n  margin: 2px 0 0;\n  width: 15px;\n  height: 15px;\n  accent-color: var(--sztb-accent);\n  cursor: pointer;\n}\n\n.sztb-row-main {\n  flex: 1 1 auto;\n  min-width: 0;\n}\n\n.sztb-row-label {\n  display: block;\n  font-size: 13px;\n  cursor: pointer;\n}\n\n.sztb-row-desc {\n  display: block;\n  color: var(--sztb-text-dim);\n  font-size: 12px;\n  margin-top: 1px;\n  word-break: break-word;\n}\n\n.sztb-risk {\n  display: inline-block;\n  margin-left: 6px;\n  padding: 0 5px;\n  border-radius: 4px;\n  font-size: 11px;\n  font-weight: 600;\n  vertical-align: 1px;\n}\n\n.sztb-risk[data-risk="trace"] {\n  background: rgba(245, 166, 35, 0.16);\n  color: #b3730a;\n}\n\n.sztb-risk[data-risk="irreversible"] {\n  background: rgba(229, 72, 77, 0.14);\n  color: var(--sztb-danger);\n}\n\n.sztb-field {\n  display: flex;\n  flex-direction: column;\n  gap: 3px;\n  margin-bottom: 10px;\n  padding: 0 8px;\n}\n\n.sztb-field-label {\n  font-size: 13px;\n  color: var(--sztb-text);\n}\n\n/* 配置项提示：单独一行，紧跟在标签下面（不塞进输入框里） */\n.sztb-field-desc {\n  font-size: 12px;\n  line-height: 1.45;\n  color: var(--sztb-text-dim);\n  word-break: break-word;\n}\n\n.sztb-input,\n.sztb-select {\n  width: 100%;\n  padding: 5px 8px;\n  border: 1px solid var(--sztb-border);\n  border-radius: 6px;\n  font-size: 13px;\n  font-family: inherit;\n  color: var(--sztb-text);\n  background: var(--sztb-bg);\n  box-sizing: border-box;\n}\n\n.sztb-input:focus,\n.sztb-select:focus {\n  outline: none;\n  border-color: var(--sztb-accent);\n}\n\n/* 空值时显示的灰色默认值 */\n.sztb-input::placeholder {\n  color: var(--sztb-text-dim);\n  opacity: 0.8;\n}\n\n.sztb-select {\n  cursor: pointer;\n}\n\n/* 校验提示：校验通过时用 hidden 收起来，不占高度 */\n.sztb-field-hint {\n  font-size: 12px;\n  line-height: 1.45;\n  color: #b3730a;\n}\n\n.sztb-field-hint[hidden] {\n  display: none;\n}\n\n.sztb-field[data-invalid="true"] .sztb-input,\n.sztb-field[data-invalid="true"] .sztb-select {\n  border-color: #d9a340;\n}\n\n.sztb-btn {\n  padding: 5px 12px;\n  border: 1px solid var(--sztb-border);\n  border-radius: 6px;\n  background: var(--sztb-bg);\n  color: var(--sztb-text);\n  font-size: 12.5px;\n  font-family: inherit;\n  cursor: pointer;\n}\n\n.sztb-btn:hover {\n  background: var(--sztb-bg-alt);\n}\n\n.sztb-btn[data-variant="primary"] {\n  background: var(--sztb-accent);\n  border-color: var(--sztb-accent);\n  color: #fff;\n}\n\n.sztb-btn[data-variant="primary"]:hover {\n  background: var(--sztb-accent-hover);\n}\n\n.sztb-btn[data-variant="danger"] {\n  background: var(--sztb-danger);\n  border-color: var(--sztb-danger);\n  color: #fff;\n}\n\n.sztb-group-title {\n  margin: 10px 0 2px;\n  font-size: 12px;\n  font-weight: 600;\n  color: var(--sztb-text-dim);\n}\n\n.sztb-group-title:first-child {\n  margin-top: 0;\n}\n\n.sztb-empty {\n  padding: 16px 8px;\n  text-align: center;\n  color: var(--sztb-text-dim);\n  font-size: 12.5px;\n}\n\n/* 段首说明文字：站点自己的设置标签页用它交代门禁规则 */\n.sztb-note {\n  margin: 0 0 8px;\n  padding: 7px 9px;\n  border-left: 2px solid var(--sztb-border);\n  border-radius: 0 5px 5px 0;\n  background: var(--sztb-bg-alt);\n  color: var(--sztb-text-dim);\n  font-size: 12px;\n  line-height: 1.6;\n}\n\n/* ---------------------------------------------------------- 日志面板 */\n.sztb-log {\n  font-family: Consolas, "Cascadia Mono", monospace;\n  font-size: 11.5px;\n  line-height: 1.6;\n  white-space: pre-wrap;\n  word-break: break-all;\n  margin: 0;\n  flex: 1 1 auto;\n}\n\n.sztb-log-line[data-level="warn"] {\n  color: #b3730a;\n}\n\n.sztb-log-line[data-level="error"] {\n  color: var(--sztb-danger);\n}\n\n.sztb-log-line[data-level="debug"] {\n  color: var(--sztb-text-dim);\n}\n\n.sztb-toolbar {\n  display: flex;\n  gap: 6px;\n  flex: 0 0 auto;\n  align-items: center;\n}\n\n/* ---------------------------------------------------------- Toast */\n.sztb-toasts {\n  position: fixed;\n  z-index: 2147483003;\n  display: flex;\n  flex-direction: column;\n  gap: 6px;\n  align-items: flex-end;\n  pointer-events: none;\n}\n\n.sztb-toast {\n  max-width: 260px;\n  padding: 7px 11px;\n  border-radius: 7px;\n  background: rgba(31, 35, 41, 0.94);\n  color: #fff;\n  font-size: 12.5px;\n  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.24);\n  animation: sztb-toast-in 0.16s ease;\n  word-break: break-word;\n}\n\n.sztb-toast[data-kind="error"] {\n  background: var(--sztb-danger);\n}\n\n.sztb-toast[data-kind="warn"] {\n  background: #b3730a;\n}\n\n.sztb-toast[data-kind="success"] {\n  background: var(--sztb-ok);\n}\n\n@keyframes sztb-toast-in {\n  from {\n    opacity: 0;\n    transform: translateY(-6px);\n  }\n  to {\n    opacity: 1;\n    transform: none;\n  }\n}\n\n/* ---------------------------------------------------------- 确认框 */\n.sztb-modal-mask {\n  position: fixed;\n  inset: 0;\n  z-index: 2147483002;\n  background: rgba(0, 0, 0, 0.35);\n  display: flex;\n  align-items: center;\n  justify-content: center;\n}\n\n.sztb-modal {\n  width: 300px;\n  max-width: calc(100vw - 32px);\n  background: var(--sztb-bg);\n  border-radius: 10px;\n  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);\n  overflow: hidden;\n}\n\n.sztb-modal-title {\n  padding: 12px 14px 0;\n  font-weight: 600;\n  font-size: 13.5px;\n}\n\n.sztb-modal-title[data-danger="true"] {\n  color: var(--sztb-danger);\n}\n\n.sztb-modal-body {\n  padding: 8px 14px 14px;\n  font-size: 12.5px;\n  color: var(--sztb-text-dim);\n  white-space: pre-wrap;\n  word-break: break-word;\n}\n\n.sztb-modal-foot {\n  display: flex;\n  justify-content: flex-end;\n  gap: 8px;\n  padding: 10px 14px;\n  background: var(--sztb-bg-alt);\n  border-top: 1px solid var(--sztb-border);\n}\n\n/* ------------------------------------------ 登录态失效（全屏提示） */\n/* 比确认框更重：遮罩再深一点、层级再高一点（万一确认框正开着） */\n.sztb-auth-mask {\n  z-index: 2147483003;\n  background: rgba(0, 0, 0, 0.45);\n}\n\n/* 正文比确认框长，放宽一行；窄屏仍受 max-width 约束 */\n.sztb-auth-box {\n  width: 360px;\n}\n\n/* ---------------------------------------------------------- 缩放手柄 */\n.sztb-resize {\n  position: absolute;\n  right: 0;\n  bottom: 0;\n  width: 14px;\n  height: 14px;\n  cursor: nwse-resize;\n  background: linear-gradient(\n    135deg,\n    transparent 0 50%,\n    var(--sztb-border) 50% 60%,\n    transparent 60% 72%,\n    var(--sztb-border) 72% 82%,\n    transparent 82%\n  );\n}\n\n/* ---- 监视页（UOOC【监视】标签页）：进度条 + 逐题表格 ---- */\n\n.sztb-bar {\n  height: 8px;\n  border-radius: 4px;\n  background: var(--sztb-bg-alt);\n  border: 1px solid var(--sztb-border);\n  overflow: hidden;\n}\n\n.sztb-bar-fill {\n  height: 100%;\n  background: var(--sztb-accent);\n  transition: width 0.2s ease;\n}\n\n.sztb-table {\n  width: 100%;\n  border-collapse: collapse;\n  font-size: 12px;\n}\n\n.sztb-table th,\n.sztb-table td {\n  padding: 3px 6px;\n  border-bottom: 1px solid var(--sztb-border);\n  text-align: left;\n  vertical-align: top;\n  word-break: break-all;\n}\n\n.sztb-table th {\n  color: var(--sztb-text-dim);\n  font-weight: 600;\n  white-space: nowrap;\n}\r\n';
 
   // src/common/core/log.ts
   var LEVEL_RANK = { debug: 10, info: 20, warn: 30, error: 40 };
@@ -197,8 +197,8 @@
     if (max < min) return min;
     return Math.min(max, Math.max(min, value));
   }
-  function readyStateAllowsMount(state) {
-    return state === "interactive" || state === "complete";
+  function readyStateAllowsMount(state2) {
+    return state2 === "interactive" || state2 === "complete";
   }
   function isDomReady() {
     return readyStateAllowsMount(document.readyState);
@@ -667,13 +667,13 @@
     document.addEventListener("pointercancel", up, true);
   }
   function createPanel(baseCss, entries2, options) {
-    const host = el("div", { class: "sztb-host" });
-    host.style.setProperty("position", "fixed");
-    host.style.setProperty("inset", "0");
-    host.style.setProperty("width", "0");
-    host.style.setProperty("height", "0");
-    host.style.setProperty("z-index", "2147483000");
-    const shadow = host.attachShadow({ mode: "open" });
+    const host2 = el("div", { class: "sztb-host" });
+    host2.style.setProperty("position", "fixed");
+    host2.style.setProperty("inset", "0");
+    host2.style.setProperty("width", "0");
+    host2.style.setProperty("height", "0");
+    host2.style.setProperty("z-index", "2147483000");
+    const shadow = host2.attachShadow({ mode: "open" });
     const baseStyle = document.createElement("style");
     baseStyle.textContent = baseCss;
     shadow.appendChild(baseStyle);
@@ -829,7 +829,7 @@
     });
     window.addEventListener("resize", () => applyGeometry());
     const api = {
-      element: host,
+      element: host2,
       collapse: () => setCollapsed(true),
       expand: () => setCollapsed(false),
       isCollapsed: () => collapsed,
@@ -860,7 +860,7 @@
         } catch (err) {
           log2.warn("销毁悬浮窗时抛错", err);
         }
-        host.remove();
+        host2.remove();
       }
     };
     function makeContext(siteToId) {
@@ -874,7 +874,7 @@
     }
     applyGeometry();
     api.setTabs(entries2);
-    (document.documentElement ?? document.body).appendChild(host);
+    (document.documentElement ?? document.body).appendChild(host2);
     if (storedCollapsed === null) write(COLLAPSED_KEY, false);
     log2.info(
       `悬浮窗已装载：${entries2.length} 个标签页，初始${collapsed ? "折叠（沿用上次）" : "展开"}，面板=(${Math.round(panelPos.left)},${Math.round(panelPos.top)})，球=(${Math.round(ballPos.left)},${Math.round(ballPos.top)})`
@@ -1735,14 +1735,14 @@ ${options.desc ?? ""}
       )
     );
   }
-  function renderState(root, state) {
-    const badge = state.loggedIn === true ? "已登录" : state.loggedIn === false ? "未登录" : "未知（尚不支持该站点）";
+  function renderState(root, state2) {
+    const badge = state2.loggedIn === true ? "已登录" : state2.loggedIn === false ? "未登录" : "未知（尚不支持该站点）";
     root.appendChild(el("div", { class: "sztb-group-title", text: `状态：${badge}` }));
-    if (state.source !== void 0) root.appendChild(row2("探测手段", state.source));
-    for (const f of state.fields ?? []) {
+    if (state2.source !== void 0) root.appendChild(row2("探测手段", state2.source));
+    for (const f of state2.fields ?? []) {
       root.appendChild(row2(f.label, f.secret === true ? maskValue(f.value) : f.value));
     }
-    if (state.error !== void 0) root.appendChild(row2("失败原因", state.error));
+    if (state2.error !== void 0) root.appendChild(row2("失败原因", state2.error));
   }
   function renderTab4(root) {
     let seq3 = 0;
@@ -1773,10 +1773,10 @@ ${options.desc ?? ""}
       }
       root.appendChild(el("div", { class: "sztb-empty", text: "探测中…" }));
       try {
-        const state = await provider2();
+        const state2 = await provider2();
         if (disposed || mine !== seq3) return;
         clear2(root);
-        renderState(root, state);
+        renderState(root, state2);
       } catch (err) {
         if (disposed || mine !== seq3) return;
         clear2(root);
@@ -1818,21 +1818,21 @@ ${options.desc ?? ""}
     }
     return re.test(value);
   }
-  function matchHost(host, pattern) {
-    return globMatch(pattern.toLowerCase(), host.toLowerCase());
+  function matchHost(host2, pattern) {
+    return globMatch(pattern.toLowerCase(), host2.toLowerCase());
   }
   function matchPage(url, pattern) {
     const target = `${url.pathname}${url.search}${url.hash}`;
     return globMatch(pattern, target);
   }
-  function matchAnyHost(host, patterns) {
-    return patterns.some((p) => matchHost(host, p));
+  function matchAnyHost(host2, patterns) {
+    return patterns.some((p) => matchHost(host2, p));
   }
   function matchAnyPage(url, patterns) {
     return patterns.some((p) => matchPage(url, p));
   }
-  function isUnderDomain(host, root) {
-    const h = host.toLowerCase();
+  function isUnderDomain(host2, root) {
+    const h = host2.toLowerCase();
     const r = root.toLowerCase();
     return h === r || h.endsWith(`.${r}`);
   }
@@ -1990,6 +1990,209 @@ ${options.desc ?? ""}
     }
   };
 
+  // src/common/utils/page.ts
+  function pageWindow() {
+    const g = globalThis;
+    const uw = g["unsafeWindow"];
+    return uw !== null && typeof uw === "object" ? uw : null;
+  }
+  function pageOrSelf() {
+    return pageWindow() ?? globalThis;
+  }
+  function pageSessionStorage() {
+    try {
+      const ps = pageOrSelf()["sessionStorage"];
+      if (ps !== null && typeof ps === "object") return ps;
+    } catch {
+    }
+    try {
+      return typeof sessionStorage === "undefined" ? null : sessionStorage;
+    } catch {
+      return null;
+    }
+  }
+
+  // src/sites/uooc/intercept.ts
+  var log5 = scoped("uooc/intercept");
+  function matchLearnApi(rawUrl) {
+    const path = rawUrl.split("#")[0] ?? "";
+    if (path.includes("/home/learn/getCatalogList")) {
+      const m = /[?&]cid=(\d+)/.exec(path);
+      if (m !== null && m[1] !== void 0) return { kind: "catalog", cid: m[1] };
+      return null;
+    }
+    if (path.includes("/home/learn/getUnitLearn")) {
+      const m = /[?&]catalog_id=(\d+)/.exec(path);
+      if (m !== null && m[1] !== void 0) return { kind: "unit", catalogId: m[1] };
+      return null;
+    }
+    return null;
+  }
+  function matchCommitApi(rawUrl) {
+    return (rawUrl.split("#")[0] ?? "").includes("/exam/commit");
+  }
+  function asRecord(v) {
+    return v !== null && typeof v === "object" ? v : {};
+  }
+  function pickString(o, key) {
+    const v = o[key];
+    if (typeof v === "string") return v;
+    if (typeof v === "number") return String(v);
+    return "";
+  }
+  function readCommit(body) {
+    const top = asRecord(body);
+    const data = asRecord(top["data"]);
+    const rawList = asRecord(data["score_list"]);
+    const scoreList = {};
+    for (const [k, v] of Object.entries(rawList)) scoreList[k] = typeof v === "string" ? v : String(v);
+    const code = typeof top["code"] === "number" ? top["code"] : Number(pickString(top, "code"));
+    return {
+      verdict: code === 1 ? "pass" : code === 110 ? "fail" : "unknown",
+      score: pickString(data, "score"),
+      passScore: pickString(data, "pass_score"),
+      scoreList,
+      message: pickString(top, "msg"),
+      raw: body
+    };
+  }
+  var lastCatalog = null;
+  var unitBodies = /* @__PURE__ */ new Map();
+  var lastCommit = null;
+  var commitWaiters = [];
+  var catalogWaiters = [];
+  var unitWaiters = /* @__PURE__ */ new Map();
+  function primeCatalog(cid, body) {
+    lastCatalog = { cid, body };
+    const pending = catalogWaiters;
+    catalogWaiters = [];
+    for (const w of pending) {
+      if (w.cid === cid) w.fn(body);
+      else catalogWaiters.push(w);
+    }
+  }
+  function primeUnitLearn(catalogId, body) {
+    unitBodies.set(catalogId, body);
+    const pending = unitWaiters.get(catalogId);
+    if (pending === void 0) return;
+    unitWaiters.delete(catalogId);
+    for (const fn of pending) fn(body);
+  }
+  function primeCommit(body) {
+    const result = readCommit(body);
+    lastCommit = result;
+    const pending = commitWaiters;
+    commitWaiters = [];
+    for (const fn of pending) fn(result);
+    return result;
+  }
+  function clearCommit() {
+    lastCommit = null;
+  }
+  function waitCommit(timeoutMs) {
+    if (lastCommit !== null) return Promise.resolve(lastCommit);
+    return new Promise((resolve2) => {
+      let done = false;
+      const finish2 = (v) => {
+        if (done) return;
+        done = true;
+        resolve2(v);
+      };
+      commitWaiters.push(finish2);
+      setTimeout(() => finish2(null), timeoutMs);
+    });
+  }
+  function dispatch(rawUrl, text) {
+    const isCommit = matchCommitApi(rawUrl);
+    const api = isCommit ? null : matchLearnApi(rawUrl);
+    if (!isCommit && api === null) return;
+    let body;
+    try {
+      body = JSON.parse(text);
+    } catch {
+      log5.warn("截获到的响应不是 JSON，已忽略", rawUrl);
+      return;
+    }
+    if (isCommit) {
+      const result = primeCommit(body);
+      log5.debug("截获交卷响应", `${result.verdict} / 得分 ${result.score}`);
+    } else if (api !== null && api.kind === "catalog") {
+      log5.debug("截获 getCatalogList", api.cid);
+      primeCatalog(api.cid, body);
+    } else if (api !== null) {
+      log5.debug("截获 getUnitLearn", api.catalogId);
+      primeUnitLearn(api.catalogId, body);
+    }
+  }
+  function shouldSniff(rawUrl) {
+    return matchLearnApi(rawUrl) !== null || matchCommitApi(rawUrl);
+  }
+  var XHR_URL_KEY = "__szuUoocUrl";
+  var XHR_MARK = "__szuUoocInstalled";
+  function installXhr(realm) {
+    const XHR = realm["XMLHttpRequest"];
+    if (typeof XHR !== "function") return false;
+    const proto = XHR.prototype;
+    if (proto[XHR_MARK] === true) return false;
+    const origOpen = proto["open"];
+    const origSend = proto["send"];
+    if (typeof origOpen !== "function" || typeof origSend !== "function") return false;
+    proto["open"] = function(method, url, ...rest) {
+      this[XHR_URL_KEY] = typeof url === "string" ? url : String(url ?? "");
+      return origOpen.call(this, method, url, ...rest);
+    };
+    proto["send"] = function(...args) {
+      const url = this[XHR_URL_KEY];
+      if (typeof url === "string" && shouldSniff(url)) {
+        const self = this;
+        self["addEventListener"].call(self, "load", () => {
+          try {
+            const text = self["responseText"];
+            if (typeof text === "string") dispatch(url, text);
+          } catch {
+          }
+        });
+      }
+      return origSend.apply(this, args);
+    };
+    Object.defineProperty(proto, XHR_MARK, { value: true, enumerable: false, configurable: true });
+    log5.debug("XMLHttpRequest 只读嗅探已装");
+    return true;
+  }
+  var FETCH_MARK = "__szuUoocFetchInstalled";
+  function installFetch(realm) {
+    const origFetch = realm["fetch"];
+    if (typeof origFetch !== "function") return false;
+    if (realm[FETCH_MARK] === true) return false;
+    const patched = function(input, init) {
+      const p = origFetch.call(this, input, init);
+      if (init !== void 0 && init["__szuSkip"] === true) return p;
+      let url = "";
+      try {
+        if (typeof input === "string") url = input;
+        else if (input !== null && typeof input === "object") url = String(input.url ?? "");
+      } catch {
+      }
+      if (url === "" || !shouldSniff(url)) return p;
+      p.then((res) => {
+        try {
+          res.clone().text().then((text) => dispatch(url, text)).catch(() => void 0);
+        } catch {
+        }
+      }).catch(() => void 0);
+      return p;
+    };
+    realm["fetch"] = patched;
+    Object.defineProperty(realm, FETCH_MARK, { value: true, enumerable: false, configurable: true });
+    log5.debug("fetch 只读嗅探已装");
+    return true;
+  }
+  function installUoocIntercept(realm = pageOrSelf()) {
+    const a = installXhr(realm);
+    const b = installFetch(realm);
+    return a || b;
+  }
+
   // src/sites/uooc/ai/fill.ts
   function isVisible(el2) {
     const he = el2;
@@ -2084,10 +2287,7 @@ ${options.desc ?? ""}
     }
     return { filled, missing, failed };
   }
-  var SUBMIT_SELECTORS = [
-    "button.btn.btn-danger",
-    'div.btn.btn-warning[ng-click*="commitTask"]'
-  ];
+  var SUBMIT_SELECTORS = ["button.btn.btn-danger"];
   function findSubmitButton(top = document) {
     for (const selector of SUBMIT_SELECTORS) {
       for (const doc of collectRoots(top)) {
@@ -2097,61 +2297,163 @@ ${options.desc ?? ""}
     }
     return null;
   }
-  function countOptionInputs(top = document) {
-    let n = 0;
-    for (const doc of collectRoots(top)) {
-      try {
-        n += doc.querySelectorAll('input[type="radio"], input[type="checkbox"]').length;
-      } catch {
-      }
-    }
-    return n;
-  }
-  function waitForOptionInputs(timeoutMs = 2e4, intervalMs2 = 300) {
-    return new Promise((resolve2) => {
-      const deadline = Date.now() + timeoutMs;
-      const tick = () => {
-        if (countOptionInputs() > 0) {
-          resolve2(true);
-          return;
-        }
-        if (Date.now() >= deadline) {
-          resolve2(false);
-          return;
-        }
-        window.setTimeout(tick, intervalMs2);
-      };
-      tick();
-    });
-  }
-  function isAnswerBoxVisible(top = document) {
-    for (const doc of collectRoots(top)) {
-      const el2 = doc.querySelector("div.answerBox");
-      if (el2 !== null && isVisible(el2)) return true;
+  function isAnsweredInDom(qid, top = document) {
+    for (const el2 of inputsFor(collectRoots(top), qid)) {
+      if (el2.checked) return true;
     }
     return false;
   }
-
-  // src/sites/uooc/ai/handoff.ts
-  var KEY = "uooc.ai.handoff";
-  var HANDOFF_TTL_MS = 30 * 60 * 1e3;
-  function isHandoff(v) {
-    if (v === null || typeof v !== "object") return false;
-    const o = v;
-    return typeof o["courseUrl"] === "string" && typeof o["tid"] === "string" && typeof o["at"] === "number";
+  function ngModelOf(el2) {
+    const win = el2.ownerDocument?.defaultView;
+    const angular = win?.angular ?? null;
+    if (angular === null || typeof angular.element !== "function") return null;
+    try {
+      const ctrl = angular.element(el2).controller?.("ngModel");
+      return ctrl ?? null;
+    } catch {
+      return null;
+    }
   }
-  function saveHandoff(tid, courseUrl = location.href) {
-    const record = { courseUrl, tid, at: Date.now() };
-    write(KEY, record);
+  function emptyValueFor(kind) {
+    if (kind === "multi") return [];
+    if (kind === "blank" || kind === "other") return "";
+    return void 0;
   }
-  function consumeHandoff(tid, now = Date.now()) {
-    const raw = read(KEY, null);
-    if (raw === null || raw === void 0) return null;
-    remove(KEY);
-    if (!isHandoff(raw)) return null;
-    if (raw.tid !== tid) return null;
-    if (now - raw.at > HANDOFF_TTL_MS) return null;
-    return raw;
+  function clearQuestion(qid, kind, top = document) {
+    const inputs = inputsFor(collectRoots(top), qid);
+    if (inputs.length === 0) return "missing";
+    const empty = emptyValueFor(kind);
+    let viaModel = false;
+    for (const el2 of inputs) {
+      const ctrl = ngModelOf(el2);
+      if (ctrl === null || typeof ctrl.$setViewValue !== "function") continue;
+      try {
+        ctrl.$setViewValue(empty);
+        ctrl.$render?.();
+        viaModel = true;
+      } catch {
+      }
+    }
+    if (viaModel) return "ngModel";
+    for (const el2 of inputs) {
+      try {
+        el2.checked = false;
+        el2.dispatchEvent(new Event("change", { bubbles: true }));
+      } catch {
+      }
+    }
+    return "dom";
+  }
+  function findQuestionAnchors(top = document) {
+    const out = [];
+    for (const doc of collectRoots(top)) {
+      let list;
+      try {
+        list = Array.from(doc.querySelectorAll("div.queContainer"));
+      } catch {
+        continue;
+      }
+      for (const c of list) {
+        if (!(c instanceof HTMLElement)) continue;
+        const indexEl = c.querySelector("div.index");
+        if (!(indexEl instanceof HTMLElement)) continue;
+        const input = c.querySelector("input[name]");
+        out.push({
+          label: (indexEl.textContent ?? "").trim(),
+          indexEl,
+          container: c,
+          qid: input?.getAttribute("name") ?? null
+        });
+      }
+    }
+    return out;
+  }
+  var PAPER_TITLE_SELECTORS = [
+    "div.paperTitle",
+    "div.paper-title",
+    "div.examTitle",
+    "h1.paperTitle",
+    "h3.paperTitle"
+  ];
+  function findPaperTitleAnchor(top) {
+    for (const doc of collectRoots(top)) {
+      for (const sel of PAPER_TITLE_SELECTORS) {
+        let el2 = null;
+        try {
+          el2 = doc.querySelector(sel);
+        } catch {
+          continue;
+        }
+        if (el2 instanceof HTMLElement && isVisible(el2)) return el2;
+      }
+    }
+    const first = findQuestionAnchors(top)[0];
+    return first?.container.parentElement ?? null;
+  }
+  var CLEAR_MARK = "data-sztb-uooc-clear";
+  var CLEAR_BTN_STYLE = "margin:0 6px 0 0;padding:1px 8px;font-size:12px;line-height:18px;border:1px solid #d9d9d9;border-radius:3px;background:#fff;color:#c0392b;cursor:pointer;vertical-align:middle;";
+  function makeClearButton(text, title, onClick) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = text;
+    btn.title = title;
+    btn.setAttribute("style", CLEAR_BTN_STYLE);
+    btn.setAttribute(CLEAR_MARK, "one");
+    btn.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      onClick();
+    });
+    return btn;
+  }
+  function removeClearButtons(top) {
+    for (const doc of collectRoots(top)) {
+      let list;
+      try {
+        list = Array.from(doc.querySelectorAll(`[${CLEAR_MARK}]`));
+      } catch {
+        continue;
+      }
+      for (const el2 of list) el2.remove();
+    }
+  }
+  function injectClearButtons(opts) {
+    const top = opts.top ?? document;
+    return {
+      refresh(answered) {
+        removeClearButtons(top);
+        if (opts.disabled === true) return 0;
+        let count = 0;
+        for (const a of findQuestionAnchors(top)) {
+          const qid = a.qid;
+          if (qid === null) continue;
+          if (!answered.has(qid)) continue;
+          const btn = makeClearButton("清除答案", `清空第 ${a.label} 题的答案`, () => {
+            opts.onClearOne(qid);
+          });
+          try {
+            a.indexEl.parentElement?.insertBefore(btn, a.indexEl);
+            count++;
+          } catch {
+          }
+        }
+        const title = findPaperTitleAnchor(top);
+        if (title !== null) {
+          const btn = makeClearButton("清除全部答案", "清空整张卷子的答案", () => {
+            opts.onClearAll();
+          });
+          try {
+            title.insertAdjacentElement("afterend", btn);
+            count++;
+          } catch {
+          }
+        }
+        return count;
+      },
+      remove() {
+        removeClearButtons(top);
+      }
+    };
   }
 
   // src/sites/uooc/ai/llm.ts
@@ -2246,6 +2548,17 @@ ${options.desc ?? ""}
   function asString(v) {
     return v === null || v === void 0 ? "" : String(v);
   }
+  function stripHtml(s) {
+    if (!s.includes("<")) return s;
+    return s.replace(/<[^>]*>/g, " ").replace(/&nbsp;/gi, " ").replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
+  }
+  function toStudentAnswer(raw) {
+    if (Array.isArray(raw)) {
+      return raw.map((x) => asString(x).trim()).filter((s2) => s2 !== "");
+    }
+    const s = asString(raw).trim();
+    return s === "" ? [] : [s];
+  }
   function toExamQuestion(raw) {
     if (raw === null || typeof raw !== "object") return null;
     const o = raw;
@@ -2256,9 +2569,10 @@ ${options.desc ?? ""}
       id,
       kind: kindOf(typeText, asString(o["type"])),
       typeText,
-      stem: asString(o["question"]),
+      stem: stripHtml(asString(o["question"])),
       options: toOptions(o["options"]),
-      score: asString(o["score"])
+      score: asString(o["score"]),
+      studentAnswer: toStudentAnswer(o["student_answer"])
     };
   }
   async function fetchPaper(tid) {
@@ -2377,7 +2691,8 @@ ${options.desc ?? ""}
     "3. 多选题写多个字母，用英文逗号分隔，按字母升序，如 A,C。",
     "4. 判断题写 A（正确）或 B（错误）。",
     "5. 填空题写答案原文，不要写字母；一道题有多个空时，按空序用竖线 | 分隔。",
-    "6. 不要输出解释、标题、空行、代码块或任何多余字符。",
+    "6. 如果你能联网搜索，请先检索相关资料再作答；不能联网就直接按已有知识作答。",
+    "7. 不要输出解释、标题、空行、代码块或任何多余字符。",
     ""
   ].join("\n");
   var TEMPLATES = [
@@ -2411,8 +2726,18 @@ ${options.desc ?? ""}
     if (q.options.length === 0) return "";
     return q.options.map((o) => `${o.key}. ${o.text}`).join("  ");
   }
-  function buildPrompt(questions, template) {
-    const lines = [template.body, "", SHARED_INSTRUCTION, "题目："];
+  function buildPrompt(questions, template, exclude) {
+    const lines = [template.body, "", SHARED_INSTRUCTION];
+    if (exclude !== void 0 && exclude !== "") {
+      lines.push(
+        "",
+        "补充要求（很重要）：",
+        `本题上一轮给出的答案「${exclude}」已被判定为错误，请给出与它**不同**的答案。`,
+        "如果这道题是多选题，请给出一个与它不同的字母组合 —— 可以是它的子集，",
+        "但不能与它完全相同。不要重复同一个答案。"
+      );
+    }
+    lines.push("题目：");
     questions.forEach((q, i) => {
       const tag = q.typeText === "" ? "" : `[${q.typeText}] `;
       lines.push(`${i + 1}. ${tag}${q.stem}`);
@@ -2435,39 +2760,64 @@ ${options.desc ?? ""}
     }
     return out;
   }
-  async function answerOne(question, cfg, hook = {}) {
+  async function answerOne(question, cfg, opts = {}) {
+    const exclude = opts.exclude ?? "";
+    const retryMode = exclude !== "";
     const pool = shuffledTemplates();
     const samples = [];
     const decided = [];
     let requests = 0;
     let lastError = "";
-    const max = Math.min(MAX_SAMPLES, pool.length);
-    for (let round2 = 0; round2 < max; round2 += 1) {
+    let note;
+    const hardMax = retryMode ? Math.max(1, Math.min(2, opts.maxRequests ?? 1)) : Math.min(MAX_SAMPLES, pool.length);
+    const extraOnUnchanged = retryMode ? opts.extraOnUnchanged ?? true : false;
+    const deliver = (answer) => ({
+      qid: question.id,
+      answer,
+      requests,
+      samples,
+      error: lastError,
+      ...note !== void 0 ? { note } : {}
+    });
+    for (let round2 = 0; round2 < hardMax; round2 += 1) {
       const template = pool.pop();
       if (template === void 0) break;
       requests += 1;
       let text = "";
       try {
-        text = await chat(cfg, buildPrompt([question], template));
+        text = await chat(cfg, buildPrompt([question], template, exclude === "" ? void 0 : exclude));
       } catch (err) {
         lastError = err instanceof Error ? err.message : String(err);
-        hook.onWarn?.(`第 ${requests} 次请求失败（模板 ${template.label}）：${lastError}`);
+        opts.onWarn?.(`第 ${requests} 次请求失败（模板 ${template.label}）：${lastError}`);
         samples.push(null);
         continue;
       }
       const parsed = parseAnswers(text, [question.kind])[0] ?? null;
       samples.push(parsed);
-      hook.onDebug?.(
+      opts.onDebug?.(
         `模板「${template.label}」→ ${parsed === null ? "解析不出答案" : parsed}（原始回答：${text.trim().slice(0, 60)}）`
       );
       if (parsed === null) continue;
+      if (retryMode) {
+        if (parsed !== exclude) {
+          note = "重答：已给出与上一轮不同的答案";
+          return deliver(parsed);
+        }
+        note = "重答：模型仍给出上一轮的答案";
+        if (extraOnUnchanged && requests < 2) {
+          continue;
+        }
+        return deliver(parsed);
+      }
       decided.push(parsed);
       const verdict = majority(decided);
-      if (verdict.decided) {
-        return { qid: question.id, answer: verdict.answer, requests, samples, error: lastError };
-      }
+      if (verdict.decided) return deliver(verdict.answer);
     }
-    return { qid: question.id, answer: "", requests, samples, error: lastError };
+    if (retryMode) {
+      const last = samples.filter((s) => s !== null).pop();
+      if (last !== void 0) return deliver(last);
+    }
+    return deliver("");
   }
   async function runPool(items2, limit, worker) {
     const out = new Array(items2.length);
@@ -2500,8 +2850,89 @@ ${options.desc ?? ""}
     });
   }
 
+  // src/sites/uooc/ai/monitor.ts
+  var log6 = scoped("uooc/ai/monitor");
+  var EMPTY = { course: null, quiz: null };
+  var state = EMPTY;
+  var listeners2 = /* @__PURE__ */ new Set();
+  function monitorState() {
+    return state;
+  }
+  function subscribeMonitor(fn) {
+    listeners2.add(fn);
+    return () => {
+      listeners2.delete(fn);
+    };
+  }
+  function emit() {
+    for (const fn of [...listeners2]) {
+      try {
+        fn();
+      } catch (err) {
+        log6.warn("监视页订阅者抛异常，已忽略", err instanceof Error ? err.message : String(err));
+      }
+    }
+  }
+  function setCourseProgress(p) {
+    state = { ...state, course: p };
+    emit();
+  }
+  var quiz = null;
+  function publishQuiz() {
+    state = { ...state, quiz };
+    emit();
+  }
+  function quizBegin(tid, questions) {
+    quiz = {
+      tid,
+      total: questions.length,
+      done: questions.filter((q) => q.hasAnswer).length,
+      phase: "fetching",
+      message: "",
+      questions: questions.map((q, i) => ({
+        qid: q.id,
+        no: i + 1,
+        typeText: q.typeText,
+        status: q.hasAnswer ? "skipped" : "pending",
+        answer: "",
+        requests: 0,
+        samples: [],
+        note: q.hasAnswer ? "页面上已有答案，不重复请求" : ""
+      }))
+    };
+    log6.debug(`监视：登记 ${tid}，共 ${questions.length} 题`);
+    publishQuiz();
+  }
+  function quizPatch(qid, patch) {
+    if (quiz === null) return;
+    let hit = false;
+    const questions = quiz.questions.map((q) => {
+      if (q.qid !== qid) return q;
+      hit = true;
+      return { ...q, ...patch };
+    });
+    if (!hit) return;
+    const done = questions.filter((q) => q.status === "answered" || q.status === "skipped").length;
+    quiz = { ...quiz, questions, done };
+    publishQuiz();
+  }
+  function quizPhase(phase, message = "") {
+    if (quiz === null) return;
+    quiz = { ...quiz, phase, message };
+    publishQuiz();
+  }
+  function quizEnd(message) {
+    if (quiz === null) return;
+    quiz = { ...quiz, phase: "done", message };
+    publishQuiz();
+  }
+  function quizClear() {
+    quiz = null;
+    publishQuiz();
+  }
+
   // src/sites/uooc/settings.ts
-  var log5 = scoped("uooc/settings");
+  var log7 = scoped("uooc/settings");
   var SITE_ID = "uooc";
   var GROUP = {
     /** 播放器行为（U1/U2/U4） */
@@ -2518,8 +2949,6 @@ ${options.desc ?? ""}
     MUTE: "mute",
     /** 🟢 防失焦暂停（U4） */
     KEEP_PLAYING: "keep-playing",
-    /** 🟠 自动连播（U3） */
-    AUTO_NEXT: "auto-next",
     /** 🟢 附件只路过，不打开文件（仍导航到该小节）—— 用户 m01816 需求 2 */
     SKIP_ATTACHMENT: "skip-attachment",
     /** 🟢 文本不停留：导航过去后不等待，直接下一项 */
@@ -2573,14 +3002,6 @@ ${options.desc ?? ""}
       group: GROUP.VIDEO
     },
     {
-      id: TOGGLE.AUTO_NEXT,
-      label: "自动连播",
-      desc: "播完自动打开目录里的下一个视频",
-      risk: "trace",
-      default: false,
-      group: GROUP.AUTOPLAY
-    },
-    {
       id: TOGGLE.SKIP_ATTACHMENT,
       label: "跳过附件",
       desc: "不打开附件文件（仍导航到该小节）。打开时会尝试在后台标签页里打开",
@@ -2615,8 +3036,8 @@ ${options.desc ?? ""}
     {
       id: TOGGLE.AI_ANSWER,
       label: "AI 答题",
-      desc: "连播遇到未完成的测验就整页跳到答题页，脚本拉题问模型并回填；提交前会弹确认框，人机验证码要你手动点一下",
-      risk: "trace",
+      desc: "连播遇到测验脚本就在页内答题 iframe 里拉题问模型、逐题回填；提交前会弹确认框，人机验证码要你手动点一下",
+      risk: "irreversible",
       default: false,
       group: GROUP.AI
     }
@@ -2690,7 +3111,7 @@ ${options.desc ?? ""}
     const raw = getValue(SITE_ID, id);
     const num3 = Number(raw);
     if (!Number.isFinite(num3) || num3 < 0) {
-      log5.warn(`${id} 取值异常（${String(raw)}），按 ${fallbackMs}ms 处理`);
+      log7.warn(`${id} 取值异常（${String(raw)}），按 ${fallbackMs}ms 处理`);
       return fallbackMs;
     }
     return num3;
@@ -2723,24 +3144,35 @@ ${options.desc ?? ""}
     waitBeforeMs();
     holdAfterMs();
     aiConcurrency();
-    log5.info(`AI 作答配置：${aiConfig() === null ? "未配置（AI 答题用不了）" : "已配置"}`);
+    log7.info(`AI 作答配置：${aiConfig() === null ? "未配置（AI 答题用不了）" : "已配置"}`);
   }
 
   // src/sites/uooc/ai/index.ts
-  var log6 = scoped("uooc/ai");
+  var log8 = scoped("uooc/ai");
+  var SUBMIT_WAIT_MS = 5 * 60 * 1e3;
   function lettersOf(answer) {
     return answer.split(",").map((s) => s.trim().toUpperCase()).filter((s) => s !== "");
   }
   function tidFromLocation(href = location.href) {
+    let u;
     try {
-      const u = new URL(href);
-      const tid = u.searchParams.get("tid");
-      if (tid !== null && tid !== "") return tid;
-      const m = /\/exam\/(\d{6,})/.exec(u.pathname);
-      return m?.[1] ?? null;
+      u = new URL(href, location.href);
     } catch {
       return null;
     }
+    const fromQuery = u.searchParams.get("tid");
+    if (fromQuery !== null && fromQuery !== "") return fromQuery;
+    const m = /^\/exam\/(\d{6,})\/?$/.exec(u.pathname);
+    return m !== null && m[1] !== void 0 ? m[1] : null;
+  }
+  function quizTidOnPage() {
+    for (const frame of document.querySelectorAll("iframe")) {
+      const src = frame.getAttribute("src") ?? "";
+      if (!src.includes("/exam/")) continue;
+      const tid = tidFromLocation(src);
+      if (tid !== null) return tid;
+    }
+    return tidFromLocation();
   }
   function summarizeFailures(outcomes) {
     const bad = outcomes.filter((o) => o.answer === "");
@@ -2753,69 +3185,183 @@ ${options.desc ?? ""}
     if (reasons.size === 0) return `${head}（模型没给出能识别的答案格式）`;
     return `${head}：${[...reasons].join("；").slice(0, 200)}`;
   }
-  async function runQuizAnswer(tid, host) {
+  async function submitAndRead(host2) {
+    const btn = findSubmitButton();
+    if (btn === null) {
+      const msg = "页面上找不到【提交】按钮，请自己点一下（答案已经填好了）";
+      log8.error(msg);
+      host2.toast(msg, "warn");
+      return { submitted: false, commit: null };
+    }
+    clearCommit();
+    quizPhase("submitting");
+    log8.info("已合成点击站点【提交】，接下来请手动完成人机验证码");
+    host2.toast("已点提交，请完成人机验证码", "info");
+    btn.click();
+    const commit = await waitCommit(SUBMIT_WAIT_MS);
+    if (commit === null) log8.warn("没截获到交卷响应（可能你还没点完验证码，或站点换了接口）");
+    else log8.info(`交卷判读：${commit.verdict}，得分 ${commit.score}/${commit.passScore}，msg=${commit.message}`);
+    return { submitted: true, commit };
+  }
+  async function retryLowScore(commit, questions, previous, cfg) {
+    const lows = [];
+    for (const q of questions) {
+      const got = commit.scoreList[q.id];
+      if (got === void 0) continue;
+      const full = Number(q.score);
+      const score = Number(got);
+      if (Number.isFinite(full) && Number.isFinite(score) && score < full) lows.push(q);
+    }
+    if (lows.length === 0) {
+      log8.info("这次没过，但 score_list 里挑不出低分题（或没带分数），不重答");
+      return { retried: 0, filled: 0 };
+    }
+    quizPhase("retrying", `未通过（得分 ${commit.score} / 门槛 ${commit.passScore}），重答 ${lows.length} 道低分题`);
+    log8.info(`未通过，重答 ${lows.length} 道低分题：${lows.map((q) => q.id).join(", ")}`);
+    let filled = 0;
+    for (const q of lows) {
+      const exclude = previous.get(q.id) ?? "";
+      quizPatch(q.id, { status: "pending", note: "重答中…" });
+      const o = await answerOne(q, cfg, {
+        onDebug: (m) => log8.debug(m),
+        onWarn: (m) => log8.warn(m),
+        ...exclude === "" ? {} : { exclude },
+        maxRequests: 1
+      });
+      quizPatch(q.id, {
+        status: o.answer === "" ? "failed" : "answered",
+        answer: o.answer,
+        requests: o.requests,
+        samples: o.samples,
+        note: o.note ?? ""
+      });
+      if (o.answer === "") continue;
+      const target = { qid: q.id, kind: q.kind, letters: lettersOf(o.answer) };
+      const r = fillAnswers([target]);
+      if (r.filled.length > 0) {
+        filled += 1;
+        previous.set(q.id, o.answer);
+      }
+    }
+    return { retried: lows.length, filled };
+  }
+  async function runQuizAnswer(tid, host2) {
     const cfg = aiConfig();
     if (cfg === null) {
       const msg = "AI 作答未配置：请到【AI 作答】标签页填接口地址与模型名";
-      log6.error(msg);
-      host.toast(msg, "error");
-      host.activateTab("uooc:ai");
+      log8.error(msg);
+      host2.toast(msg, "error");
+      host2.activateTab("uooc:ai");
       return null;
     }
-    log6.info(`开始 AI 作答：tid=${tid}，接口=${chatUrl(cfg.baseUrl)}，模型=${cfg.model}`);
+    log8.info(`开始 AI 作答：tid=${tid}，接口=${chatUrl(cfg.baseUrl)}，模型=${cfg.model}`);
+    quizClear();
     let paper;
     try {
       paper = await fetchPaper(tid);
     } catch (err) {
       const msg = `拉题失败：${err instanceof Error ? err.message : String(err)}`;
-      log6.error(msg);
-      host.toast(msg, "error");
+      log8.error(msg);
+      host2.toast(msg, "error");
       return null;
     }
-    const answerable = paper.questions.filter((q) => isAnswerable(q.kind));
-    const skipped = paper.questions.length - answerable.length;
-    log6.info(
-      `拿到 ${paper.questions.length} 道题（可自动作答 ${answerable.length} 道，跳过 ${skipped} 道填空/主观题）`
+    const all = paper.questions;
+    const already = all.filter((q) => q.studentAnswer.length > 0 || isAnsweredInDom(q.id));
+    const alreadyIds = new Set(already.map((q) => q.id));
+    const todo = all.filter((q) => !alreadyIds.has(q.id) && isAnswerable(q.kind));
+    const skippedKind = all.filter((q) => !alreadyIds.has(q.id) && !isAnswerable(q.kind)).length;
+    quizBegin(
+      tid,
+      all.map((q) => ({ id: q.id, typeText: q.typeText, hasAnswer: alreadyIds.has(q.id) }))
     );
-    if (answerable.length === 0) {
-      host.toast("这份卷子没有可自动作答的题目", "warn");
-      return null;
+    for (const q of already) quizPatch(q.id, { status: "skipped", note: "页面上已有答案，不重复请求" });
+    log8.info(
+      `拿到 ${all.length} 道题：页面上已有答案 ${already.length} 道（跳过），可自动作答 ${todo.length} 道，跳过 ${skippedKind} 道填空/主观题`
+    );
+    const answers = /* @__PURE__ */ new Map();
+    const failures = [];
+    let filled = 0;
+    let buttons = injectClearButtons({
+      onClearOne: () => void 0,
+      onClearAll: () => void 0
+    });
+    const refreshButtons = () => {
+      buttons.refresh(new Set(answers.keys()));
+    };
+    if (todo.length > 0) {
+      const concurrency = aiConcurrency();
+      quizPhase("answering", `并发 ${concurrency}`);
+      log8.info(`开始问模型（并发 ${concurrency}）…`);
+      await answerQuestions(todo, {
+        cfg,
+        concurrency,
+        onDebug: (m) => log8.debug(m),
+        onWarn: (m) => log8.warn(m),
+        onProgress: (ev) => {
+          const { question, outcome } = ev;
+          log8.info(
+            `[${ev.index + 1}/${ev.total}] ${question.typeText} ${question.id} → ${outcome.answer === "" ? "未答出" : outcome.answer}（${outcome.requests} 次请求）`
+          );
+          if (outcome.answer === "") {
+            failures.push(outcome);
+            quizPatch(question.id, {
+              status: "failed",
+              requests: outcome.requests,
+              samples: outcome.samples,
+              note: outcome.error === "" ? "模型没给出可识别的答案" : outcome.error
+            });
+            return;
+          }
+          const report = fillAnswers([
+            { qid: question.id, kind: question.kind, letters: lettersOf(outcome.answer) }
+          ]);
+          const ok = report.filled.length > 0;
+          if (ok) {
+            filled += 1;
+            answers.set(question.id, outcome.answer);
+          }
+          quizPatch(question.id, {
+            status: ok ? "answered" : "failed",
+            answer: outcome.answer,
+            requests: outcome.requests,
+            samples: outcome.samples,
+            note: ok ? outcome.note ?? "" : "模型答出来了，但页面里点不动这一题"
+          });
+          refreshButtons();
+        }
+      });
     }
-    const concurrency = aiConcurrency();
-    log6.info(`开始问模型（并发 ${concurrency}）…`);
-    const outcomes = await answerQuestions(answerable, {
-      cfg,
-      concurrency,
-      onDebug: (m) => log6.debug(m),
-      onWarn: (m) => log6.warn(m),
-      onProgress: (ev) => {
-        const { question, outcome } = ev;
-        log6.info(
-          `[${ev.index + 1}/${ev.total}] ${question.typeText} ${question.id} → ${outcome.answer === "" ? "未答出" : outcome.answer}（${outcome.requests} 次请求）`
-        );
+    buttons.remove();
+    buttons = injectClearButtons({
+      onClearOne: (qid) => {
+        const q = all.find((x) => x.id === qid);
+        const how = clearQuestion(qid, q?.kind ?? "other");
+        answers.delete(qid);
+        refreshButtons();
+        log8.info(`清除第 ${qid} 题的答案（${how}）`);
+      },
+      onClearAll: () => {
+        for (const q of all) {
+          clearQuestion(q.id, q.kind);
+          answers.delete(q.id);
+        }
+        refreshButtons();
+        log8.info("清除全部答案");
       }
     });
-    const targets = [];
-    for (let i = 0; i < outcomes.length; i += 1) {
-      const o = outcomes[i];
-      const q = answerable[i];
-      if (o === void 0 || q === void 0 || o.answer === "") continue;
-      targets.push({ qid: q.id, kind: q.kind, letters: lettersOf(o.answer) });
-    }
-    const report = fillAnswers(targets);
-    log6.info(
-      `回填结果：成功 ${report.filled.length} 题，页面没找到 ${report.missing.length} 题，点不动 ${report.failed.length} 题`
-    );
-    const failure = summarizeFailures(outcomes);
+    refreshButtons();
+    const failure = summarizeFailures(failures);
     const bodyLines = [
-      `卷面 ${paper.questions.length} 道题：模型作答 ${targets.length} 道，已填入页面 ${report.filled.length} 道。`
+      `卷面 ${all.length} 道题：页面上本来就有答案 ${already.length} 道，模型作答并填入 ${filled} 道。`
     ];
-    if (skipped > 0) bodyLines.push(`跳过 ${skipped} 道（填空/主观题暂不支持自动作答）。`);
-    if (report.missing.length > 0) bodyLines.push(`有 ${report.missing.length} 道在页面上没找到对应选项，未填入。`);
+    if (skippedKind > 0) bodyLines.push(`跳过 ${skippedKind} 道（填空/主观题）。`);
+    if (filled < todo.length) bodyLines.push(`有 ${todo.length - filled} 道没填进去（见【监视】页的逐题表）。`);
     if (failure !== "") bodyLines.push(failure);
     bodyLines.push("");
     bodyLines.push("点【开始提交】后脚本会点站点的提交按钮，接着会弹人机验证码，需要你手动点一下。");
-    const confirmed = await host.confirm({
+    bodyLines.push("没通过的话，脚本会按分数挑低分题重答一轮（每题只再问 1 次），然后自动再提交一次。");
+    quizPhase("filling", `已填入 ${filled} 道，等你确认提交`);
+    const confirmed = await host2.confirm({
       title: "答案已填好，确认提交？",
       body: bodyLines.join("\n"),
       danger: true,
@@ -2823,123 +3369,47 @@ ${options.desc ?? ""}
       cancelText: "再等等"
     });
     if (!confirmed) {
-      log6.info("用户选择「再等等」，不提交。答案已填在页面上，你可以自己改");
+      log8.info("用户选择「再等等」，不提交。答案已填在页面上，你可以自己改");
+      quizEnd("用户取消了提交，答案已填在页面上");
       return {
-        total: paper.questions.length,
-        answerable: answerable.length,
-        answered: targets.length,
-        filled: report.filled.length,
-        submitted: false
+        total: all.length,
+        alreadyAnswered: already.length,
+        answered: answers.size,
+        filled,
+        submitted: false,
+        commit: null,
+        retried: 0
       };
     }
-    const btn = findSubmitButton();
-    if (btn === null) {
-      const msg = "页面上找不到【提交】按钮，请自己点一下（答案已经填好了）";
-      log6.error(msg);
-      host.toast(msg, "warn");
+    buttons.remove();
+    const first = await submitAndRead(host2);
+    let commit = first.commit;
+    let retried = 0;
+    if (commit !== null && commit.verdict === "fail" && first.submitted) {
+      const r = await retryLowScore(commit, all, answers, cfg);
+      retried = r.retried;
+      filled += r.filled;
+      if (r.retried > 0) {
+        const again = await submitAndRead(host2);
+        commit = again.commit ?? commit;
+      }
+    }
+    if (commit !== null) {
+      quizEnd(
+        commit.verdict === "pass" ? `已通过（得分 ${commit.score}）` : commit.verdict === "fail" ? `仍未通过：${commit.message}` : `提交完成，但读不懂站点回话：${commit.message}`
+      );
     } else {
-      log6.info("已合成点击站点【提交】，接下来请手动完成人机验证码");
-      host.toast("已点提交，请完成人机验证码", "info");
-      btn.click();
+      quizEnd("已点提交，但没截获到站点回话（可能验证码还没点完）");
     }
     return {
-      total: paper.questions.length,
-      answerable: answerable.length,
-      answered: targets.length,
-      filled: report.filled.length,
-      submitted: btn !== null
+      total: all.length,
+      alreadyAnswered: already.length,
+      answered: answers.size,
+      filled,
+      submitted: first.submitted,
+      commit,
+      retried
     };
-  }
-  var SUBMIT_WAIT_MS = 5 * 60 * 1e3;
-  function waitForSubmitted(timeoutMs = SUBMIT_WAIT_MS, intervalMs2 = 1e3) {
-    return new Promise((resolve2) => {
-      const deadline = Date.now() + timeoutMs;
-      const tick = () => {
-        if (!location.pathname.startsWith("/exam/")) {
-          resolve2("left");
-          return;
-        }
-        if (findSubmitButton() === null && isAnswerBoxVisible()) {
-          resolve2("done");
-          return;
-        }
-        if (Date.now() >= deadline) {
-          resolve2("timeout");
-          return;
-        }
-        window.setTimeout(tick, intervalMs2);
-      };
-      tick();
-    });
-  }
-  async function autoAnswerExamPage(host, tidArg) {
-    const tid = tidArg ?? tidFromLocation();
-    if (tid === null) {
-      log6.warn("答题页地址里找不到 tid，不做自动作答");
-      return null;
-    }
-    const handoff = consumeHandoff(tid);
-    log6.info(
-      `答题页自动作答：tid=${tid}` + (handoff === null ? "（没有交接条，答完留在本页）" : `，答完回课程页 ${handoff.courseUrl}`)
-    );
-    if (!await waitForOptionInputs()) {
-      const msg = "答题页等了 20 秒还没渲染出选项，放弃自动作答（题型结构可能变了）";
-      log6.error(msg);
-      host.toast(msg, "warn");
-      return { tid, quiz: null, returned: false };
-    }
-    if (findSubmitButton() === null) {
-      const msg = "页面上没有【提交】按钮：这份卷子可能已经交过了，不做自动作答";
-      log6.warn(msg);
-      host.toast(msg, "warn");
-      return { tid, quiz: null, returned: false };
-    }
-    let quiz;
-    try {
-      quiz = await runQuizAnswer(tid, host);
-    } catch (err) {
-      const msg = `自动作答意外出错：${err instanceof Error ? err.message : String(err)}`;
-      log6.error(msg);
-      host.toast(msg, "error");
-      return { tid, quiz: null, returned: false };
-    }
-    if (quiz === null || !quiz.submitted) {
-      return { tid, quiz, returned: false };
-    }
-    if (handoff === null) return { tid, quiz, returned: false };
-    const signal = await waitForSubmitted();
-    if (signal !== "done") {
-      log6.warn(
-        signal === "left" ? "站点自己已经把页面跳走了，脚本不再插手" : `等了 ${SUBMIT_WAIT_MS / 6e4} 分钟没看出「已交卷」，不自动跳回课程页；交完卷自己回课程页即可`
-      );
-      return { tid, quiz, returned: false };
-    }
-    log6.info(`已交卷，把当前页换回课程页继续连播：${handoff.courseUrl}`);
-    host.toast("已交卷，正在回到课程页继续连播", "success");
-    location.href = handoff.courseUrl;
-    return { tid, quiz, returned: true };
-  }
-
-  // src/common/utils/page.ts
-  function pageWindow() {
-    const g = globalThis;
-    const uw = g["unsafeWindow"];
-    return uw !== null && typeof uw === "object" ? uw : null;
-  }
-  function pageOrSelf() {
-    return pageWindow() ?? globalThis;
-  }
-  function pageSessionStorage() {
-    try {
-      const ps = pageOrSelf()["sessionStorage"];
-      if (ps !== null && typeof ps === "object") return ps;
-    } catch {
-    }
-    try {
-      return typeof sessionStorage === "undefined" ? null : sessionStorage;
-    } catch {
-      return null;
-    }
   }
 
   // src/sites/uooc/catalog.ts
@@ -2966,806 +3436,583 @@ ${options.desc ?? ""}
         return "unknown";
     }
   }
-  function normalizeNode(raw) {
-    if (raw === null || typeof raw !== "object") return null;
-    const o = raw;
-    const id = Number(o["id"]);
-    if (!Number.isFinite(id)) return null;
-    const node = { id, name: String(o["name"] ?? "") };
-    if (typeof o["finished"] === "number") node.finished = o["finished"];
-    if (typeof o["learning"] === "number") node.learning = o["learning"];
-    if (typeof o["status"] === "string") node.status = o["status"];
-    if (Array.isArray(o["children"])) {
-      const kids = o["children"].map(normalizeNode).filter((n) => n !== null);
-      if (kids.length > 0) node.children = kids;
-    }
-    return node;
-  }
-  function parseCatalogTree(raw) {
-    if (raw === null || typeof raw !== "object") return [];
-    const data = raw["data"];
-    if (!Array.isArray(data)) return [];
-    return data.map(normalizeNode).filter((n) => n !== null);
-  }
-  function flattenLeaves(tree) {
-    const out = [];
-    const walk = (node, ids, titles, onLearningPath) => {
-      const chain = [...ids, node.id];
-      const chainTitles = [...titles, node.name];
-      const learningHere = node.learning === 1;
-      const learningPath = onLearningPath || learningHere;
-      if (node.children === void 0 || node.children.length === 0) {
-        const leaf = { nodeId: node.id, title: node.name, chain, titles: chainTitles };
-        if (node.finished !== void 0) leaf.finished = node.finished;
-        if (learningPath) leaf.learning = 1;
-        out.push(leaf);
-        return;
-      }
-      for (const child of node.children) walk(child, chain, chainTitles, learningPath);
-    };
-    for (const node of tree) walk(node, [], [], false);
-    return out;
-  }
-  function toBoolFlag(v) {
-    return Number(v) === 1;
-  }
-  function parseDocuments(raw) {
-    if (!Array.isArray(raw)) return [];
-    const out = [];
-    for (const item of raw) {
-      if (item === null || typeof item !== "object") continue;
-      const o = item;
-      out.push({
-        id: String(o["id"] ?? ""),
-        title: String(o["title"] ?? ""),
-        uri: String(o["uri"] ?? "")
-      });
-    }
-    return out;
-  }
-  function parseUnitSources(raw) {
-    if (raw === null || typeof raw !== "object") return [];
-    const data = raw["data"];
-    if (!Array.isArray(data)) return [];
-    const out = [];
-    for (const item of data) {
-      if (item === null || typeof item !== "object") continue;
-      const o = item;
-      const taskId = Number(o["task_id"]);
-      out.push({
-        id: Number(o["id"] ?? 0),
-        // ⚠️ 同一份响应里 type 出现过数字 50 与字符串 "80" 两种，统一成字符串
-        type: String(o["type"] ?? ""),
-        title: String(o["title"] ?? ""),
-        finished: toBoolFlag(o["finished"]),
-        taskId: Number.isFinite(taskId) && taskId > 0 ? taskId : null,
-        documents: parseDocuments(o["document"])
-      });
-    }
-    return out;
-  }
-  function catalogListUrl(cid) {
-    return `/home/learn/getCatalogList?cid=${encodeURIComponent(cid)}&hidemsg_=true`;
-  }
-  function unitLearnUrl(cid, leaf) {
-    const chapterId = leaf.chain[0] ?? leaf.nodeId;
-    const sectionId = leaf.chain[1] ?? chapterId;
-    const params = [
-      `catalog_id=${leaf.nodeId}`,
-      `chapter_id=${chapterId}`,
-      `section_id=${sectionId}`,
-      `cid=${encodeURIComponent(cid)}`,
-      "hidemsg_=true"
-    ];
-    return `/home/learn/getUnitLearn?${params.join("&")}`;
-  }
-  function sourceHash(cid, leaf, sourceId) {
-    const c = leaf.chain;
-    if (c.length >= 3) return `#/${cid}/${c[0]}/${c[1]}/${c[2]}/${sourceId}/subsection`;
-    if (c.length === 2) return `#/${cid}/${c[0]}/${c[1]}/${sourceId}/section`;
-    if (c.length === 1) return `#/${cid}/${c[0]}`;
-    return `#/${cid}`;
-  }
-  function examUrl(cid, taskId) {
-    return `/exam/paper?cid=${encodeURIComponent(cid)}&tid=${taskId}`;
-  }
-  function currentChainFromHash(hash) {
-    const parts = hash.replace(/^#\/?/, "").split("/").filter((s) => s.length > 0);
-    if (parts.length < 2) return null;
-    let body = parts.slice(1);
-    const tail = body[body.length - 1];
-    if (tail === "section" || tail === "subsection") {
-      body = body.slice(0, -1);
-      body = body.slice(0, -1);
-    }
-    if (body.length === 0) return null;
-    const nums = body.map((s) => Number(s));
-    if (nums.some((n) => !Number.isFinite(n))) return null;
-    return nums;
-  }
-  function courseIdFromLocation(pathname, hash) {
-    const fromPath = /^\/home\/learn\/new\/(\d+)/.exec(pathname);
-    if (fromPath !== null) return fromPath[1] ?? null;
-    const fromHash = /^#\/(\d+)(?:\/|$)/.exec(hash);
-    if (fromHash !== null) return fromHash[1] ?? null;
-    return null;
-  }
-  function sameChain(a, b) {
-    if (a.length !== b.length) return false;
-    for (let i = 0; i < a.length; i++) {
-      if (a[i] !== b[i]) return false;
-    }
-    return true;
-  }
-  function findLeafIndex(leaves, chain) {
-    return leaves.findIndex((leaf) => sameChain(leaf.chain, chain));
-  }
-
-  // src/sites/uooc/intercept.ts
-  var log7 = scoped("uooc/intercept");
-  function matchLearnApi(rawUrl) {
-    const path = rawUrl.split("#")[0] ?? "";
-    if (path.includes("/home/learn/getCatalogList")) {
-      const m = /[?&]cid=(\d+)/.exec(path);
-      if (m !== null && m[1] !== void 0) return { kind: "catalog", cid: m[1] };
-      return null;
-    }
-    if (path.includes("/home/learn/getUnitLearn")) {
-      const m = /[?&]catalog_id=(\d+)/.exec(path);
-      if (m !== null && m[1] !== void 0) return { kind: "unit", catalogId: m[1] };
-      return null;
-    }
-    return null;
-  }
-  var lastCatalog = null;
-  var unitBodies = /* @__PURE__ */ new Map();
-  var catalogWaiters = [];
-  var unitWaiters = /* @__PURE__ */ new Map();
-  function primeCatalog(cid, body) {
-    lastCatalog = { cid, body };
-    const pending = catalogWaiters;
-    catalogWaiters = [];
-    for (const w of pending) {
-      if (w.cid === cid) w.fn(body);
-      else catalogWaiters.push(w);
-    }
-  }
-  function primeUnitLearn(catalogId, body) {
-    unitBodies.set(catalogId, body);
-    const pending = unitWaiters.get(catalogId);
-    if (pending === void 0) return;
-    unitWaiters.delete(catalogId);
-    for (const fn of pending) fn(body);
-  }
-  function peekCatalog(cid) {
-    return lastCatalog !== null && lastCatalog.cid === cid ? lastCatalog.body : null;
-  }
-  function peekUnitLearn(catalogId) {
-    return unitBodies.get(catalogId) ?? null;
-  }
-  function waitCatalog(cid, timeoutMs) {
-    const cached = peekCatalog(cid);
-    if (cached !== null) return Promise.resolve(cached);
-    return new Promise((resolve2) => {
-      let done = false;
-      const finish2 = (v) => {
-        if (done) return;
-        done = true;
-        resolve2(v);
-      };
-      catalogWaiters.push({ cid, fn: finish2 });
-      setTimeout(() => finish2(null), timeoutMs);
-    });
-  }
-  function waitUnitLearn(catalogId, timeoutMs) {
-    const cached = peekUnitLearn(catalogId);
-    if (cached !== null) return Promise.resolve(cached);
-    return new Promise((resolve2) => {
-      let done = false;
-      const finish2 = (v) => {
-        if (done) return;
-        done = true;
-        resolve2(v);
-      };
-      const list = unitWaiters.get(catalogId) ?? [];
-      list.push(finish2);
-      unitWaiters.set(catalogId, list);
-      setTimeout(() => finish2(null), timeoutMs);
-    });
-  }
-  function dispatch(rawUrl, text) {
-    const api = matchLearnApi(rawUrl);
-    if (api === null) return;
-    let body;
-    try {
-      body = JSON.parse(text);
-    } catch {
-      log7.warn("截获到的响应不是 JSON，已忽略", rawUrl);
-      return;
-    }
-    if (api.kind === "catalog") {
-      log7.debug("截获 getCatalogList", api.cid);
-      primeCatalog(api.cid, body);
-    } else {
-      log7.debug("截获 getUnitLearn", api.catalogId);
-      primeUnitLearn(api.catalogId, body);
-    }
-  }
-  var XHR_URL_KEY = "__szuUoocUrl";
-  var XHR_MARK = "__szuUoocInstalled";
-  function installXhr(realm) {
-    const XHR = realm["XMLHttpRequest"];
-    if (typeof XHR !== "function") return false;
-    const proto = XHR.prototype;
-    if (proto[XHR_MARK] === true) return false;
-    const origOpen = proto["open"];
-    const origSend = proto["send"];
-    if (typeof origOpen !== "function" || typeof origSend !== "function") return false;
-    proto["open"] = function(method, url, ...rest) {
-      this[XHR_URL_KEY] = typeof url === "string" ? url : String(url ?? "");
-      return origOpen.call(this, method, url, ...rest);
-    };
-    proto["send"] = function(...args) {
-      const url = this[XHR_URL_KEY];
-      if (typeof url === "string" && matchLearnApi(url) !== null) {
-        const self = this;
-        self["addEventListener"].call(self, "load", () => {
-          try {
-            const text = self["responseText"];
-            if (typeof text === "string") dispatch(url, text);
-          } catch {
-          }
-        });
-      }
-      return origSend.apply(this, args);
-    };
-    Object.defineProperty(proto, XHR_MARK, { value: true, enumerable: false, configurable: true });
-    log7.debug("XMLHttpRequest 只读嗅探已装");
-    return true;
-  }
-  var FETCH_MARK = "__szuUoocFetchInstalled";
-  function installFetch(realm) {
-    const origFetch = realm["fetch"];
-    if (typeof origFetch !== "function") return false;
-    if (realm[FETCH_MARK] === true) return false;
-    const patched = function(input, init) {
-      const p = origFetch.call(this, input, init);
-      if (init !== void 0 && init["__szuSkip"] === true) return p;
-      let url = "";
-      try {
-        if (typeof input === "string") url = input;
-        else if (input !== null && typeof input === "object") url = String(input.url ?? "");
-      } catch {
-      }
-      if (url === "" || matchLearnApi(url) === null) return p;
-      p.then((res) => {
-        try {
-          res.clone().text().then((text) => dispatch(url, text)).catch(() => void 0);
-        } catch {
-        }
-      }).catch(() => void 0);
-      return p;
-    };
-    realm["fetch"] = patched;
-    Object.defineProperty(realm, FETCH_MARK, { value: true, enumerable: false, configurable: true });
-    log7.debug("fetch 只读嗅探已装");
-    return true;
-  }
-  function installUoocIntercept(realm = pageOrSelf()) {
-    const a = installXhr(realm);
-    const b = installFetch(realm);
-    return a || b;
-  }
 
   // src/sites/uooc/autoplay.ts
-  var log8 = scoped("uooc/autoplay");
-  var FALLBACK_AFTER_LOAD_MS = 2e3;
-  var CATALOG_HARD_TIMEOUT_MS = 3e4;
-  var UNIT_INTERCEPT_TIMEOUT_MS = 3e3;
-  var VIDEO_END_CHECK_MS = 1500;
-  var ENDED_DEDUPE_MS = 1e3;
-  var AUTOPLAY_HANDLE_KEY = "__szuUoocAutoplay";
-  var CTRL_CLICK_FALLBACK_MS = 1200;
-  function synthesizeCtrlClick(url) {
-    try {
-      const a = document.createElement("a");
-      a.href = url;
-      a.target = "_blank";
-      a.rel = "noopener noreferrer";
-      a.style.display = "none";
-      document.body.appendChild(a);
-      a.dispatchEvent(
-        new MouseEvent("click", {
-          bubbles: true,
-          cancelable: true,
-          ctrlKey: true,
-          // Windows / Linux
-          metaKey: true,
-          // macOS 的 Cmd+左键
-          view: window
-        })
-      );
-      a.remove();
-      return true;
-    } catch (err) {
-      log8.warn(`合成 Ctrl+左键失败：${String(err)}`);
-      return false;
-    }
-  }
-  function openViaGm(url) {
-    const g = globalThis;
-    const gmOpen = g["GM_openInTab"];
-    if (typeof gmOpen !== "function") return false;
-    try {
-      gmOpen(url, {
-        active: false,
-        // 后台打开，不抢当前课程页的焦点
-        insert: false,
-        // 挂到窗口末尾，别插在当前标签页旁边
-        setParent: true
-      });
-      return true;
-    } catch (err) {
-      log8.warn(`GM_openInTab 不可用：${String(err)}`);
-      return false;
-    }
-  }
-  function scheduleGmFallback(url) {
-    window.setTimeout(() => {
-      if (openViaGm(url)) {
-        log8.debug("已用 GM_openInTab 兜底（看到两个标签页 = Ctrl+左键生效了）");
-      }
-    }, CTRL_CLICK_FALLBACK_MS);
-  }
-  function openInBackgroundTab(url) {
-    if (url === "") return "failed";
-    if (synthesizeCtrlClick(url)) {
-      scheduleGmFallback(url);
-      return "ctrl";
-    }
-    if (openViaGm(url)) return "gm";
-    return "failed";
-  }
-  function startAutoplay(host) {
-    let stopped = false;
-    let paused = false;
-    let phase = "idle";
-    let delayTimer = null;
-    let checkTimer = null;
-    let endedArmed = false;
-    let lastAdvanceAt = 0;
-    let cid = "";
-    let leaves = [];
-    let cursor = 0;
-    let currentLeaf = null;
-    let currentSources = [];
-    let subIndex = 0;
-    async function sourcesOf(leaf) {
-      const key = String(leaf.nodeId);
-      const primed = peekUnitLearn(key);
-      if (primed !== null) return parseUnitSources(primed);
-      const captured = await waitUnitLearn(key, UNIT_INTERCEPT_TIMEOUT_MS);
-      if (captured !== null) return parseUnitSources(captured);
-      log8.debug(`未截获 getUnitLearn（${key}），主动补发`);
+  var log9 = scoped("uooc/autoplay");
+  var NAV_WAIT_MS = 6e3;
+  var VIEW_WAIT_MS = 8e3;
+  var VIDEO_SLACK_MS = 10 * 60 * 1e3;
+  var VIDEO_MIN_MS = 5 * 60 * 1e3;
+  var VIDEO_MAX_MS = 6 * 60 * 60 * 1e3;
+  var CATALOG_ROOT_SEL = "div.panel-catalog ul.rank-1";
+  var VIEWER_SEL = "div.showViewer";
+  var listeners3 = /* @__PURE__ */ new Set();
+  var host = null;
+  var running = false;
+  var statusText = "已停止";
+  var token = null;
+  function notify() {
+    for (const fn of [...listeners3]) {
       try {
-        const res = await request({
-          url: unitLearnUrl(cid, leaf),
-          responseType: "json",
-          timeoutMs: 15e3
-        });
-        if (res.status === 200 && res.json !== void 0) {
-          primeUnitLearn(key, res.json);
-          return parseUnitSources(res.json);
-        }
-        log8.warn(`补发 getUnitLearn 失败（${key}）：HTTP ${res.status}`);
-      } catch (err) {
-        log8.warn(`补发 getUnitLearn 异常（${key}）：${String(err)}`);
+        fn();
+      } catch {
       }
-      return [];
     }
-    async function loadCatalog() {
-      const primed = peekCatalog(cid);
-      if (primed !== null) return flattenLeaves(parseCatalogTree(primed));
-      const body = await catalogWhenSiteGivesUp();
-      if (body === null) return null;
-      return flattenLeaves(parseCatalogTree(body));
+  }
+  function setStatus(text) {
+    statusText = text;
+    notify();
+  }
+  function autoplayStatus() {
+    return { running, text: statusText };
+  }
+  function subscribeAutoplay(fn) {
+    listeners3.add(fn);
+    return () => {
+      listeners3.delete(fn);
+    };
+  }
+  function startAutoplay(api) {
+    host = api;
+    log9.debug("连播已装载（等待用户点【开始连播】）");
+    return () => {
+      autoplayStop();
+      host = null;
+      listeners3.clear();
+    };
+  }
+  function autoplayStart() {
+    if (running) return;
+    if (host === null) {
+      log9.warn("还没装载就点了【开始连播】，忽略");
+      return;
     }
-    function catalogWhenSiteGivesUp() {
-      return new Promise((resolve2) => {
-        let settled = false;
-        let armTimer = 0;
-        let hardTimer = 0;
-        const done = (body) => {
-          if (settled) return;
-          settled = true;
-          window.clearTimeout(armTimer);
-          window.clearTimeout(hardTimer);
-          window.removeEventListener("load", arm);
-          resolve2(body);
-        };
-        const arm = () => {
-          armTimer = window.setTimeout(() => {
-            void (async () => {
-              log8.debug(`页面已 load 且站点仍未发 getCatalogList（${cid}），主动补发`);
-              try {
-                const res = await request({
-                  url: catalogListUrl(cid),
-                  responseType: "json",
-                  timeoutMs: 2e4
-                });
-                if (res.status === 200 && res.json !== void 0) {
-                  primeCatalog(cid, res.json);
-                  done(res.json);
-                  return;
-                }
-                log8.warn(`补发 getCatalogList 失败：HTTP ${res.status}`);
-              } catch (err) {
-                log8.warn(`补发 getCatalogList 异常：${String(err)}`);
-              }
-            })();
-          }, FALLBACK_AFTER_LOAD_MS);
-        };
-        void waitCatalog(cid, CATALOG_HARD_TIMEOUT_MS).then((body) => {
-          if (body !== null) done(body);
-        });
-        if (document.readyState === "complete") arm();
-        else window.addEventListener("load", arm, { once: true });
-        hardTimer = window.setTimeout(() => done(null), CATALOG_HARD_TIMEOUT_MS);
+    const root = catalogRoot();
+    if (root === null) {
+      const msg = "当前页面上找不到课程目录，无法连播（要先打开旧版课程页）";
+      log9.error(msg);
+      host.toast(msg, "error");
+      setStatus(msg);
+      return;
+    }
+    running = true;
+    const t = { cancelled: false };
+    token = t;
+    setStatus("连播中：正在定位当前项…");
+    log9.info("连播开始");
+    void loop(t);
+  }
+  function autoplayStop() {
+    if (!running && token === null) return;
+    running = false;
+    if (token !== null) token.cancelled = true;
+    token = null;
+    setStatus("已停止");
+    setCourseProgress(null);
+    log9.info("连播已停止");
+    notify();
+  }
+  function sleep(ms, t) {
+    return new Promise((resolve2) => {
+      if (t.cancelled) {
+        resolve2();
+        return;
+      }
+      const timer3 = window.setTimeout(() => {
+        window.clearTimeout(timer3);
+        resolve2();
+      }, ms);
+      const off = subscribeAutoplay(() => {
+        if (!t.cancelled) return;
+        off();
+        window.clearTimeout(timer3);
+        resolve2();
       });
+    });
+  }
+  async function waitFor(pred, timeoutMs, t, intervalMs2 = 200) {
+    const deadline = Date.now() + timeoutMs;
+    for (; ; ) {
+      if (t.cancelled) return false;
+      if (pred()) return true;
+      if (Date.now() >= deadline) return false;
+      await sleep(intervalMs2, t);
     }
-    function clearTimers() {
-      if (delayTimer !== null) {
-        window.clearTimeout(delayTimer);
-        delayTimer = null;
+  }
+  function textOf(node) {
+    return (node?.textContent ?? "").replace(/\s+/g, " ").trim();
+  }
+  function isComplete(el2) {
+    return el2.classList.contains("complete");
+  }
+  function isActive(el2) {
+    return el2.classList.contains("active");
+  }
+  async function clickNav(el2, t) {
+    const before = location.hash;
+    try {
+      el2.click();
+    } catch (err) {
+      log9.warn("click 抛异常", err instanceof Error ? err.message : String(err));
+    }
+    if (before !== location.hash) return true;
+    const href = el2.getAttribute("href");
+    if (href !== null && href !== "" && href !== before) {
+      log9.debug(`click 没换 hash，改用 href 兜底：${href}`);
+      location.hash = href;
+      await sleep(120, t);
+      return location.hash !== before;
+    }
+    return false;
+  }
+  function catalogRoot() {
+    return document.querySelector(CATALOG_ROOT_SEL);
+  }
+  function chapterLis(root) {
+    return [...root.children].filter(
+      (n) => n instanceof HTMLElement && n.classList.contains("catalogItem")
+    );
+  }
+  function chapterTitle(li) {
+    return li.querySelector(":scope > div.basic.chapter");
+  }
+  function chapterBody(li) {
+    return li.querySelector(":scope > ul.rank-2");
+  }
+  function sectionLis(chapterLi) {
+    const body = chapterBody(chapterLi);
+    if (body === null) return [];
+    return [...body.children].filter((n) => n instanceof HTMLElement);
+  }
+  function sectionTitle(li) {
+    return li.querySelector(":scope > div.basic");
+  }
+  function resourceList(sectionLi) {
+    return sectionLi.querySelector(":scope > div.resourcelist");
+  }
+  function resourceRows(sectionLi) {
+    const list = resourceList(sectionLi);
+    if (list === null) return [];
+    return [...list.children].filter(
+      (n) => n instanceof HTMLElement && n.classList.contains("basic")
+    );
+  }
+  function kindOf2(row3) {
+    const ico = row3.querySelector("span.tag-source-ico");
+    if (ico !== null) {
+      const ngIf = ico.getAttribute("ng-if") ?? "";
+      const m = /source\.type\s*==\s*(\d+)/.exec(ngIf);
+      if (m !== null && m[1] !== void 0) return classifySource(Number(m[1]));
+      for (const cls of [...ico.classList]) {
+        if (!cls.startsWith("icon-")) continue;
+        if (cls.includes("video")) return "video";
+        if (cls.includes("doc") || cls.includes("file") || cls.includes("attach")) return "attach";
+        if (cls.includes("text") || cls.includes("word")) return "text";
+        if (cls.includes("discuss") || cls.includes("talk") || cls.includes("note")) return "discussion";
+        if (cls.includes("quiz") || cls.includes("task") || cls.includes("exam")) return "quiz";
       }
-      if (checkTimer !== null) {
-        window.clearTimeout(checkTimer);
-        checkTimer = null;
-      }
     }
-    function finish2(reason) {
-      phase = "idle";
-      clearTimers();
-      log8.info(`连播结束：${reason}`);
-      host.toast(`连播结束：${reason}`, "info");
+    return "unknown";
+  }
+  function rowName(row3) {
+    return textOf(row3.querySelector("span.tag-source-name")) || textOf(row3);
+  }
+  function posOf(root) {
+    const chs = chapterLis(root);
+    let chapterIdx = -1;
+    for (let i = 0; i < chs.length; i += 1) {
+      const li = chs[i];
+      if (li === void 0) continue;
+      const title = chapterTitle(li);
+      if (title !== null && isActive(title) || chapterBody(li) !== null) chapterIdx = i;
     }
-    function pause(reason) {
-      paused = true;
-      phase = "idle";
-      clearTimers();
-      log8.info(`连播暂停：${reason}`);
-      host.toast(`连播已暂停：${reason}（${AUTOPLAY_HANDLE_KEY}.resume() 可恢复）`, "warn");
+    if (chapterIdx < 0) return { chapterIdx: -1, sectionIdx: -1, resourceIdx: -1 };
+    const chapLi = chs[chapterIdx];
+    if (chapLi === void 0) return { chapterIdx: -1, sectionIdx: -1, resourceIdx: -1 };
+    const secs = sectionLis(chapLi);
+    let sectionIdx = -1;
+    for (let i = 0; i < secs.length; i += 1) {
+      const li = secs[i];
+      if (li === void 0) continue;
+      const title = sectionTitle(li);
+      if (title !== null && isActive(title) || resourceList(li) !== null) sectionIdx = i;
     }
-    function next() {
-      if (stopped) return;
-      endedArmed = false;
-      subIndex++;
-      if (subIndex >= currentSources.length) {
-        cursor++;
-        currentLeaf = null;
-        currentSources = [];
-        subIndex = 0;
-      }
-      void step();
+    if (sectionIdx < 0) return { chapterIdx, sectionIdx: -1, resourceIdx: -1 };
+    const secLi = secs[sectionIdx];
+    if (secLi === void 0) return { chapterIdx, sectionIdx: -1, resourceIdx: -1 };
+    const rows = resourceRows(secLi);
+    let resourceIdx = -1;
+    for (let i = 0; i < rows.length; i += 1) {
+      const r = rows[i];
+      if (r !== void 0 && isActive(r)) resourceIdx = i;
     }
-    function scheduleHold() {
-      const ms = holdAfterMs();
-      if (ms <= 0) {
-        next();
-        return;
-      }
-      phase = "delay";
-      log8.debug(`播完，停留 ${ms}ms 后继续`);
-      delayTimer = window.setTimeout(() => {
-        delayTimer = null;
-        phase = "idle";
-        next();
-      }, ms);
+    return { chapterIdx, sectionIdx, resourceIdx };
+  }
+  function describe(root, pos) {
+    const chs = chapterLis(root);
+    const chapLi = chs[pos.chapterIdx];
+    const chap = textOf(chapLi !== void 0 ? chapterTitle(chapLi) : null);
+    const parts = [];
+    if (chap !== "") parts.push(chap);
+    if (chapLi !== void 0 && pos.sectionIdx >= 0) {
+      const secLi = sectionLis(chapLi)[pos.sectionIdx];
+      const sec = textOf(secLi !== void 0 ? sectionTitle(secLi) : null);
+      if (sec !== "") parts.push(sec);
     }
-    function scheduleDelay() {
-      const ms = waitBeforeMs();
-      phase = "delay";
-      log8.debug(`等待 ${ms}ms 后继续`);
-      delayTimer = window.setTimeout(() => {
-        delayTimer = null;
-        phase = "idle";
-        next();
-      }, ms);
-    }
-    function navigateTo(hash) {
-      if (location.hash === hash) return;
-      log8.debug(`跳转 ${hash}`);
-      location.hash = hash;
-    }
-    function announce(action, src) {
-      host.toast(`即将${action}（${cursor + 1}/${leaves.length}）：${src.title}`, "info");
-    }
-    async function act(leaf, src) {
-      const kind = classifySource(src.type);
-      if (kind === "quiz") {
-        if (src.finished) {
-          log8.debug(`测验已完成，跳过（${src.title}）`);
-          scheduleDelay();
-          return;
+    if (chapLi !== void 0 && pos.sectionIdx >= 0) {
+      const secLi = sectionLis(chapLi)[pos.sectionIdx];
+      if (secLi !== void 0 && pos.resourceIdx >= 0) {
+        const row3 = resourceRows(secLi)[pos.resourceIdx];
+        if (row3 !== void 0) {
+          const name = rowName(row3);
+          if (name !== "") parts.push(`「${name}」`);
         }
-        if (isEnabled(SITE_ID, TOGGLE.AI_ANSWER)) {
-          if (src.taskId === null) {
-            log8.warn(`测验没有 task_id，进不去答题页：${src.title}`);
-            pause(`测验「${src.title}」没有 task_id，进不去答题页，请手动完成`);
-            return;
-          }
-          saveHandoff(String(src.taskId));
-          announce("打开", src);
-          log8.info(`AI 作答：整页前往答题页 tid=${src.taskId}（${src.title}）`);
-          location.href = examUrl(cid, src.taskId);
-          return;
-        }
-        if (isEnabled(SITE_ID, TOGGLE.SKIP_QUIZ)) {
-          log8.info(`跳过未完成的测验：${src.title}`);
-          scheduleDelay();
-          return;
-        }
-        pause(`遇到未完成的测验「${src.title}」，请手动完成`);
-        return;
-      }
-      if (kind === "discussion" && !isEnabled(SITE_ID, TOGGLE.SKIP_DISCUSSION)) {
-        pause(`遇到讨论「${src.title}」，请手动完成后恢复`);
-        return;
-      }
-      if (kind === "video") {
-        announce("播放", src);
-        navigateTo(sourceHash(cid, leaf, src.id));
-        phase = "video";
-        endedArmed = true;
-        log8.info(`开始播放：${leaf.titles.join(" / ")} / ${src.title}`);
-        checkTimer = window.setTimeout(() => {
-          checkTimer = null;
-          if (stopped || paused || phase !== "video") return;
-          const v = document.querySelector("video");
-          if (v !== null && v.ended) {
-            log8.debug("视频已在片尾，直接推进");
-            phase = "idle";
-            scheduleHold();
-          }
-        }, VIDEO_END_CHECK_MS);
-        return;
-      }
-      if (kind === "attach") {
-        const skipOpen = isEnabled(SITE_ID, TOGGLE.SKIP_ATTACHMENT);
-        announce(skipOpen ? "跳转" : "打开", src);
-        navigateTo(sourceHash(cid, leaf, src.id));
-        if (skipOpen) {
-          log8.info(`附件只路过，不打开文件：${src.title}`);
-          scheduleDelay();
-          return;
-        }
-        const doc = src.documents[0];
-        const uri = doc === void 0 ? "" : doc.uri;
-        const name = doc === void 0 ? src.title : doc.title;
-        if (uri !== "") {
-          const how = openInBackgroundTab(uri);
-          if (how === "ctrl") {
-            log8.info(`打开附件（合成 Ctrl+左键，后台标签页）：${name}`);
-            log8.debug("1.2 秒后会用 GM_openInTab 兜一次；看到两个标签页就说明 Ctrl+左键生效了");
-          } else if (how === "gm") {
-            log8.info(`打开附件（GM_openInTab 后台标签页）：${name}`);
-          } else {
-            log8.warn(`附件打开失败：${name}`);
-            host.toast(`附件「${name}」打开失败，请手动查看`, "warn");
-          }
-        } else {
-          log8.warn(`附件没有 document[].uri（${src.title}）`);
-        }
-        scheduleDelay();
-        return;
-      }
-      if (kind === "unknown") log8.debug(`未知资源类型 ${src.type}，按文本处理（${src.title}）`);
-      if (kind === "text" && isEnabled(SITE_ID, TOGGLE.SKIP_TEXT)) {
-        announce("跳转", src);
-        navigateTo(sourceHash(cid, leaf, src.id));
-        log8.debug(`文本不停留：${src.title}`);
-        next();
-        return;
-      }
-      announce("跳转", src);
-      navigateTo(sourceHash(cid, leaf, src.id));
-      scheduleDelay();
-    }
-    async function step() {
-      for (; ; ) {
-        if (stopped || paused) return;
-        const leaf = leaves[cursor];
-        if (leaf === void 0) {
-          finish2("已到目录末尾");
-          return;
-        }
-        if (currentLeaf !== leaf) {
-          const sources = await sourcesOf(leaf);
-          if (stopped || paused) return;
-          currentLeaf = leaf;
-          currentSources = sources.filter((s) => classifySource(s.type) !== "unknown");
-          subIndex = 0;
-          write(cursorKey(), leaf.nodeId);
-        }
-        if (subIndex >= currentSources.length) {
-          if (currentSources.length === 0) log8.debug(`跳过无资源的叶子 ${leaf.nodeId} ${leaf.title}`);
-          cursor++;
-          currentLeaf = null;
-          currentSources = [];
-          subIndex = 0;
-          continue;
-        }
-        const src = currentSources[subIndex];
-        if (src === void 0) {
-          cursor++;
-          currentLeaf = null;
-          currentSources = [];
-          subIndex = 0;
-          continue;
-        }
-        await act(leaf, src);
-        return;
       }
     }
-    const onEnded = (ev) => {
-      const el2 = ev.target;
-      if (el2 === null || el2.tagName !== "VIDEO") return;
-      if (stopped || paused) return;
-      if (!endedArmed) {
-        log8.debug("忽略未布防的 ended（当前项不是视频）");
+    return parts.join(" ");
+  }
+  function viewerOf() {
+    const box = document.querySelector(VIEWER_SEL) ?? document.body;
+    const video = box.querySelector("video");
+    const frames = [...box.querySelectorAll("iframe")];
+    const hasQuizFrame = frames.some((f) => (f.getAttribute("src") ?? "").includes("/exam/"));
+    return { video, hasFrame: frames.length > 0, hasQuizFrame };
+  }
+  function waitVideoEnd(video, t) {
+    return new Promise((resolve2) => {
+      if (video.ended) {
+        resolve2(true);
         return;
       }
-      if (!el2.isConnected) {
-        log8.debug("忽略已脱离文档的 ended（播放器被换掉了）");
-        return;
-      }
-      const now = Date.now();
-      if (now - lastAdvanceAt < ENDED_DEDUPE_MS) {
-        log8.debug("忽略重复的 ended");
-        return;
-      }
-      endedArmed = false;
-      lastAdvanceAt = now;
-      clearTimers();
-      phase = "idle";
-      log8.info("视频播放完毕，准备进入下一项");
-      scheduleHold();
-    };
-    function boot2() {
-      const hashAtBoot = location.hash;
-      const found = courseIdFromLocation(location.pathname, hashAtBoot);
-      if (found === null) {
-        log8.warn(`拿不到课程 id，连播不启动（pathname=${location.pathname}，hash=${hashAtBoot}）`);
-        return;
-      }
-      cid = found;
-      void (async () => {
-        const list = await loadCatalog();
-        if (stopped) return;
-        if (list === null || list.length === 0) {
-          host.toast("连播启动失败：没拿到课程目录", "error");
-          return;
-        }
-        leaves = list;
-        const { index, by } = resolveCursor(hashAtBoot);
-        cursor = index;
-        log8.info(
-          `连播已启动：cid=${cid}，叶子 ${leaves.length} 个（未完成 ${countUnfinished()} 个），从第 ${cursor + 1} 个开始（装载时 hash=${show(hashAtBoot)}；对齐=${by}；目录到货时 hash=${show(location.hash)}）`
-        );
-        host.toast("自动连播已启动", "info");
-        void step();
-      })();
-    }
-    function show(hash) {
-      return hash === "" ? "（空）" : hash;
-    }
-    function cursorKey() {
-      return `uooc:autoplay:cursor:${cid}`;
-    }
-    function resolveCursor(hashAtBoot) {
-      const byHash = (hash) => {
-        const chain = currentChainFromHash(hash);
-        return chain === null ? -1 : findLeafIndex(leaves, chain);
+      const rate = video.playbackRate > 0 ? video.playbackRate : 1;
+      const remaining = Number.isFinite(video.duration) ? (video.duration - video.currentTime) / rate : 0;
+      const budget = Math.min(VIDEO_MAX_MS, Math.max(VIDEO_MIN_MS, remaining * 1e3 + VIDEO_SLACK_MS));
+      let done = false;
+      const finish2 = (ok) => {
+        if (done) return;
+        done = true;
+        window.clearTimeout(timer3);
+        video.removeEventListener("ended", onEnded);
+        video.removeEventListener("error", onError);
+        off();
+        resolve2(ok);
       };
-      const onPath = leaves.findIndex((leaf) => leaf.learning === 1);
-      if (onPath >= 0) {
-        const firstUnfinished = firstUnfinishedFrom(onPath);
-        if (firstUnfinished >= 0) {
-          return {
-            index: firstUnfinished,
-            by: `站点 learning 链上的第一个未完成（${firstUnfinished + 1}）`
-          };
+      const onEnded = () => finish2(true);
+      const onError = () => finish2(false);
+      const timer3 = window.setTimeout(() => finish2(video.ended), budget);
+      const off = subscribeAutoplay(() => {
+        if (t.cancelled) finish2(false);
+      });
+      video.addEventListener("ended", onEnded);
+      video.addEventListener("error", onError);
+      if (t.cancelled) finish2(false);
+    });
+  }
+  async function loop(t) {
+    let clickFails = 0;
+    while (running && !t.cancelled) {
+      const root = catalogRoot();
+      if (root === null) {
+        await halt(t, "找不到课程目录 DOM（div.panel-catalog ul.rank-1），连播停止");
+        return;
+      }
+      const pos = posOf(root);
+      publishCourseProgress(root, pos);
+      if (pos.chapterIdx < 0) {
+        await halt(t, "目录里没有「当前项」标记 —— 请你先点开一节，脚本会跟着你走");
+        return;
+      }
+      const chapLi = chapterLis(root)[pos.chapterIdx];
+      if (chapLi === void 0) {
+        await halt(t, "目录结构变了，连播停止");
+        return;
+      }
+      if (chapterBody(chapLi) === null) {
+        setStatus(`连播中：正在展开 ${textOf(chapterTitle(chapLi))}`);
+        await clickNav(chapterTitle(chapLi) ?? chapLi, t);
+        await waitFor(() => chapterBody(chapLi) !== null, NAV_WAIT_MS, t);
+        continue;
+      }
+      const secs = sectionLis(chapLi);
+      if (pos.sectionIdx < 0) {
+        const next = secs.findIndex((li) => {
+          if (li.hasAttribute(SKIP_ATTR)) return false;
+          const title = sectionTitle(li);
+          return title === null || !isComplete(title);
+        });
+        if (next < 0) {
+          if (!await goNextChapter(root, pos.chapterIdx, t)) return;
+          continue;
         }
-        const chainEnd = lastOnChainFrom(onPath);
-        const after = firstUnfinishedFrom(chainEnd + 1);
-        if (after >= 0) {
-          return { index: after, by: `站点 learning 链已学完，往后第一个未完成（${after + 1}）` };
+        const target2 = sectionTitle(secs[next] ?? void 0);
+        setStatus(`连播中：正在进入 ${describe(root, { ...pos, sectionIdx: next, resourceIdx: -1 })}`);
+        if (!await clickNav(target2 ?? secs[next], t)) {
+          const failed = secs[next];
+          if (failed !== void 0) failed.setAttribute(SKIP_ATTR, "1");
+          clickFails += 1;
+          log9.warn("节点不动，标记跳过");
+          if (clickFails > 3) await halt(t, "连续几次都点不动目录，连播停止");
+          continue;
         }
-        return { index: onPath, by: `站点 learning 链（${onPath + 1}，整门课都已学完）` };
+        await sleep(waitBeforeMs(), t);
+        continue;
       }
-      const atBoot = byHash(hashAtBoot);
-      if (atBoot >= 0) return { index: atBoot, by: "装载时 hash" };
-      const atNow = byHash(location.hash);
-      if (atNow >= 0) return { index: atNow, by: "到货时 hash" };
-      const saved = read(cursorKey(), null);
-      if (saved !== null) {
-        const at = leaves.findIndex((leaf) => leaf.nodeId === saved);
-        if (at >= 0) return { index: at, by: `记住的叶子 ${saved}` };
+      const secLi = secs[pos.sectionIdx];
+      if (secLi === void 0) {
+        if (!await goNextChapter(root, pos.chapterIdx, t)) return;
+        continue;
       }
-      const unfinished = firstUnfinishedFrom(0);
-      if (unfinished >= 0) return { index: unfinished, by: "第一个未完成的叶子" };
-      return { index: 0, by: "没有可用线索，从第 1 个开始" };
-    }
-    function firstUnfinishedFrom(from) {
-      const start = leaves[from];
-      if (start === void 0) return -1;
-      const requireSameChain = start.learning === 1;
-      for (let i = from; i < leaves.length; i += 1) {
-        const leaf = leaves[i];
-        if (leaf === void 0) continue;
-        if (requireSameChain && leaf.learning !== 1) break;
-        if (leaf.finished !== 1) return i;
+      if (resourceList(secLi) === null) {
+        setStatus(`连播中：正在展开 ${describe(root, pos)}`);
+        await clickNav(sectionTitle(secLi) ?? secLi, t);
+        await waitFor(() => resourceList(secLi) !== null, NAV_WAIT_MS, t);
+        continue;
       }
-      return -1;
-    }
-    function lastOnChainFrom(from) {
-      if (leaves[from]?.learning !== 1) return from;
-      let end = from;
-      while (leaves[end + 1]?.learning === 1) end += 1;
-      return end;
-    }
-    function countUnfinished() {
-      return leaves.reduce((n, leaf) => leaf.finished === 1 ? n : n + 1, 0);
-    }
-    function uninstall() {
-      if (stopped) return;
-      stopped = true;
-      paused = false;
-      clearTimers();
-      document.removeEventListener("ended", onEnded, true);
-      const g = pageOrSelf();
-      if (g[AUTOPLAY_HANDLE_KEY] === handle) delete g[AUTOPLAY_HANDLE_KEY];
-    }
-    const handle = {
-      resume() {
-        if (stopped) return;
-        paused = false;
-        log8.info("连播已恢复");
-        host.toast("连播已恢复", "info");
-        void step();
-      },
-      next() {
-        if (stopped) return;
-        paused = false;
-        clearTimers();
-        next();
-      },
-      stop() {
-        uninstall();
-      },
-      status() {
-        return { running: !stopped, paused, cursor, total: leaves.length };
+      const rows = resourceRows(secLi);
+      let nextIdx = -1;
+      for (let i = pos.resourceIdx + 1; i < rows.length; i += 1) {
+        const r = rows[i];
+        if (r === void 0) continue;
+        if (r.hasAttribute(SKIP_ATTR)) continue;
+        if (isComplete(r)) continue;
+        nextIdx = i;
+        break;
       }
-    };
-    document.addEventListener("ended", onEnded, true);
-    pageOrSelf()[AUTOPLAY_HANDLE_KEY] = handle;
-    if (isEnabled(SITE_ID, TOGGLE.AUTO_NEXT)) {
-      boot2();
+      if (nextIdx < 0) {
+        const after = secs.findIndex((li) => li === secLi);
+        const nextSec = secs.findIndex(
+          (li, i) => i > after && !li.hasAttribute(SKIP_ATTR) && !isComplete(sectionTitle(li) ?? li)
+        );
+        if (nextSec >= 0) {
+          const target2 = sectionTitle(secs[nextSec] ?? void 0);
+          setStatus(`连播中：正在进入 ${describe(root, { ...pos, sectionIdx: nextSec, resourceIdx: -1 })}`);
+          if (!await clickNav(target2 ?? secs[nextSec], t)) {
+            const failed = secs[nextSec];
+            if (failed !== void 0) failed.setAttribute(SKIP_ATTR, "1");
+            log9.warn("下一节点不动，标记跳过");
+          }
+          await sleep(waitBeforeMs(), t);
+          continue;
+        }
+        if (!await goNextChapter(root, pos.chapterIdx, t)) return;
+        continue;
+      }
+      const cur = pos.resourceIdx >= 0 ? rows[pos.resourceIdx] : void 0;
+      const target = rows[nextIdx] ?? void 0;
+      setStatus(`连播中：${describe(root, { ...pos, resourceIdx: nextIdx })}`);
+      if (cur !== void 0 && cur === target) {
+        await handleCurrent(target, t);
+        continue;
+      }
+      const ok = await clickNav(target, t);
+      if (!ok) {
+        clickFails += 1;
+        log9.warn(`点不动这一项，跳过：${rowName(target)}`);
+        await skipOne(t);
+        if (clickFails > 20) await halt(t, "连续点不动太多次，连播停止");
+        continue;
+      }
+      clickFails = 0;
+      await sleep(waitBeforeMs(), t);
+      await handleCurrent(target, t);
+    }
+  }
+  function publishCourseProgress(root, pos) {
+    const chs = chapterLis(root);
+    const chapLi = chs[pos.chapterIdx];
+    const label = describe(root, pos);
+    if (chapLi !== void 0 && pos.sectionIdx >= 0) {
+      const secLi = sectionLis(chapLi)[pos.sectionIdx];
+      if (secLi !== void 0 && pos.resourceIdx >= 0) {
+        const rows = resourceRows(secLi);
+        setCourseProgress({ index: pos.resourceIdx + 1, total: rows.length, label });
+        return;
+      }
+      setCourseProgress({ index: pos.sectionIdx + 1, total: sectionLis(chapLi).length, label });
+      return;
+    }
+    if (pos.chapterIdx >= 0) {
+      setCourseProgress({ index: pos.chapterIdx + 1, total: chs.length, label });
+    }
+  }
+  var SKIP_ATTR = "data-sztb-skip";
+  async function skipOne(t) {
+    const root = catalogRoot();
+    if (root === null) return;
+    const pos = posOf(root);
+    if (pos.chapterIdx < 0 || pos.sectionIdx < 0 || pos.resourceIdx < 0) {
+      await sleep(300, t);
+      return;
+    }
+    const chapLi = chapterLis(root)[pos.chapterIdx];
+    if (chapLi === void 0) return;
+    const secLi = sectionLis(chapLi)[pos.sectionIdx];
+    if (secLi === void 0) return;
+    const rows = resourceRows(secLi);
+    const idx = pos.resourceIdx + 1;
+    const row3 = rows[idx];
+    if (row3 !== void 0) {
+      row3.setAttribute(SKIP_ATTR, "1");
+      log9.debug(`标记跳过：${rowName(row3)}`);
+    }
+    await sleep(200, t);
+  }
+  async function goNextChapter(root, chapterIdx, t) {
+    const chs = chapterLis(root);
+    let nextLi;
+    for (let i = chapterIdx + 1; i < chs.length; i += 1) {
+      const li = chs[i];
+      if (li === void 0) continue;
+      if (li.hasAttribute(SKIP_ATTR)) continue;
+      nextLi = li;
+      break;
+    }
+    if (nextLi === void 0) {
+      const anyLeft = chs.slice(chapterIdx + 1).some((li) => !li.hasAttribute(SKIP_ATTR));
+      if (!anyLeft) {
+        await halt(t, "已经是最后一章最后一节，连播结束");
+        return false;
+      }
+      nextLi = chs[chapterIdx + 1];
+    }
+    if (nextLi === void 0) {
+      await halt(t, "已经是最后一章最后一节，连播结束");
+      return false;
+    }
+    const title = chapterTitle(nextLi);
+    setStatus(`连播中：正在进入下一章 ${textOf(title)}`);
+    const ok = await clickNav(title ?? nextLi, t);
+    if (!ok) {
+      log9.warn(`下一章点不动，跳过去：${textOf(title)}`);
+      nextLi.setAttribute(SKIP_ATTR, "1");
+    }
+    await waitFor(() => chapterBody(nextLi) !== null, NAV_WAIT_MS, t);
+    await sleep(waitBeforeMs(), t);
+    return true;
+  }
+  async function handleCurrent(row3, t) {
+    if (isComplete(row3)) {
+      log9.debug("这一项站点标了完成，跳过");
+      return;
+    }
+    const kind = kindOf2(row3);
+    const name = rowName(row3);
+    setStatus(`连播中：正在处理「${name}」（${KIND_TEXT[kind]}）`);
+    await waitFor(() => viewerReady(), VIEW_WAIT_MS, t);
+    const v = viewerOf();
+    if (v.video !== null || kind === "video") {
+      if (v.video === null) {
+        log9.warn(`看着像视频但没找到 <video>，等一会儿就往下走：「${name}」`);
+        await sleep(holdAfterMs(), t);
+        return;
+      }
+      const done = await waitVideoEnd(v.video, t);
+      log9.info(`视频「${name}」${done ? "已播完" : "没等到播完（被停止或出错）"}`);
+      if (t.cancelled || !running) return;
+      await sleep(holdAfterMs(), t);
+      return;
+    }
+    if (kind === "quiz" || v.hasQuizFrame) {
+      const tid = quizTidOnPage();
+      if (tid === null) {
+        log9.warn(`走到测验「${name}」但 iframe 地址里读不出 tid，停下等你`);
+        await halt(t, `走到测验「${name}」但读不出 tid，连播停下等你`);
+        return;
+      }
+      if (isEnabled(SITE_ID, TOGGLE.SKIP_QUIZ)) {
+        await halt(t, `走到测验「${name}」，【跳过测验】开着，连播停下等你`);
+        return;
+      }
+      if (!isEnabled(SITE_ID, TOGGLE.AI_ANSWER)) {
+        await halt(t, `走到测验「${name}」，AI 答题没开，连播停下等你`);
+        return;
+      }
+      if (host === null) return;
+      setStatus(`连播中：正在作答「${name}」`);
+      log9.info(`测验「${name}」→ tid=${tid}，交给 AI 作答`);
+      await runQuizAnswer(tid, host);
+      await sleep(holdAfterMs(), t);
+      return;
+    }
+    if (kind === "attach" && isEnabled(SITE_ID, TOGGLE.SKIP_ATTACHMENT)) {
+      log9.debug(`跳过附件「${name}」`);
+      return;
+    }
+    if (kind === "text" && isEnabled(SITE_ID, TOGGLE.SKIP_TEXT)) {
+      log9.debug(`跳过文本「${name}」`);
+      return;
+    }
+    if (kind === "discussion" && isEnabled(SITE_ID, TOGGLE.SKIP_DISCUSSION)) {
+      log9.debug(`跳过讨论「${name}」，不等待`);
+      return;
+    }
+    if (v.hasFrame) {
+      log9.warn(`这一项是个 iframe 但没有 tid，认不出来是什么，等一会儿就往下走：「${name}」`);
     } else {
-      log8.debug("自动连播开关未开，只挂手柄不启动");
+      log9.warn(`认不出这一项是什么（类型 ${kind}），等一会儿就往下走：「${name}」`);
     }
-    return uninstall;
+    if (kind === "unknown") setStatus(`连播中：认不出「${name}」，稍等就继续`);
+    await sleep(holdAfterMs(), t);
+  }
+  function viewerReady() {
+    const box = document.querySelector(VIEWER_SEL);
+    if (box === null) return false;
+    if (box.querySelector("video") !== null) return true;
+    if (box.querySelector("iframe") !== null) return true;
+    return textOf(box).length > 0;
+  }
+  var KIND_TEXT = {
+    video: "视频",
+    attach: "附件",
+    text: "文本",
+    discussion: "讨论",
+    quiz: "测验",
+    unknown: "认不出来"
+  };
+  async function halt(t, reason) {
+    t.cancelled = true;
+    running = false;
+    token = null;
+    setStatus(`已停止 —— ${reason}`);
+    setCourseProgress(null);
+    log9.warn(reason);
+    host?.toast(reason, "warn");
+    notify();
   }
 
   // src/sites/uooc/tabs/ai.ts
-  var log9 = scoped("uooc/ai-tab");
+  var log10 = scoped("uooc/ai-tab");
   var UOOC_AI_TAB = {
     id: `${SITE_ID}:ai`,
     title: "AI 作答",
     order: 220,
     mount(root, ctx) {
-      root.appendChild(renderSiteSettings(SITE_ID, null, ctx, { onlyGroups: [GROUP.AI] }));
       const status = el("div", { class: "sztb-field-desc", text: "" });
+      const runBtn = el("button", {
+        class: "sztb-btn",
+        text: "开始作答",
+        attrs: { type: "button", "data-variant": "primary" },
+        on: {
+          click: () => {
+            void (async () => {
+              const tid = quizTidOnPage();
+              if (tid === null) {
+                status.textContent = "这个页面上没找到试卷：请先在目录里点开一个测验。";
+                ctx.host.toast("没找到试卷", "warn");
+                return;
+              }
+              runBtn.disabled = true;
+              status.textContent = `正在作答（tid=${tid}）…进度看【监视】标签页`;
+              try {
+                const r = await runQuizAnswer(tid, ctx.host);
+                status.textContent = r === null ? "作答没跑完，详见【监视】页与日志" : `已填入 ${r.filled} 题，页面已有答案跳过 ${r.alreadyAnswered} 题${r.submitted ? "，已点提交" : "（未提交）"}`;
+              } finally {
+                runBtn.disabled = false;
+              }
+            })();
+          }
+        }
+      });
       const testBtn = el("button", {
         class: "sztb-btn",
         text: "测试连接",
@@ -3783,34 +4030,9 @@ ${options.desc ?? ""}
               status.textContent = "正在测试…";
               const r = await testConnection(cfg);
               status.textContent = r.detail;
-              log9.info(`测试连接：${r.ok ? "OK" : "失败"} — ${r.detail}`);
+              log10.info(`测试连接：${r.ok ? "OK" : "失败"} — ${r.detail}`);
               ctx.host.toast(r.ok ? "连接正常" : "连接失败，详见下方说明", r.ok ? "success" : "error");
               testBtn.disabled = false;
-            })();
-          }
-        }
-      });
-      const runBtn = el("button", {
-        class: "sztb-btn",
-        text: "现在开始作答（当前试卷）",
-        attrs: { type: "button", "data-variant": "primary" },
-        on: {
-          click: () => {
-            void (async () => {
-              const tid = tidFromLocation();
-              if (tid === null) {
-                status.textContent = "当前页面不是一份试卷（地址里找不到 tid）";
-                ctx.host.toast("请先打开一份试卷", "warn");
-                return;
-              }
-              runBtn.disabled = true;
-              status.textContent = "正在作答…（进度看【日志】标签页）";
-              try {
-                const r = await runQuizAnswer(tid, ctx.host);
-                status.textContent = r === null ? "作答未完成，详见日志" : `已填入 ${r.filled} 题${r.submitted ? "，已点提交" : "（未提交）"}`;
-              } finally {
-                runBtn.disabled = false;
-              }
             })();
           }
         }
@@ -3820,11 +4042,15 @@ ${options.desc ?? ""}
           "div",
           { class: "sztb-field" },
           el("div", { class: "sztb-group-title", text: "操作" }),
-          el("div", { class: "sztb-field-desc", text: "答完不会自动交卷：会先弹确认框，你点了才会提交。" }),
-          el("div", { class: "sztb-modal-foot" }, testBtn, runBtn),
+          el("div", {
+            class: "sztb-field-desc",
+            text: "答完不会自动交卷：会先弹确认框，你点了才会提交（还要你手动点一下人机验证码）。"
+          }),
+          el("div", { class: "sztb-modal-foot" }, runBtn, testBtn),
           status
         )
       );
+      root.appendChild(renderSiteSettings(SITE_ID, null, ctx, { onlyGroups: [GROUP.AI] }));
     }
   };
 
@@ -3834,7 +4060,148 @@ ${options.desc ?? ""}
     title: "连播",
     order: 210,
     mount(root, ctx) {
+      const startBtn = el("button", {
+        class: "sztb-btn",
+        text: "开始连播",
+        attrs: { type: "button", "data-variant": "primary" }
+      });
+      const stopBtn = el("button", {
+        class: "sztb-btn",
+        text: "停止连播",
+        attrs: { type: "button", "data-variant": "danger" }
+      });
+      startBtn.addEventListener("click", () => {
+        autoplayStart();
+      });
+      stopBtn.addEventListener("click", () => {
+        autoplayStop();
+      });
+      const statusLine = el("div", { class: "sztb-field-desc" });
+      const sync = () => {
+        const s = autoplayStatus();
+        statusLine.textContent = s.text;
+        startBtn.disabled = s.running;
+        stopBtn.disabled = !s.running;
+      };
+      sync();
+      const off = subscribeAutoplay(() => {
+        if (!root.isConnected) {
+          off();
+          return;
+        }
+        sync();
+      });
+      root.appendChild(el("div", { class: "sztb-toolbar" }, startBtn, stopBtn));
+      root.appendChild(statusLine);
       root.appendChild(renderSiteSettings(SITE_ID, null, ctx, { onlyGroups: [GROUP.AUTOPLAY] }));
+    }
+  };
+
+  // src/sites/uooc/tabs/monitor.ts
+  var log11 = scoped("uooc/monitor-tab");
+  var PHASE_TEXT = {
+    idle: "空闲",
+    fetching: "正在拉题…",
+    answering: "正在问模型…",
+    filling: "正在回填页面…",
+    submitting: "已点提交，等待站点结果…（人机验证码要你手动点）",
+    retrying: "未通过，正在重答低分题…",
+    done: "已结束",
+    error: "出错"
+  };
+  var STATUS_TEXT = {
+    pending: "等待中",
+    answered: "已作答",
+    failed: "没答出",
+    skipped: "跳过"
+  };
+  function bar(done, total) {
+    const pct = total <= 0 ? 0 : Math.round(done / total * 100);
+    const fill = el("div", { class: "sztb-bar-fill" });
+    fill.style.width = `${pct}%`;
+    return el(
+      "div",
+      { class: "sztb-field" },
+      el("div", { class: "sztb-field-desc", text: `${done} / ${total}（${pct}%）` }),
+      el("div", { class: "sztb-bar" }, fill)
+    );
+  }
+  function questionRow(q) {
+    const samples = q.samples.length === 0 ? "—" : q.samples.map((s) => s === null ? "✗" : s).join(" → ");
+    return el(
+      "tr",
+      {},
+      el("td", { text: String(q.no) }),
+      el("td", { text: q.typeText === "" ? "—" : q.typeText }),
+      el("td", { text: STATUS_TEXT[q.status] }),
+      el("td", { text: String(q.requests) }),
+      el("td", { text: samples }),
+      el("td", { text: q.answer === "" ? "—" : q.answer }),
+      el("td", { text: q.note === "" ? "—" : q.note })
+    );
+  }
+  var UOOC_MONITOR_TAB = {
+    id: `${SITE_ID}:monitor`,
+    title: "监视",
+    order: 230,
+    mount(root, ctx) {
+      const box = el("div", { class: "sztb-field" });
+      root.appendChild(box);
+      let off = null;
+      const draw = () => {
+        const s = monitorState();
+        box.textContent = "";
+        const course = s.course;
+        if (course === null) {
+          box.appendChild(el("div", { class: "sztb-group-title", text: "课程进度" }));
+          box.appendChild(el("div", { class: "sztb-field-desc", text: "连播还没开始（在【连播】页点【开始连播】）" }));
+        } else {
+          box.appendChild(el("div", { class: "sztb-group-title", text: "课程进度" }));
+          box.appendChild(el("div", { class: "sztb-field-desc", text: course.label }));
+          box.appendChild(bar(course.index, course.total));
+        }
+        box.appendChild(el("div", { class: "sztb-group-title", text: "AI 答题进度" }));
+        const quiz2 = s.quiz;
+        if (quiz2 === null) {
+          box.appendChild(el("div", { class: "sztb-field-desc", text: "本次会话还没跑过答题" }));
+        } else {
+          box.appendChild(el("div", { class: "sztb-field-desc", text: `任务 tid=${quiz2.tid} —— ${PHASE_TEXT[quiz2.phase]}` }));
+          if (quiz2.message !== "") box.appendChild(el("div", { class: "sztb-field-desc", text: quiz2.message }));
+          box.appendChild(bar(quiz2.done, quiz2.total));
+          const table = el(
+            "table",
+            { class: "sztb-table" },
+            el(
+              "thead",
+              {},
+              el(
+                "tr",
+                {},
+                el("th", { text: "题号" }),
+                el("th", { text: "题型" }),
+                el("th", { text: "状态" }),
+                el("th", { text: "请求" }),
+                el("th", { text: "每次答案" }),
+                el("th", { text: "定稿" }),
+                el("th", { text: "备注" })
+              )
+            ),
+            el("tbody", {}, ...quiz2.questions.map(questionRow))
+          );
+          box.appendChild(table);
+        }
+        void ctx;
+      };
+      draw();
+      off = subscribeMonitor(() => {
+        if (!root.isConnected) {
+          off?.();
+          off = null;
+          return;
+        }
+        draw();
+      });
+      log11.debug("监视页已挂载");
     }
   };
 
@@ -3849,7 +4216,7 @@ ${options.desc ?? ""}
   };
 
   // src/sites/uooc/video.ts
-  var log10 = scoped("uooc/video");
+  var log12 = scoped("uooc/video");
   var VIDEO_ID = "player_html5_api";
   var TARGET_RATE = 2;
   var RESCAN_DEBOUNCE_MS = 200;
@@ -3873,7 +4240,7 @@ ${options.desc ?? ""}
       if (stamps.length >= FIGHT_MAX) {
         mutedUntil = now + FIGHT_COOLDOWN_MS;
         stamps.length = 0;
-        log10.warn(`${label}在 ${FIGHT_WINDOW_MS / 1e3} 秒内被反复改回，暂停纠正 ${FIGHT_COOLDOWN_MS / 1e3} 秒`);
+        log12.warn(`${label}在 ${FIGHT_WINDOW_MS / 1e3} 秒内被反复改回，暂停纠正 ${FIGHT_COOLDOWN_MS / 1e3} 秒`);
         return false;
       }
       stamps.push(now);
@@ -3906,42 +4273,42 @@ ${options.desc ?? ""}
       const found = asVideo(doc.getElementById(VIDEO_ID)) ?? asVideo(doc.querySelector("video"));
       if (found !== null) {
         cachedFrameVideo = found;
-        log10.debug("播放器在同源 iframe 内，已切换查找目标");
+        log12.debug("播放器在同源 iframe 内，已切换查找目标");
         return found;
       }
     }
     return null;
   }
   function apply(v) {
-    const state = applied.get(v) ?? { rate: false, mute: false };
+    const state2 = applied.get(v) ?? { rate: false, mute: false };
     if (!v.paused && !v.ended) hasStarted.add(v);
     const wantRate = isEnabled(SITE_ID, TOGGLE.RATE_2X);
     if (wantRate) {
       if (v.playbackRate !== TARGET_RATE) {
         try {
           v.playbackRate = TARGET_RATE;
-          state.rate = true;
+          state2.rate = true;
         } catch {
         }
       }
-    } else if (state.rate && v.playbackRate === TARGET_RATE) {
+    } else if (state2.rate && v.playbackRate === TARGET_RATE) {
       v.playbackRate = 1;
-      state.rate = false;
+      state2.rate = false;
     }
     const wantMute = isEnabled(SITE_ID, TOGGLE.MUTE);
     if (wantMute) {
       if (!v.muted) {
         v.muted = true;
-        state.mute = true;
+        state2.mute = true;
       }
-    } else if (state.mute && v.muted) {
+    } else if (state2.mute && v.muted) {
       v.muted = false;
-      state.mute = false;
+      state2.mute = false;
     }
-    applied.set(v, state);
+    applied.set(v, state2);
     if (!announced.has(v)) {
       announced.add(v);
-      log10.info(
+      log12.info(
         `播放器助手已就绪：二倍速=${wantRate ? "开" : "关"}，静音=${wantMute ? "开" : "关"}，防失焦=${isEnabled(SITE_ID, TOGGLE.KEEP_PLAYING) ? "开" : "关"}（当前速率 ${v.playbackRate}x）`
       );
     }
@@ -3955,7 +4322,7 @@ ${options.desc ?? ""}
     const p = v.play();
     if (p !== void 0 && typeof p.catch === "function") {
       p.catch((err) => {
-        log10.debug(`抢播被拒绝：${err instanceof Error ? err.message : String(err)}`);
+        log12.debug(`抢播被拒绝：${err instanceof Error ? err.message : String(err)}`);
       });
     }
   }
@@ -4017,7 +4384,7 @@ ${options.desc ?? ""}
     document.addEventListener("volumechange", onMediaEvent, true);
     window.addEventListener("hashchange", schedule2);
     window.addEventListener("popstate", schedule2);
-    log10.debug("视频助手已挂载（二倍速 / 静音 / 防失焦）");
+    log12.debug("视频助手已挂载（二倍速 / 静音 / 防失焦）");
     return () => {
       stopped = true;
       if (timer3 !== null) {
@@ -4034,19 +4401,36 @@ ${options.desc ?? ""}
   }
 
   // src/sites/uooc/index.ts
-  var log11 = scoped("site/uooc");
+  var log13 = scoped("site/uooc");
   var HOSTS = ["uooc.net.cn", "*.uooc.net.cn"];
-  var PAGES = ["/home/learn/index*", "/home/learn/new/*", "/exam/*"];
-  var LEARN_PATH_PREFIX = "/home/learn/";
-  var EXAM_PATH_PREFIX = "/exam/";
+  var PAGES = ["/home/learn/index*", "/home/learn/new/*"];
+  var OLD_LEARN_PATH = "/home/learn/index";
+  var NEW_LEARN_PREFIX = "/home/learn/new/";
+  function isNewVersionPage() {
+    return location.pathname.startsWith(NEW_LEARN_PREFIX);
+  }
+  function isOldVersionPage() {
+    return location.pathname.startsWith(OLD_LEARN_PATH);
+  }
+  function oldVersionUrl(href = location.href) {
+    let u;
+    try {
+      u = new URL(href);
+    } catch {
+      return null;
+    }
+    if (!u.pathname.startsWith(NEW_LEARN_PREFIX)) return null;
+    u.pathname = OLD_LEARN_PATH;
+    return u.toString();
+  }
   var uoocAdapter = {
     id: SITE_ID,
     name: "UOOC 优课联盟",
     hosts: HOSTS,
     pages: PAGES,
-    tabs: [UOOC_VIDEO_TAB, UOOC_AUTOPLAY_TAB, UOOC_AI_TAB],
+    tabs: [UOOC_VIDEO_TAB, UOOC_AUTOPLAY_TAB, UOOC_AI_TAB, UOOC_MONITOR_TAB],
     /**
-     * 本站的设置**拆成了三个标签页**（视频 / 连播 / AI 作答），没有任何一个 id
+     * 本站的设置**拆成了多个标签页**（视频 / 连播 / AI 作答 / 监视），没有任何一个 id
      * 能代表全部 ⇒ 必须显式声明，否则公共【设置】页会把同一批开关再渲染一遍。
      * 详见 `src/sites/types.ts` 的 `settingsInOwnTabs`。
      */
@@ -4059,36 +4443,55 @@ ${options.desc ?? ""}
      */
     earlyInit() {
       registerUoocSettings();
+      if (isNewVersionPage()) {
+        log13.debug("新版课程页：不装接口嗅探（本次不启动任何 UOOC 功能）");
+        return;
+      }
       installUoocIntercept();
     },
     /** 挂载期：DOM 已就绪，可以开始接管播放器。 */
     init(ctx) {
       applyUoocSettings();
-      const onLearnPage = location.pathname.startsWith(LEARN_PATH_PREFIX);
-      const onExamPage = location.pathname.startsWith(EXAM_PATH_PREFIX);
-      let autoplayMounted = false;
-      if (onLearnPage) {
-        startVideoAssist();
-        startAutoplay({ toast: (message, kind) => ctx.panel.toast(message, kind) });
-        autoplayMounted = true;
-      } else if (onExamPage) {
-        if (isEnabled(SITE_ID, TOGGLE.AI_ANSWER)) {
-          log11.info("答题页：AI 作答开着，交给 ai/index.ts 自动接管");
-          void autoAnswerExamPage(ctx.panel);
-        } else {
-          log11.debug("答题页，但「AI 作答」开关没开，不自动作答");
-        }
-      } else {
-        log11.debug(`非学习页（${location.pathname}），本次不启动视频助手与连播`);
+      if (isNewVersionPage()) {
+        log13.info("新版课程页：只弹「要不要切旧版」的提示，本次不启动任何 UOOC 功能");
+        void promptSwitchToOld(ctx.panel);
+        return;
       }
-      log11.info(
-        `UOOC 适配器已启用：isFeaturePage=${String(ctx.isFeaturePage)}，路径=${location.pathname}，视频助手=${onLearnPage ? "已挂载" : "未挂载"}，连播=${autoplayMounted ? "已挂载" : "未挂载"}`
+      if (!isOldVersionPage()) {
+        log13.debug(`非旧版课程页（${location.pathname}），本次不启动任何 UOOC 功能`);
+        return;
+      }
+      startVideoAssist();
+      startAutoplay(ctx.panel);
+      log13.info(
+        `UOOC 旧版课程页已启用：isFeaturePage=${String(ctx.isFeaturePage)}，路径=${location.pathname}，视频助手=已挂载，连播=已装载（等用户点开始）`
       );
     }
   };
+  async function promptSwitchToOld(host2) {
+    const yes = await host2.confirm({
+      title: "检测到新版课程页",
+      body: "本插件只适配旧版课程页，是否切换到旧版？",
+      confirmText: "切换到旧版",
+      cancelText: "不用，我自己看"
+    });
+    if (!yes) {
+      log13.info("用户选择留在新版页 —— 面板挂空，不启动任何 UOOC 功能");
+      return;
+    }
+    const target = oldVersionUrl();
+    if (target === null) {
+      const msg = "拼不出旧版地址，请手动把地址栏的 /home/learn/new/<cid> 改成 /home/learn/index";
+      log13.error(msg);
+      host2.toast(msg, "error");
+      return;
+    }
+    log13.info(`切换到旧版：${target}`);
+    location.href = target;
+  }
 
   // src/sites/bkxk/settings.ts
-  var log12 = scoped("bkxk/settings");
+  var log14 = scoped("bkxk/settings");
   var SITE_ID2 = "bkxk";
   var TOGGLE2 = {
     /** 🔴 写接口总开关（抢课）。旧仓库红线 R1：默认 false，不得改 */
@@ -4233,13 +4636,13 @@ ${options.desc ?? ""}
     const raw = getValue(SITE_ID2, VALUE2.INTERVAL_MS);
     const ms = clampLimit("intervalMs", raw);
     if (isBelowRecommended("intervalMs", ms)) {
-      log12.warn(`请求间隔被设为 ${ms}ms，低于建议下限 ${LIMITS.intervalMs.recommended}ms`);
+      log14.warn(`请求间隔被设为 ${ms}ms，低于建议下限 ${LIMITS.intervalMs.recommended}ms`);
     }
     setIntervalMs(ms);
   }
 
   // src/sites/bkxk/session.ts
-  var log13 = scoped("bkxk/session");
+  var log15 = scoped("bkxk/session");
   var DEFAULT_CAMPUS = "01";
   var EMPTY_SESSION = {
     studentCode: "",
@@ -4286,19 +4689,19 @@ ${options.desc ?? ""}
   function buildSession(input) {
     const info = parseStudentInfo(input.studentInfo);
     const studentCode = info?.studentCode ?? "";
-    const token = input.token ?? "";
+    const token2 = input.token ?? "";
     return {
       studentCode,
       batchCode: info?.batchCode ?? null,
       campus: parseCampusCode(input.campus),
-      token,
-      loggedIn: studentCode !== "" && token !== ""
+      token: token2,
+      loggedIn: studentCode !== "" && token2 !== ""
     };
   }
   function readSession() {
     const ss = pageSessionStorage();
     if (ss === null) {
-      log13.warn("读不到 sessionStorage，按未登录处理");
+      log15.warn("读不到 sessionStorage，按未登录处理");
       return EMPTY_SESSION;
     }
     try {
@@ -4308,7 +4711,7 @@ ${options.desc ?? ""}
         token: ss.getItem("token")
       });
     } catch (err) {
-      log13.warn("读取会话失败，按未登录处理", err);
+      log15.warn("读取会话失败，按未登录处理", err);
       return EMPTY_SESSION;
     }
   }
@@ -4335,7 +4738,7 @@ ${options.desc ?? ""}
     const picked = CUSTOM_COLORS[(i % n + n) % n];
     return picked === void 0 ? "#e8f2fd" : picked;
   }
-  function asRecord(v) {
+  function asRecord2(v) {
     if (v === null || typeof v !== "object" || Array.isArray(v)) return null;
     return v;
   }
@@ -4343,7 +4746,7 @@ ${options.desc ?? ""}
     return typeof v === "string" ? v : "";
   }
   function slimCustomCourse(item) {
-    const o = asRecord(item);
+    const o = asRecord2(item);
     if (o === null) return null;
     const name = str(o["name"]).trim();
     if (name === "") return null;
@@ -4411,7 +4814,7 @@ ${options.desc ?? ""}
   }
 
   // src/sites/bkxk/legacy.ts
-  var log14 = scoped("bkxk/legacy");
+  var log16 = scoped("bkxk/legacy");
   var LEGACY_SETTINGS_KEY = "szubkxk.settings.v2";
   var LEGACY_STORE_PREFIX = "szubkxk.v2.";
   var LEGACY_DATA_KEY = {
@@ -4449,7 +4852,7 @@ ${options.desc ?? ""}
       return null;
     }
   }
-  function asRecord2(v) {
+  function asRecord3(v) {
     if (v === null || typeof v !== "object" || Array.isArray(v)) return null;
     return v;
   }
@@ -4460,7 +4863,7 @@ ${options.desc ?? ""}
       return { entries: [], report: ["旧数据已迁移过，本次跳过。"], notices: [], empty: true };
     }
     const entries2 = [];
-    const settings = asRecord2(parseJson(snapshot.settings));
+    const settings = asRecord3(parseJson(snapshot.settings));
     if (settings === null && snapshot.settings !== null) {
       notices.push("旧设置 `szubkxk.settings.v2` 无法解析，已跳过。");
     }
@@ -4509,7 +4912,7 @@ ${options.desc ?? ""}
     for (const blob of blobs) {
       const parsed = parseJson(blob.raw);
       if (parsed === null) continue;
-      if (asRecord2(parsed) === null) {
+      if (asRecord3(parsed) === null) {
         notices.push(`旧${blob.label}不是对象，已跳过。`);
         continue;
       }
@@ -4552,12 +4955,12 @@ ${options.desc ?? ""}
     const plan = planCustomCarry(site, common);
     write(CARRY_FLAG_KEY, true);
     if (plan.empty) {
-      for (const line of plan.notices) log14.warn(`搬运 · ${line}`);
+      for (const line of plan.notices) log16.warn(`搬运 · ${line}`);
       return [];
     }
     for (const e of plan.entries) write(e.key, e.value);
-    log14.info(`自定义课程搬运完成：${plan.report.join("；")}`);
-    for (const line of plan.notices) log14.warn(`搬运 · ${line}`);
+    log16.info(`自定义课程搬运完成：${plan.report.join("；")}`);
+    for (const line of plan.notices) log16.warn(`搬运 · ${line}`);
     return [...plan.report, ...plan.notices];
   }
   function readLegacySnapshot() {
@@ -4597,7 +5000,7 @@ ${options.desc ?? ""}
     const lines = [];
     if (plan.empty && plan.notices.length === 0) {
       write(MIGRATION_FLAG_KEY, true);
-      log14.info("未发现旧版数据，跳过迁移");
+      log16.info("未发现旧版数据，跳过迁移");
       return [];
     }
     for (const e of plan.entries) {
@@ -4605,9 +5008,9 @@ ${options.desc ?? ""}
     }
     write(MIGRATION_FLAG_KEY, true);
     lines.push(...plan.report, ...plan.notices);
-    log14.info(`旧数据迁移完成：写入 ${plan.entries.length} 项`);
-    for (const line of plan.report) log14.info(`迁移 · ${line}`);
-    for (const line of plan.notices) log14.warn(`迁移 · ${line}`);
+    log16.info(`旧数据迁移完成：写入 ${plan.entries.length} 项`);
+    for (const line of plan.report) log16.info(`迁移 · ${line}`);
+    for (const line of plan.notices) log16.warn(`迁移 · ${line}`);
     return lines;
   }
 
@@ -4792,11 +5195,11 @@ ${options.desc ?? ""}
   }
 
   // src/sites/bkxk/hijack.ts
-  var log15 = scoped("bkxk/hijack");
+  var log17 = scoped("bkxk/hijack");
   var CUSTOM_ID_PREFIX = "szu-custom-";
   var LIST_RE = /elective\/(?:programCourse|unProgramCourse|publicCourse|recommendedCourse|queryCourse|course|minorCourse|retakeCourse|sportCourse)\.do/i;
   var TIMETABLE_RE = /elective\/teachingTime\.do/i;
-  function kindOf2(url) {
+  function kindOf3(url) {
     if (typeof url !== "string" || url === "") return null;
     if (TIMETABLE_RE.test(url)) return "timetable";
     if (LIST_RE.test(url)) return "list";
@@ -4805,7 +5208,7 @@ ${options.desc ?? ""}
   function kindEnabled(kind) {
     return isEnabled(SITE_ID2, kind === "timetable" ? TOGGLE2.HIJACK_TIMETABLE : TOGGLE2.HIJACK_LIST_CONFLICT);
   }
-  function asRecord3(v) {
+  function asRecord4(v) {
     if (v === null || typeof v !== "object" || Array.isArray(v)) return null;
     return v;
   }
@@ -4829,7 +5232,7 @@ ${options.desc ?? ""}
     return items2.map((c) => `自定义课程：${c.name}(${c.place})`).join("；");
   }
   function augmentTimetable(json, items2) {
-    const root = asRecord3(json);
+    const root = asRecord4(json);
     if (root === null) return { json, changed: 0 };
     const list = asArray(root["dataList"]);
     if (list === null) return { json, changed: 0 };
@@ -4850,7 +5253,7 @@ ${options.desc ?? ""}
   function weekStringsOf(list) {
     const out = [];
     for (const row3 of list) {
-      const rec = asRecord3(row3);
+      const rec = asRecord4(row3);
       if (rec === null) continue;
       const w = rec["week"];
       if (typeof w === "string" && w !== "") out.push(w);
@@ -4884,16 +5287,16 @@ ${options.desc ?? ""}
     };
   }
   function augmentList(json, items2) {
-    const root = asRecord3(json);
+    const root = asRecord4(json);
     if (root === null) return { json, changed: 0 };
     const list = asArray(root["dataList"]);
     if (list === null) return { json, changed: 0 };
     let changed = 0;
     for (const row3 of list) {
-      const item = asRecord3(row3);
+      const item = asRecord4(row3);
       if (item === null) continue;
       const tcList = asArray(item["tcList"]);
-      const targets = tcList === null ? [item] : tcList.map(asRecord3).filter(isRec);
+      const targets = tcList === null ? [item] : tcList.map(asRecord4).filter(isRec);
       for (const tc of targets) {
         const place = tc["teachingPlace"];
         if (typeof place !== "string" || place === "") continue;
@@ -4920,12 +5323,12 @@ ${options.desc ?? ""}
     } catch {
       return null;
     }
-    const root = asRecord3(json);
+    const root = asRecord4(json);
     if (root === null) return null;
     if (String(root["code"]) !== "1") return null;
     const res = kind === "timetable" ? augmentTimetable(root, items2) : augmentList(root, items2);
     if (res.changed === 0) return null;
-    log15.info(`[接管] ${kind} 改写了 ${res.changed} 处`);
+    log17.info(`[接管] ${kind} 改写了 ${res.changed} 处`);
     return JSON.stringify(res.json);
   }
   function transformCurrentResponse(kind, text) {
@@ -4939,7 +5342,7 @@ ${options.desc ?? ""}
     return rewroteTimetable;
   }
   function rewriteXhr(xhr) {
-    const kind = kindOf2(typeof xhr.responseURL === "string" ? xhr.responseURL : null);
+    const kind = kindOf3(typeof xhr.responseURL === "string" ? xhr.responseURL : null);
     if (kind === null) return false;
     const rt = typeof xhr.responseType === "string" ? xhr.responseType : "";
     if (rt !== "" && rt !== "text" && rt !== "json") return false;
@@ -4958,7 +5361,7 @@ ${options.desc ?? ""}
         Object.defineProperty(xhr, "response", { configurable: true, get: () => JSON.parse(next) });
       }
     } catch {
-      log15.warn("接管响应失败（无法改写 responseText）");
+      log17.warn("接管响应失败（无法改写 responseText）");
       return false;
     }
     return true;
@@ -4993,14 +5396,14 @@ ${options.desc ?? ""}
       const p = orig(input, init);
       if (init !== void 0 && init !== null && init["__szuSkip"] === true) return p;
       const url = typeof input === "string" ? input : input?.url ?? "";
-      const kind = kindOf2(url);
+      const kind = kindOf3(url);
       if (kind === null) return p;
       return p.then(async (res) => {
         const text = await res.text();
         const next = transformCurrentResponse(kind, text);
         if (next === null) return res;
         if (typeof ResponseCtor !== "function") {
-          log15.warn("接管响应失败（环境里没有 Response 构造器）");
+          log17.warn("接管响应失败（环境里没有 Response 构造器）");
           return res;
         }
         const Ctor = ResponseCtor;
@@ -5014,7 +5417,7 @@ ${options.desc ?? ""}
   function installHijack(target = pageRealm()) {
     const xhr = installXhr2(target);
     const fetch2 = installFetch2(target);
-    if (xhr || fetch2) log15.info(`响应接管已安装（XHR=${String(xhr)} fetch=${String(fetch2)}）`);
+    if (xhr || fetch2) log17.info(`响应接管已安装（XHR=${String(xhr)} fetch=${String(fetch2)}）`);
     return xhr || fetch2;
   }
 
@@ -5262,7 +5665,7 @@ ${options.desc ?? ""}
   }
 
   // src/sites/bkxk/api.ts
-  var log16 = scoped("bkxk/api");
+  var log18 = scoped("bkxk/api");
   var BASE_PATH = "/xsxkapp/sys/xsxkapp/";
   var EP = {
     // 只读：课程查询（按类别分派）
@@ -5402,8 +5805,8 @@ ${options.desc ?? ""}
     };
     return `querySetting=${encodeURIComponent(JSON.stringify(setting))}`;
   }
-  function headers(token) {
-    return { token: String(token), "X-Requested-With": "XMLHttpRequest" };
+  function headers(token2) {
+    return { token: String(token2), "X-Requested-With": "XMLHttpRequest" };
   }
   function capacityRemain(data) {
     if (data === null || typeof data !== "object") return null;
@@ -5450,19 +5853,19 @@ code: ${input.code ?? ""} | msg: ${input.msg}
 ${text}
 ──────────────────────────────
 `;
-    log16.error(
+    log18.error(
       `未识别返回（已全量落档） code=${input.code ?? ""}${input.msg !== "" ? ` msg=${input.msg}` : ""}`
     );
     console.log(`%c${block}`, "color:#c00");
     return block;
   }
   async function bkxkSend(o) {
-    const token = o.token ?? "";
+    const token2 = o.token ?? "";
     const extra = o.extraHeaders ?? {};
-    const requestHeaders = token !== "" ? { ...headers(token), ...extra } : { ...extra };
+    const requestHeaders = token2 !== "" ? { ...headers(token2), ...extra } : { ...extra };
     if (o.body !== void 0) requestHeaders["Content-Type"] = "application/x-www-form-urlencoded";
     const url = o.timestamp === true ? appendTimestamp(o.url) : o.url;
-    log16.info(`[请求] ${o.action} ${o.url}`);
+    log18.info(`[请求] ${o.action} ${o.url}`);
     const raw = await request({
       url,
       method: o.method ?? "POST",
@@ -5485,8 +5888,8 @@ ${text}
   }
 
   // src/sites/bkxk/courses.ts
-  var log17 = scoped("bkxk/courses");
-  function asRecord4(value) {
+  var log19 = scoped("bkxk/courses");
+  function asRecord5(value) {
     if (value === null || typeof value !== "object" || Array.isArray(value)) return {};
     return value;
   }
@@ -5498,7 +5901,7 @@ ${text}
     }
     return null;
   }
-  function pickString(...values) {
+  function pickString2(...values) {
     const v = pick(...values);
     if (v === null) return "";
     return typeof v === "string" ? v : String(v);
@@ -5540,31 +5943,31 @@ ${text}
     return null;
   }
   function normClass(tc, course) {
-    const t = asRecord4(tc);
-    const c = asRecord4(course);
+    const t = asRecord5(tc);
+    const c = asRecord5(course);
     return {
-      teachingClassID: pickString(t["teachingClassID"], c["teachingClassID"]),
-      courseNumber: pickString(t["courseNumber"], c["courseNumber"]),
-      courseName: pickString(t["courseName"], c["courseName"]),
-      teacherName: pickString(t["teacherName"], c["teacherName"]),
-      teachingPlace: pickString(t["teachingPlace"], c["teachingPlace"]),
+      teachingClassID: pickString2(t["teachingClassID"], c["teachingClassID"]),
+      courseNumber: pickString2(t["courseNumber"], c["courseNumber"]),
+      courseName: pickString2(t["courseName"], c["courseName"]),
+      teacherName: pickString2(t["teacherName"], c["teacherName"]),
+      teachingPlace: pickString2(t["teachingPlace"], c["teachingPlace"]),
       courseTotalNumber: pickNumber(t["courseTotalNumber"], c["courseTotalNumber"]),
       classCapacity: pickNumber(t["classCapacity"], c["classCapacity"]),
       numberOfFirstVolunteer: pickNumber(t["numberOfFirstVolunteer"], c["numberOfFirstVolunteer"]),
-      courseIndex: pickString(t["courseIndex"], c["courseIndex"]),
+      courseIndex: pickString2(t["courseIndex"], c["courseIndex"]),
       isMooc: pickFlag(t["isMooc"], c["isMooc"]),
       isFull: pickFlag(t["isFull"], c["isFull"]),
       isConflict: pickFlag(t["isConflict"], c["isConflict"]),
       isFavorite: pickFlag(t["isFavorite"], c["isFavorite"]),
-      typeName: pickString(t["typeName"], c["typeName"]),
-      courseNatureName: pickString(t["courseNatureName"], c["courseNatureName"]),
-      departmentName: pickString(t["departmentName"], c["departmentName"]),
+      typeName: pickString2(t["typeName"], c["typeName"]),
+      courseNatureName: pickString2(t["courseNatureName"], c["courseNatureName"]),
+      departmentName: pickString2(t["departmentName"], c["departmentName"]),
       credit: pickNumber(t["credit"], c["credit"]),
-      campus: pickString(t["campus"], c["campus"])
+      campus: pickString2(t["campus"], c["campus"])
     };
   }
   function classesOf(item) {
-    const obj = asRecord4(item);
+    const obj = asRecord5(item);
     const list = obj["tcList"];
     if (Array.isArray(list)) {
       return list.map((tc) => normClass(tc, item));
@@ -5572,18 +5975,18 @@ ${text}
     return [normClass(item, item)];
   }
   function listFrom(json) {
-    const list = asRecord4(json)["dataList"];
+    const list = asRecord5(json)["dataList"];
     return Array.isArray(list) ? list : null;
   }
   function flatten(json) {
     const list = listFrom(json);
     if (list === null) {
-      log17.warn("列表响应里没有顶层 dataList，返回空列表（站点改版？端点形态变了？）");
+      log19.warn("列表响应里没有顶层 dataList，返回空列表（站点改版？端点形态变了？）");
       return [];
     }
     const out = [];
     for (const item of list) out.push(...classesOf(item));
-    log17.info(`列表响应 ${list.length} 项 → ${out.length} 个教学班`);
+    log19.info(`列表响应 ${list.length} 项 → ${out.length} 个教学班`);
     return out;
   }
   function remainOf(c) {
@@ -5606,15 +6009,15 @@ ${text}
     });
     const origin = p.origin ?? currentOrigin();
     if (origin === "") {
-      log17.warn("取不到 origin，放弃拉取课程列表");
+      log19.warn("取不到 origin，放弃拉取课程列表");
       return denied("取不到 origin");
     }
     if (p.studentCode === "") {
-      log17.warn("会话里没有学号，放弃拉取课程列表");
+      log19.warn("会话里没有学号，放弃拉取课程列表");
       return denied("缺少学号");
     }
     if (p.batchCode === null || p.batchCode === "") {
-      log17.warn("没有选课批次码，放弃拉取课程列表");
+      log19.warn("没有选课批次码，放弃拉取课程列表");
       return denied("缺少选课批次码");
     }
     const url = endpointUrl(CATEGORY_EP[p.category], origin);
@@ -5686,7 +6089,7 @@ ${text}
     return hit === void 0 ? "" : hit;
   }
   var TASK_STATUS_PENDING = "pending";
-  function asRecord5(v) {
+  function asRecord6(v) {
     if (v === null || typeof v !== "object" || Array.isArray(v)) return null;
     return v;
   }
@@ -5702,12 +6105,12 @@ ${text}
     return typeof v === "boolean" ? v : fallback;
   }
   function readTaskStore(raw) {
-    const rec = asRecord5(raw);
+    const rec = asRecord6(raw);
     const rawItems = rec === null ? null : rec["items"];
     if (!Array.isArray(rawItems)) return { seq: 0, items: [] };
     const items2 = [];
     for (const it of rawItems) {
-      const o = asRecord5(it);
+      const o = asRecord6(it);
       if (o === null) continue;
       const teachingClassID = str2(o["teachingClassID"]);
       if (teachingClassID === "") continue;
@@ -5731,12 +6134,12 @@ ${text}
     return { seq: num2(rec?.["seq"], items2.length), items: items2 };
   }
   function readMonitorStore(raw) {
-    const rec = asRecord5(raw);
+    const rec = asRecord6(raw);
     const rawItems = rec === null ? null : rec["items"];
     if (!Array.isArray(rawItems)) return { items: [], hitCount: 0 };
     const items2 = [];
     for (const it of rawItems) {
-      const o = asRecord5(it);
+      const o = asRecord6(it);
       if (o === null) continue;
       const teachingClassID = str2(o["teachingClassID"]);
       if (teachingClassID === "") continue;
@@ -6008,24 +6411,24 @@ ${text}
   }
 
   // src/sites/bkxk/monitor.ts
-  var log18 = scoped("bkxk/monitor");
+  var log20 = scoped("bkxk/monitor");
   var panel = null;
   function bindMonitorPanel(p) {
     panel = p;
   }
-  var listeners2 = /* @__PURE__ */ new Set();
-  function subscribeMonitor(fn) {
-    listeners2.add(fn);
+  var listeners4 = /* @__PURE__ */ new Set();
+  function subscribeMonitor2(fn) {
+    listeners4.add(fn);
     return () => {
-      listeners2.delete(fn);
+      listeners4.delete(fn);
     };
   }
-  function notify() {
-    for (const fn of [...listeners2]) {
+  function notify2() {
+    for (const fn of [...listeners4]) {
       try {
         fn();
       } catch (err) {
-        log18.warn("监控订阅回调抛错（已忽略）", err);
+        log20.warn("监控订阅回调抛错（已忽略）", err);
       }
     }
   }
@@ -6034,7 +6437,7 @@ ${text}
   }
   function saveMonitorStore(store) {
     write(BKXK_STORE_KEY.MONITOR, slimMonitor(store));
-    notify();
+    notify2();
   }
   function updateMonitor(fn) {
     const next = fn(loadMonitorStore());
@@ -6082,25 +6485,25 @@ ${text}
       return false;
     }
     polling = true;
-    log18.info(`开始监控轮询（${currentMode()}），监控项 ${String(store.items.length)} 条`);
+    log20.info(`开始监控轮询（${currentMode()}），监控项 ${String(store.items.length)} 条`);
     panel?.toast(`开始监控（${String(store.items.length)} 条）`, "success");
-    notify();
-    void loop();
+    notify2();
+    void loop2();
     return true;
   }
   function stopPolling() {
     if (!polling) return false;
     polling = false;
     interruptSleep();
-    log18.info("已停止监控轮询");
+    log20.info("已停止监控轮询");
     panel?.toast("已停止监控轮询", "info");
-    notify();
+    notify2();
     return true;
   }
   function isPolling() {
     return polling;
   }
-  async function loop() {
+  async function loop2() {
     try {
       while (polling) {
         await pollOnce();
@@ -6109,10 +6512,10 @@ ${text}
       }
     } catch (err) {
       polling = false;
-      log18.error("监控轮询异常结束", err);
+      log20.error("监控轮询异常结束", err);
       panel?.toast("监控轮询异常，已停止（详见日志）", "error");
     } finally {
-      notify();
+      notify2();
     }
   }
   async function pollOnce() {
@@ -6120,12 +6523,12 @@ ${text}
     pollCount += 1;
     const store = loadMonitorStore();
     if (store.items.length === 0) {
-      notify();
+      notify2();
       return { checked: 0, hits: [] };
     }
     const res = currentMode() === "single" ? await pollSingle(store) : await pollCategory(store);
     await afterCheck(res);
-    notify();
+    notify2();
     return res;
   }
   async function pollSingle(start) {
@@ -6141,7 +6544,7 @@ ${text}
   async function checkOne(store, tcId) {
     const ctx = bkxkContext();
     if (ctx.batchCode === "") {
-      log18.warn(`查容量跳过 ${tcId}：批次码为空（请刷新选课页）`);
+      log20.warn(`查容量跳过 ${tcId}：批次码为空（请刷新选课页）`);
       return {
         store,
         row: { teachingClassID: tcId, remain: null, kind: "nobatch", msg: "批次码为空（请刷新选课页）" }
@@ -6164,14 +6567,14 @@ ${text}
       if (kind === RESP_KIND.OK) remain = capacityRemain(r.cls.data);
     } catch (err) {
       const text = err instanceof Error ? err.message : String(err);
-      log18.warn(`查容量请求异常：${tcId}`, err);
+      log20.warn(`查容量请求异常：${tcId}`, err);
       const applied3 = applyCheck(store, tcId, null, Date.now(), `请求异常：${text}`);
       saveMonitorStore(applied3.store);
       return { store: applied3.store, row: { teachingClassID: tcId, remain: null, kind: "exception", msg: text } };
     }
     if (kind !== RESP_KIND.OK) {
       noteAuthLost(kind);
-      log18.warn(`查容量失败（${kind}）：${tcId} ${msg}`);
+      log20.warn(`查容量失败（${kind}）：${tcId} ${msg}`);
       const applied3 = applyCheck(store, tcId, null, Date.now(), msg);
       saveMonitorStore(applied3.store);
       return { store: applied3.store, row: { teachingClassID: tcId, remain: null, kind, msg } };
@@ -6196,27 +6599,27 @@ ${text}
           origin: pageOrigin()
         });
       } catch (err) {
-        log18.warn(`类别 ${category} 请求异常（pageNumber=${String(page)}）`, err);
+        log20.warn(`类别 ${category} 请求异常（pageNumber=${String(page)}）`, err);
         return out.length > 0 ? out : null;
       }
       if (r.kind !== RESP_KIND.OK) {
         noteAuthLost(r.kind);
-        log18.warn(`类别 ${category} 拉取失败（pageNumber=${String(page)}，${r.kind}）：${r.msg}`);
+        log20.warn(`类别 ${category} 拉取失败（pageNumber=${String(page)}，${r.kind}）：${r.msg}`);
         return out.length > 0 ? out : null;
       }
       for (const c of r.classes) out.push(c);
       if (r.classes.length < PAGE_SIZE) return out;
     }
-    log18.warn(`类别 ${category} 超过 ${String(MAX_PAGES)} 页上限，只用前 ${String(out.length)} 条比对`);
+    log20.warn(`类别 ${category} 超过 ${String(MAX_PAGES)} 页上限，只用前 ${String(out.length)} 条比对`);
     return out;
   }
   async function pollCategory(start) {
     const { groups, skipped } = groupByCategory(start.items);
     if (skipped > 0) {
-      log18.warn(`类别监控：跳过 ${String(skipped)} 条缺类别代码的监控项（无法按类别查询）`);
+      log20.warn(`类别监控：跳过 ${String(skipped)} 条缺类别代码的监控项（无法按类别查询）`);
     }
     if (groups.length === 0) {
-      log18.warn("类别监控：监控项都缺类别代码，无法按类别查询");
+      log20.warn("类别监控：监控项都缺类别代码，无法按类别查询");
       return { checked: 0, hits: [] };
     }
     let store = start;
@@ -6252,7 +6655,7 @@ ${text}
   function noteAuthLost(kind) {
     if (kind !== RESP_KIND.UNAUTHENTICATED) return false;
     stopPolling();
-    log18.error("登录态失效，已停止监控轮询");
+    log20.error("登录态失效，已停止监控轮询");
     panel?.toast("登录态失效，已停止监控，请刷新页面重新登录", "error");
     panel?.alertAuthExpired();
     return true;
@@ -6267,10 +6670,10 @@ ${text}
     const withCount = addHitCount(loadMonitorStore(), res.hits.length);
     saveMonitorStore(withCount);
     const summary = hitSummaryText(res.hits, (tcId) => nameOf(withCount, tcId));
-    log18.info(`监控命中余量：${summary}`);
+    log20.info(`监控命中余量：${summary}`);
     panel?.toast(`发现余量：${summary}`, "success");
     if (!isEnabled(SITE_ID2, TOGGLE2.WRITE_API)) {
-      log18.warn("监控命中余量，但写接口总开关未开启，只提醒不自动抢");
+      log20.warn("监控命中余量，但写接口总开关未开启，只提醒不自动抢");
       return;
     }
     for (const row3 of res.hits) {
@@ -6302,7 +6705,7 @@ ${text}
       });
       if (r.cls.kind === RESP_KIND.OK) {
         const name = item.courseName === "" ? item.teachingClassID : item.courseName;
-        log18.info(`监控自动抢成功 ${name}`);
+        log20.info(`监控自动抢成功 ${name}`);
         panel?.toast(`监控抢到：${name}`, "success");
         const removed = removeMonitorItem(loadMonitorStore(), item.teachingClassID);
         if (removed.removed) saveMonitorStore(removed.store);
@@ -6310,12 +6713,12 @@ ${text}
       }
       const msg = r.cls.msg === "" ? r.cls.kind : r.cls.msg;
       updateMonitor((s) => patchMonitor(s, item.teachingClassID, { lastMsg: msg }));
-      log18.warn(`监控自动抢未成功（${r.cls.kind}）：${msg}`);
+      log20.warn(`监控自动抢未成功（${r.cls.kind}）：${msg}`);
       noteAuthLost(r.cls.kind);
       return { ok: false, reason: r.cls.kind, msg };
     } catch (err) {
       const text = err instanceof Error ? err.message : String(err);
-      log18.warn(`监控自动抢请求异常：${item.teachingClassID}`, err);
+      log20.warn(`监控自动抢请求异常：${item.teachingClassID}`, err);
       return { ok: false, reason: "exception", msg: text };
     }
   }
@@ -6477,11 +6880,11 @@ ${text}
     const count = (s) => items2.filter((t) => t.status === s).length;
     const parts = [];
     const pending = count(TASK_STATUS.PENDING);
-    const running2 = count(TASK_STATUS.RUNNING);
+    const running3 = count(TASK_STATUS.RUNNING);
     const success = count(TASK_STATUS.SUCCESS);
     const failed = count(TASK_STATUS.FAILED);
     if (pending > 0) parts.push(`待抢 ${String(pending)}`);
-    if (running2 > 0) parts.push(`抢课中 ${String(running2)}`);
+    if (running3 > 0) parts.push(`抢课中 ${String(running3)}`);
     if (success > 0) parts.push(`已抢到 ${String(success)}`);
     if (failed > 0) parts.push(`已停止 ${String(failed)}`);
     const disabled = items2.filter((t) => !t.enabled).length;
@@ -6513,24 +6916,24 @@ ${text}
   }
 
   // src/sites/bkxk/tasks.ts
-  var log19 = scoped("bkxk/tasks");
+  var log21 = scoped("bkxk/tasks");
   var panel2 = null;
   function bindTaskPanel(p) {
     panel2 = p;
   }
-  var listeners3 = /* @__PURE__ */ new Set();
+  var listeners5 = /* @__PURE__ */ new Set();
   function subscribeTasks(fn) {
-    listeners3.add(fn);
+    listeners5.add(fn);
     return () => {
-      listeners3.delete(fn);
+      listeners5.delete(fn);
     };
   }
-  function notify2() {
-    for (const fn of [...listeners3]) {
+  function notify3() {
+    for (const fn of [...listeners5]) {
       try {
         fn();
       } catch (err) {
-        log19.warn("任务订阅回调抛错（已忽略）", err);
+        log21.warn("任务订阅回调抛错（已忽略）", err);
       }
     }
   }
@@ -6539,85 +6942,85 @@ ${text}
   }
   function saveTaskStore(store) {
     write(BKXK_STORE_KEY.TASKS, slimTasks(store));
-    notify2();
+    notify3();
   }
   function updateTasks(fn) {
     const next = fn(loadTaskStore());
     saveTaskStore(next);
     return next;
   }
-  var running = false;
+  var running2 = false;
   function isTaskRunning() {
-    return running;
+    return running2;
   }
   function startTasks() {
     if (!isEnabled(SITE_ID2, TOGGLE2.WRITE_API)) {
-      log19.warn("写接口总开关未开启，拒绝开始抢课");
+      log21.warn("写接口总开关未开启，拒绝开始抢课");
       panel2?.toast("写接口总开关未开启，请先到【设置】里打开", "warn");
       return { ok: false, reason: "write-disabled", count: 0 };
     }
-    if (running) {
+    if (running2) {
       return { ok: false, reason: "already-running", count: 0 };
     }
     const stale = clearStaleTasks(loadTaskStore());
     if (stale.cleared > 0) {
       saveTaskStore(stale.store);
-      log19.info(`开始前清洗了 ${String(stale.cleared)} 条「已勾选但上次跑失败」的任务，它们会重新参与`);
+      log21.info(`开始前清洗了 ${String(stale.cleared)} 条「已勾选但上次跑失败」的任务，它们会重新参与`);
     }
     const list = activeTasks(loadTaskStore().items);
     if (list.length === 0) {
       panel2?.toast("没有可抢的任务（都没勾选，或都已抢到）", "warn");
       return { ok: false, reason: "no-task", count: 0 };
     }
-    running = true;
-    log19.info(`开始抢课，任务数 ${String(list.length)}`);
+    running2 = true;
+    log21.info(`开始抢课，任务数 ${String(list.length)}`);
     panel2?.toast(`开始抢课（${String(list.length)} 条）`, "success");
-    void loop2();
+    void loop3();
     return { ok: true, reason: "", count: list.length };
   }
   function stopTasks() {
-    if (!running) return false;
-    running = false;
+    if (!running2) return false;
+    running2 = false;
     const before = loadTaskStore();
     const after = slimTasks(before);
     const changed = after.items.some((t, i) => t !== before.items[i]);
     if (changed) saveTaskStore(after);
-    else notify2();
-    log19.info("已停止抢课");
+    else notify3();
+    log21.info("已停止抢课");
     panel2?.toast("已停止抢课", "info");
     return true;
   }
-  function sleep(ms) {
+  function sleep2(ms) {
     return new Promise((resolve2) => {
       setTimeout(resolve2, ms);
     });
   }
-  async function loop2() {
+  async function loop3() {
     try {
-      while (running) {
+      while (running2) {
         if (activeTasks(loadTaskStore().items).length === 0) {
-          running = false;
-          log19.info("全部任务已结束");
+          running2 = false;
+          log21.info("全部任务已结束");
           panel2?.toast("全部任务已结束", "info");
           return;
         }
         await round();
-        if (!running) return;
+        if (!running2) return;
         const iv = clampLimit("retryIntervalMs", getValue(SITE_ID2, VALUE2.RETRY_INTERVAL_MS));
-        await sleep(iv);
+        await sleep2(iv);
       }
     } catch (err) {
-      running = false;
-      log19.error("抢课循环异常结束", err);
+      running2 = false;
+      log21.error("抢课循环异常结束", err);
       panel2?.toast("抢课循环异常，已停止（详见日志）", "error");
     } finally {
-      notify2();
+      notify3();
     }
   }
   async function round() {
     const list = activeTasks(loadTaskStore().items);
     for (const snapshot of list) {
-      if (!running) return;
+      if (!running2) return;
       const cur = byId2(loadTaskStore(), snapshot.id);
       if (cur === null || !cur.enabled) continue;
       await attempt(cur);
@@ -6634,7 +7037,7 @@ ${text}
         lastMsg: "缺少学号或选课批次码，请在设置中补全",
         lastKind: TASK_KIND.TERMINAL
       });
-      log19.error(`抢课中止：缺少学号或批次码 ${task.teachingClassID}`);
+      log21.error(`抢课中止：缺少学号或批次码 ${task.teachingClassID}`);
       return;
     }
     if (task.category === "") {
@@ -6643,7 +7046,7 @@ ${text}
         lastMsg: "未能识别该教学班的类别代码，请重新在列表中点击「添加抢课」",
         lastKind: TASK_KIND.TERMINAL
       });
-      log19.error(`抢课中止：类别代码未知 ${task.teachingClassID}`);
+      log21.error(`抢课中止：类别代码未知 ${task.teachingClassID}`);
       return;
     }
     finish(task.id, { status: TASK_STATUS.RUNNING, attempts: task.attempts + 1 });
@@ -6675,20 +7078,20 @@ ${text}
         lastMsg: `请求异常：${text}`,
         lastKind: TASK_KIND.UNKNOWN
       });
-      log19.warn(`抢课请求异常（${retry ? "稍后重试" : "已停手"}）：${task.teachingClassID}`, err);
+      log21.warn(`抢课请求异常（${retry ? "稍后重试" : "已停手"}）：${task.teachingClassID}`, err);
       return;
     }
     if (kind === RESP_KIND.OK) {
       finish(task.id, { status: TASK_STATUS.SUCCESS, lastMsg: msg, lastKind: TASK_KIND.OK });
       const name = task.courseName === "" ? task.teachingClassID : task.courseName;
-      log19.info(`抢课成功 ${name}`);
+      log21.info(`抢课成功 ${name}`);
       panel2?.toast(`抢课成功：${name}`, "success");
       return;
     }
     if (kind === RESP_KIND.UNAUTHENTICATED) {
-      running = false;
+      running2 = false;
       finish(task.id, { status: TASK_STATUS.FAILED, lastMsg: AUTH_MSG2, lastKind: TASK_KIND.AUTH });
-      log19.error("登录态失效，已停止全部任务");
+      log21.error("登录态失效，已停止全部任务");
       panel2?.toast("登录态失效，已停止全部任务，请刷新页面重新登录", "error");
       panel2?.alertAuthExpired();
       return;
@@ -6696,16 +7099,16 @@ ${text}
     const cls = kind === RESP_KIND.BUSINESS ? classifyMsg(msg) : TASK_KIND.UNKNOWN;
     if (shouldRetry(task.retryMode, cls)) {
       finish(task.id, { status: TASK_STATUS.PENDING, lastMsg: msg, lastKind: cls });
-      log19.warn(`抢课未成功，稍后重试（${kindLabel(cls)}）：${msg}`);
+      log21.warn(`抢课未成功，稍后重试（${kindLabel(cls)}）：${msg}`);
     } else {
       finish(task.id, { status: TASK_STATUS.FAILED, lastMsg: msg, lastKind: cls });
       const mode = RETRY_MODE_NAME[task.retryMode] ?? task.retryMode;
-      log19.warn(`抢课失败，已按「${mode}」停手（${kindLabel(cls)}）：${msg}`);
+      log21.warn(`抢课失败，已按「${mode}」停手（${kindLabel(cls)}）：${msg}`);
     }
   }
 
   // src/sites/bkxk/list.ts
-  var log20 = scoped("site/bkxk/list");
+  var log22 = scoped("site/bkxk/list");
   var LIST_PAGE_MARK = "grablessons.do";
   var RESCAN_DELAY_MS = 120;
   var MAX_BLOCKS_PER_SCAN = 400;
@@ -6720,7 +7123,7 @@ ${text}
     ev.preventDefault();
     ev.stopPropagation();
   }
-  function textOf(node) {
+  function textOf2(node) {
     return cleanText(node === null ? "" : node.textContent);
   }
   function ownDescendant(unit, selector) {
@@ -6763,7 +7166,7 @@ ${text}
   }
   function courseNameOf(row3) {
     if (row3 === null) return "";
-    return textOf(row3.querySelector(TITLE_CELL_SELECTOR));
+    return textOf2(row3.querySelector(TITLE_CELL_SELECTOR));
   }
   function placeOfUnit(unit) {
     const timeEl = ownDescendant(unit, "div[title]");
@@ -6785,9 +7188,9 @@ ${text}
     return {
       tcId,
       courseName: courseNameOf(row3),
-      teacherName: textOf(row3.querySelector(".cv-teacher-col")),
+      teacherName: textOf2(row3.querySelector(".cv-teacher-col")),
       category: categoryFor(row3),
-      teachingPlace: textOf(row3.querySelector(".cv-time-col"))
+      teachingPlace: textOf2(row3.querySelector(".cv-time-col"))
     };
   }
   function targetText(info) {
@@ -6798,11 +7201,11 @@ ${text}
   async function copyId(tcId, panel3) {
     const res = await copyText(tcId);
     if (res.ok) {
-      log20.info(`已复制教学班ID ${tcId} 到剪贴板（方式：${res.method}）`);
+      log22.info(`已复制教学班ID ${tcId} 到剪贴板（方式：${res.method}）`);
       panel3.toast("已复制教学班ID", "success");
       return;
     }
-    log20.warn(`复制教学班ID 失败：${res.detail}（可手动选中那一行复制）`);
+    log22.warn(`复制教学班ID 失败：${res.detail}（可手动选中那一行复制）`);
     panel3.toast("复制失败，请手动选中复制", "warn");
   }
   function applyGrabButton(btn, on) {
@@ -6839,13 +7242,13 @@ ${text}
     });
     applyGrabButton(btn, nowOn);
     if (nowOn) {
-      log20.info(`已加入抢课队列：${targetText(info)}（本轮只入队，不会发送任何请求）`);
+      log22.info(`已加入抢课队列：${targetText(info)}（本轮只入队，不会发送任何请求）`);
       ctx.panel.toast(
         `已加入抢课队列：${info.courseName === "" ? info.tcId : info.courseName}`,
         "success"
       );
     } else {
-      log20.info(`已移出抢课队列：${targetText(info)}（站点上已经选到的课不会被退掉）`);
+      log22.info(`已移出抢课队列：${targetText(info)}（站点上已经选到的课不会被退掉）`);
       ctx.panel.toast("已移出抢课队列（不会退掉已经选上的课）", "info");
     }
   }
@@ -6861,10 +7264,10 @@ ${text}
     });
     applyMonitorButton(btn, nowOn);
     if (nowOn) {
-      log20.info(`已加入监控列表：${targetText(info)}（到监控页点【开始监控】才会轮询）`);
+      log22.info(`已加入监控列表：${targetText(info)}（到监控页点【开始监控】才会轮询）`);
       ctx.panel.toast("已加入监控", "success");
     } else {
-      log20.info(`已移出监控列表：${targetText(info)}`);
+      log22.info(`已移出监控列表：${targetText(info)}`);
       ctx.panel.toast("已移出监控", "info");
     }
   }
@@ -6922,7 +7325,7 @@ ${text}
     if (ownsBlock(unit)) return;
     const tcId = tcIdIn(unit);
     if (tcId === null) {
-      log20.debug("卡片 .cv-info 未取到教学班 id，跳过（站点结构可能已变）");
+      log22.debug("卡片 .cv-info 未取到教学班 id，跳过（站点结构可能已变）");
       return;
     }
     const info = infoForUnit(unit, tcId);
@@ -6939,7 +7342,7 @@ ${text}
     if (cell === null) return;
     const ids = tcIdsIn(cell);
     if (ids.length === 0) {
-      log20.debug("列表行未取到教学班 id，跳过（站点结构可能已变）");
+      log22.debug("列表行未取到教学班 id，跳过（站点结构可能已变）");
       return;
     }
     const col = el("div", { class: "sztb-bkxk-col" });
@@ -7005,7 +7408,7 @@ ${text}
     const nodes = document.querySelectorAll(".sztb-bkxk-block, .sztb-bkxk-col, .sztb-bkxk-head");
     if (nodes.length === 0) return;
     for (const node of nodes) node.remove();
-    log20.info(`列表注入开关已关闭：移除 ${String(nodes.length)} 个注入节点`);
+    log22.info(`列表注入开关已关闭：移除 ${String(nodes.length)} 个注入节点`);
   }
   function scan(ctx) {
     if (!isEnabled(SITE_ID2, TOGGLE2.LIST_INJECT)) {
@@ -7025,7 +7428,7 @@ ${text}
   }
   function startListInjection(panel3) {
     if (!location.pathname.includes(LIST_PAGE_MARK)) {
-      log20.debug(`当前不是选课页（${location.pathname}），跳过列表注入`);
+      log22.debug(`当前不是选课页（${location.pathname}），跳过列表注入`);
       return () => void 0;
     }
     const ctx = {
@@ -7041,12 +7444,12 @@ ${text}
         scan(ctx);
       }, RESCAN_DELAY_MS);
     };
-    const unsubscribes = [subscribeTasks(syncInjectedButtons), subscribeMonitor(syncInjectedButtons)];
+    const unsubscribes = [subscribeTasks(syncInjectedButtons), subscribeMonitor2(syncInjectedButtons)];
     whenDomReady(() => {
       scan(ctx);
       observer = new MutationObserver(schedule2);
       observer.observe(document.body, { childList: true, subtree: true });
-      log20.info(
+      log22.info(
         `选课列表注入已就绪：抢课队列 ${String(loadTaskStore().items.length)} 条 / 监控 ${String(loadMonitorStore().items.length)} 条（本轮点击只入队，不发请求）`
       );
     });
@@ -7091,7 +7494,7 @@ ${text}
   }
 
   // src/sites/bkxk/timetable.ts
-  var log21 = scoped("site/bkxk/timetable");
+  var log23 = scoped("site/bkxk/timetable");
   var TT_PAGE_MARK = "curriculum.do";
   var MAX_TRIES = 20;
   var RETRY_MS = 500;
@@ -7117,12 +7520,12 @@ ${text}
   function askSiteToRefetch(reason) {
     const mod = pageRecord()[SITE_TIMETABLE_MODULE];
     if (mod === void 0 || typeof mod.init !== "function") {
-      log21.warn(
+      log23.warn(
         `站点没有 ${SITE_TIMETABLE_MODULE}.init（改版了？）—— 这一轮的自定义课程不会出现，刷新页面可重来`
       );
       return false;
     }
-    log21.info(
+    log23.info(
       `请站点重新请求一次课表（${reason}；上一发响应${didRewriteTimetable() ? "已被我们改写" : "我们没赶上"}）⇒ ${SITE_TIMETABLE_MODULE}.init()`
     );
     mod.init.call(mod);
@@ -7143,7 +7546,7 @@ ${text}
     if (!ok) {
       if (!loggedDrawn && tags > 0) {
         loggedDrawn = true;
-        log21.info(
+        log23.info(
           `站点画出的课表里已经带上我们的标记 ${String(tags)} 个（自定义课程 ${String(enabled)} 门）`
         );
       }
@@ -7163,7 +7566,7 @@ ${text}
   }
   function startTimetableInjection() {
     if (!location.pathname.includes(TT_PAGE_MARK)) {
-      log21.debug(`当前不是课表页（${location.pathname}），跳过课表接管`);
+      log23.debug(`当前不是课表页（${location.pathname}），跳过课表接管`);
       return () => void 0;
     }
     let observer = null;
@@ -7187,13 +7590,13 @@ ${text}
         if (tries < MAX_TRIES) {
           retry = window.setTimeout(attempt2, RETRY_MS);
         } else {
-          log21.warn(`未找到课表容器 #${SITE_TABLE_ID}，放弃接管（站点的课表可能还没出数据）`);
+          log23.warn(`未找到课表容器 #${SITE_TABLE_ID}，放弃接管（站点的课表可能还没出数据）`);
         }
         return;
       }
       injectTagStyle();
       const courses = readEnabledCustomCourses();
-      log21.info(
+      log23.info(
         `课表页接管就绪：自定义课程 ${String(courses.length)} 门；课表由站点自己画，我们只加「自定义」标签`
       );
       autoRefetchIfNeeded(table);
@@ -7355,7 +7758,7 @@ ${text}
 `;
 
   // src/sites/bkxk/tabs/tasks.ts
-  var log22 = scoped("bkxk/tasks-tab");
+  var log24 = scoped("bkxk/tasks-tab");
   var BKXK_TASKS_TAB_ID = "bkxk:tasks";
   var MODE_ORDER = [RETRY_MODE.SMART, RETRY_MODE.NEVER, RETRY_MODE.ALWAYS];
   var GATE_POLL_MS = 1e3;
@@ -7406,18 +7809,18 @@ ${text}
     root.appendChild(listBox);
     function render() {
       const items2 = loadTaskStore().items;
-      const running2 = isTaskRunning();
+      const running3 = isTaskRunning();
       summary.textContent = summaryText2(items2);
       listTitle.textContent = `队列（${String(items2.length)} 条）`;
-      runningBox.hidden = !running2;
-      if (running2) {
+      runningBox.hidden = !running3;
+      if (running3) {
         const left = items2.filter(
           (t) => t.enabled && (t.status === TASK_STATUS.PENDING || t.status === TASK_STATUS.RUNNING)
         ).length;
         runningBox.textContent = `抢课进行中：还剩 ${String(left)} 条待抢。抢到的任务会留在队列里（不会自动移出）。循环跑在本页里，关掉页面就等于停止抢课。`;
       }
-      stopBtn.disabled = !running2;
-      startBtn.disabled = running2;
+      stopBtn.disabled = !running3;
+      startBtn.disabled = running3;
       listBox.textContent = "";
       if (items2.length === 0) {
         listBox.appendChild(
@@ -7457,7 +7860,7 @@ ${text}
       check.checked = task.enabled;
       check.addEventListener("change", () => {
         updateTasks((s) => toggleTask2(s, task.id).store);
-        log22.info(
+        log24.info(
           `${task.enabled ? "取消勾选" : "勾选"}任务「${task.courseName === "" ? task.teachingClassID : task.courseName}」`
         );
         render();
@@ -7528,7 +7931,7 @@ ${text}
       mode.value = RETRY_MODE_NAME[task.retryMode] === void 0 ? RETRY_MODE.SMART : task.retryMode;
       mode.addEventListener("change", () => {
         updateTasks((s) => setRetryMode(s, task.id, mode.value));
-        log22.info(`任务「${task.courseName || task.teachingClassID}」的重试策略改为 ${mode.value}`);
+        log24.info(`任务「${task.courseName || task.teachingClassID}」的重试策略改为 ${mode.value}`);
         render();
       });
       ops.appendChild(mode);
@@ -7539,7 +7942,7 @@ ${text}
       });
       del.addEventListener("click", () => {
         updateTasks((s) => removeTask(s, task.id).store);
-        log22.info(`已从队列删除任务「${task.courseName || task.teachingClassID}」`);
+        log24.info(`已从队列删除任务「${task.courseName || task.teachingClassID}」`);
         render();
       });
       ops.appendChild(del);
@@ -7547,7 +7950,7 @@ ${text}
       return item;
     }
     startBtn.addEventListener("click", () => {
-      if (!syncGate()) log22.warn("写接口总开关未开，拒绝开始");
+      if (!syncGate()) log24.warn("写接口总开关未开，拒绝开始");
       const res = startTasks();
       if (!res.ok && res.reason === "already-running") ctx.host.toast("已经在抢课中了", "info");
       render();
@@ -7570,7 +7973,7 @@ ${text}
       }).then((yes) => {
         if (!yes) return;
         updateTasks((s) => resetTasks(s));
-        log22.info(`已重置 ${String(stale)} 条未成功的任务`);
+        log24.info(`已重置 ${String(stale)} 条未成功的任务`);
         ctx.host.toast("已重置", "success");
         render();
       });
@@ -7590,7 +7993,7 @@ ${text}
       }).then((yes) => {
         if (!yes) return;
         updateTasks(() => clearTasks());
-        log22.info(`已清空抢课队列（${String(n)} 条）`);
+        log24.info(`已清空抢课队列（${String(n)} 条）`);
         ctx.host.toast("已清空队列", "success");
         render();
       });
@@ -7734,7 +8137,7 @@ ${text}
 `;
 
   // src/sites/bkxk/tabs/monitor.ts
-  var log23 = scoped("bkxk/monitor-tab");
+  var log25 = scoped("bkxk/monitor-tab");
   var BKXK_MONITOR_TAB_ID = "bkxk:monitor";
   var TICK_MS = 1e3;
   var GRAB_REASON = {
@@ -7770,7 +8173,7 @@ ${text}
     modeRow.appendChild(modeSelect);
     modeSelect.addEventListener("change", () => {
       setValue(SITE_ID2, VALUE2.MONITOR_MODE, modeSelect.value);
-      log23.info(`监控模式改为 ${modeSelect.value}`);
+      log25.info(`监控模式改为 ${modeSelect.value}`);
       render();
     });
     const modeHint = el("span", { class: "sztb-bkxk-mo-meta" });
@@ -7814,11 +8217,11 @@ ${text}
       const now = Date.now();
       summary.textContent = summaryText(store, now);
       listTitle.textContent = `监控项（${String(store.items.length)} 条）`;
-      const running2 = isPolling();
-      startBtn.disabled = running2;
-      stopBtn.disabled = !running2;
-      runningBox.hidden = !running2;
-      if (running2) {
+      const running3 = isPolling();
+      startBtn.disabled = running3;
+      stopBtn.disabled = !running3;
+      runningBox.hidden = !running3;
+      if (running3) {
         runningBox.textContent = `监控进行中（${mode === MONITOR_MODE.CATEGORY ? "按类别" : "逐个教学班"}）：已跑 ${String(stats.pollCount)} 轮，上次检查 ${checkedAgoText(stats.lastPollAt, now)}。命中余量时会提醒你；写接口总开关开着的话会直接帮你抢。`;
       }
       listBox.textContent = "";
@@ -7910,7 +8313,7 @@ ${text}
       });
       del.addEventListener("click", () => {
         updateMonitor((s) => removeMonitorItem(s, item.teachingClassID).store);
-        log23.info(`已移出监控列表：${item.courseName || item.teachingClassID}`);
+        log25.info(`已移出监控列表：${item.courseName || item.teachingClassID}`);
         render();
       });
       ops.appendChild(del);
@@ -7944,7 +8347,7 @@ ${text}
     });
     resetBtn.addEventListener("click", () => {
       updateMonitor((s) => resetMonitorStats(s));
-      log23.info("已重置监控统计（余量、检查时间、命中次数与上次抢课结果）");
+      log25.info("已重置监控统计（余量、检查时间、命中次数与上次抢课结果）");
       ctx.host.toast("已重置统计，下次检查会重新填", "success");
       render();
     });
@@ -7964,12 +8367,12 @@ ${text}
         if (!yes) return;
         stopPolling();
         updateMonitor(() => clearMonitor());
-        log23.info(`已清空监控列表（${String(n)} 条）`);
+        log25.info(`已清空监控列表（${String(n)} 条）`);
         ctx.host.toast("已清空监控列表", "success");
         render();
       });
     });
-    const off = subscribeMonitor(render);
+    const off = subscribeMonitor2(render);
     syncGate();
     render();
     let lastGate = isEnabled(SITE_ID2, TOGGLE2.WRITE_API);
@@ -8231,7 +8634,7 @@ ${text}
 `;
 
   // src/sites/bkxk/tabs/custom.ts
-  var log24 = scoped("bkxk/custom-tab");
+  var log26 = scoped("bkxk/custom-tab");
   var BKXK_CUSTOM_TAB_ID = "bkxk:custom";
   var PARITY_OPTIONS = [
     ["", "每周"],
@@ -8513,7 +8916,7 @@ ${text}
       }
       const parsed = parsePlace(place);
       if (parsed.length !== segs.length) {
-        log24.warn(
+        log26.warn(
           `生成的时间文本与解析结果对不上：${place}（解析出 ${String(parsed.length)} 段，表单有 ${String(segs.length)} 段）`
         );
         const msg = "时间文本生成异常，已取消本次提交（请把这条日志报给开发者）";
@@ -8526,7 +8929,7 @@ ${text}
       const next = editing === null ? appendCourse(courses, draft, makeCourseId(Date.now(), Math.random())) : updateCourse(courses, editing, draft);
       mutate(next);
       resetForm();
-      log24.info(`${editing === null ? "添加" : "修改"}自定义课程「${name}」（${place}）`);
+      log26.info(`${editing === null ? "添加" : "修改"}自定义课程「${name}」（${place}）`);
       ctx.host.toast(editing === null ? "已添加" : "已保存修改", "success");
     }
     function beginEdit(course) {
@@ -8540,7 +8943,7 @@ ${text}
         const msg = "这门课原本的时间文本解析不出，已按默认值回填，请重新填写";
         showHint(msg);
         ctx.host.toast(msg, "warn");
-        log24.warn(`自定义课程「${course.name}」的 place 解析不出：${course.place}`);
+        log26.warn(`自定义课程「${course.name}」的 place 解析不出：${course.place}`);
       } else {
         segs = drafts.map((d) => ({ ...d }));
         hideHint();
@@ -8564,7 +8967,7 @@ ${text}
           return;
         }
         mutate(setCourseEnabled(courses, course.id, toggle.checked));
-        log24.info(`${toggle.checked ? "启用" : "停用"}自定义课程「${course.name}」`);
+        log26.info(`${toggle.checked ? "启用" : "停用"}自定义课程「${course.name}」`);
       });
       item.appendChild(toggle);
       const main2 = el("div", { class: "sztb-bkxk-itemmain" });
@@ -8598,7 +9001,7 @@ ${text}
         const wasEditing = editingId === course.id;
         mutate(removeCourse(courses, course.id));
         if (wasEditing) resetForm();
-        log24.info(`删除自定义课程「${course.name}」`);
+        log26.info(`删除自定义课程「${course.name}」`);
         ctx.host.toast("已删除", "success");
       });
       ops.appendChild(editBtn);
@@ -8634,7 +9037,7 @@ ${text}
       writeCustomCourses(next);
       renderList();
       renderConflicts();
-      if (refreshTimetable() > 0) log24.info("已请站点重画课表（这次带的课程就是你刚改的）");
+      if (refreshTimetable() > 0) log26.info("已请站点重画课表（这次带的课程就是你刚改的）");
     }
     addSegBtn.addEventListener("click", () => {
       if (!guard()) return;
@@ -8666,7 +9069,7 @@ ${text}
         if (!ok) return;
         mutate([]);
         resetForm();
-        log24.info(`清空自定义课程：删除 ${String(n)} 门`);
+        log26.info(`清空自定义课程：删除 ${String(n)} 门`);
         ctx.host.toast("已清空", "success");
       });
     });
@@ -8694,7 +9097,7 @@ ${text}
   };
 
   // src/sites/bkxk/index.ts
-  var log25 = scoped("site/bkxk");
+  var log27 = scoped("site/bkxk");
   var HOSTS2 = ["bkxk.szu.edu.cn"];
   var PAGES2 = ["*default/grablessons.do*", "*default/curriculum.do*"];
   var bkxkAdapter = {
@@ -8720,13 +9123,13 @@ ${text}
       registerBkxkSettings();
       const carried = runCustomCarry();
       if (lines.length > 0) {
-        log25.info(`已从旧版迁移 ${lines.length} 条内容，详情见日志页`);
+        log27.info(`已从旧版迁移 ${lines.length} 条内容，详情见日志页`);
       }
       if (carried.length > 0) {
-        log25.info(`自定义课程已搬到通用键（${carried.length} 条说明见日志页）`);
+        log27.info(`自定义课程已搬到通用键（${carried.length} 条说明见日志页）`);
       }
       if (lines.length === 0 && carried.length === 0) {
-        log25.debug(`无旧数据需要迁移（earlyInit @ ${ctx.url.pathname}）`);
+        log27.debug(`无旧数据需要迁移（earlyInit @ ${ctx.url.pathname}）`);
       }
     },
     /** 挂载期：DOM 已就绪，可以安全地把配置推给运行时并报登录态。 */
@@ -8736,11 +9139,11 @@ ${text}
       bindMonitorPanel(ctx.panel);
       const session = readSession();
       if (!session.loggedIn) {
-        log25.warn("未读到有效登录态：学号或 token 缺失，功能接口会失败。请先在站内完成登录。");
+        log27.warn("未读到有效登录态：学号或 token 缺失，功能接口会失败。请先在站内完成登录。");
       } else {
-        log25.info(`站点已就绪：${sessionSummary(session)}`);
+        log27.info(`站点已就绪：${sessionSummary(session)}`);
       }
-      log25.info(`功能页=${String(ctx.isFeaturePage)}（任务 / 监控 / 自定义 / 设置四个站点标签页已就绪）`);
+      log27.info(`功能页=${String(ctx.isFeaturePage)}（任务 / 监控 / 自定义 / 设置四个站点标签页已就绪）`);
       startListInjection(ctx.panel);
       startTimetableInjection();
     }
@@ -8759,10 +9162,10 @@ ${text}
   }
 
   // src/main.ts
-  var log26 = scoped("main");
+  var log28 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-07T16:18:34.766Z" : null;
-  var BUILD_NO = true ? 77 : null;
+  var BUILD_TIME = true ? "2026-10-08T10:50:20.387Z" : null;
+  var BUILD_NO = true ? 78 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();
@@ -8802,7 +9205,7 @@ ${text}
       version: VERSION
     }));
     booted = { panel: panel3, adapterId: res.adapter?.id ?? null };
-    log26.info(
+    log28.info(
       `深大人工具箱 ${VERSION_LABEL} 已装载（host=${url.hostname}，分派=${res.reason}，站点=${res.adapter?.id ?? "无"}，功能页=${res.autoExpand ? "是" : "否"}）`
     );
     res.adapter?.init?.({
@@ -8822,10 +9225,10 @@ ${text}
         return;
       }
       if (!res.inject) {
-        log26.debug(`站内跳转后不再属于支持范围，保持现有悬浮窗`);
+        log28.debug(`站内跳转后不再属于支持范围，保持现有悬浮窗`);
         return;
       }
-      log26.info(`站内跳转导致重新分派：${bootedFor} → ${location.href}`);
+      log28.info(`站内跳转导致重新分派：${bootedFor} → ${location.href}`);
       bootedFor = location.href;
       boot(url, res);
     };
@@ -8852,9 +9255,9 @@ ${text}
     if (res.adapter?.earlyInit !== void 0) {
       try {
         res.adapter.earlyInit({ adapter: res.adapter, url });
-        log26.debug(`已执行启动期钩子：${res.adapter.id}`);
+        log28.debug(`已执行启动期钩子：${res.adapter.id}`);
       } catch (err) {
-        log26.error(`启动期钩子执行失败：${res.adapter.id}`, err);
+        log28.error(`启动期钩子执行失败：${res.adapter.id}`, err);
       }
     }
     whenDomReady(() => {
