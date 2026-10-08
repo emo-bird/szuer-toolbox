@@ -1,20 +1,18 @@
 /**
- * UOOC 资源类型字典（纯函数，可单测）。
+ * UOOC 目录树：「资源类型字典」+「任务点展平 / 拼 hash」的**纯函数**（可单测）。
  *
- * 新连播是**纯 DOM 点击**的（见 `autoplay.ts` 文件头），不再拉 `getCatalogList` /
- * `getUnitLearn` 自己算路线 ⇒ 原来的「解析 + 展平 + 拼 URL」整套随之删除
- * （用户 m05858 拍板全删；需要时可从 git 历史取回）。
+ * ⚠️ **2026-10-08 方向反转**：新方案（唯一口径见 `docs/UOOC-API驱动连播-需求.md`）
+ * 是 **API 驱动**的 —— 一次 `getCatalogList` 拿整棵树、自己算「第一个未完成任务点」、
+ * 自己拼 `location.hash` 跳过去；DOM 只用来**读**（等 `ended`、等测验 iframe）。
+ * 所以「展平 + 拼 URL」这一套又回来了。
  *
- * 这里只留一件东西：**资源类型号 → 动作种类**的映射。
+ * ⚠️ **与旧实现不是同一套模型，不要从 git 历史搬**：旧实现认为「树里只有章节点，
+ * 资源得另外打 `getUnitLearn` 才查得到」；新模型是
+ * 「**节点自己的 `icon_list` 非空 = 这个节点就是一个任务点**」，
+ * `sourceId = icon_list[0].id`。两者不可互换（旧实现取样命令见需求文档 §G）。
  *
- * ⚠️ 类型号的**来源变了**：以前读接口响应里的 `unitSource[i].type`，
- * 现在读目录 DOM 上那颗类型图标的 `ng-if`：
- *
- * ```
- * <span class="tag-source-ico iconfont icon-video" ng-if="source.type == 10">
- * ```
- *
- * 站点自己的类型号没变，所以字典不用改，只是取材处换了。
+ * 本文件**只放纯函数**：不碰 DOM、不碰网络、不碰 `location`，全部可单测。
+ * 网络与重试在 `fetch-catalog.ts`，主循环在 `takeover.ts`。
  */
 
 // --------------------------------------------------------------- 资源类型
@@ -51,4 +49,179 @@ export function classifySource(type: unknown): SourceKind {
     default:
       return 'unknown';
   }
+}
+
+// --------------------------------------------------------------- 目录树 → 任务点
+
+/**
+ * 任务点的**路径形态** —— 决定拼出来的 hash 长什么样。
+ *
+ * 站点自己的 ui-router 状态表（`local/capture/uirouter-states.json`）里只有两条资源状态：
+ *
+ * | 状态 | url 模板 | 任务点挂在哪 |
+ * | --- | --- | --- |
+ * | `main.chapter.section.source` | `/{sourceId}/section` | 挂在「节」上（章 → 节 → 资源） |
+ * | `main.chapter.section.point.source` | `/{sourceId}/subsection` | 挂在「点」上（章 → 节 → 点 → 资源） |
+ *
+ * 判据是**祖先链长度**（不含自己）：`1` ⇒ `section`；`2` ⇒ `subsection`。
+ * 其余长度站点没有对应状态，归 `unsupported`（本课 cid `2005836044` 未出现）。
+ *
+ * ⚠️ `subsection` 这条**是按同族状态类推出来的，没有任何真实页面实证**
+ * （2026-10-08 全量扫过 `local/` 无一条真实 `/subsection` 页面 URL）。
+ * 用户已知悉并拍板照跳 —— 理由与现场验证点见需求文档 §A.2 / §F.1-1。
+ */
+export type PointForm = 'section' | 'subsection' | 'unsupported';
+
+/** 展平后的一个任务点。字段全部来自 `getCatalogList` 的响应，不做二次推导。 */
+export interface TaskPoint {
+  /** 该任务点**所在节点自己**的 id（`section` 形态里是「节」id，`subsection` 形态里是「点」id） */
+  nodeId: string;
+  /** 祖先 id 链，**不含自己**：`[章id]` 或 `[章id, 节id]` */
+  ancestors: string[];
+  /** 拼好的 `location.hash`；`unsupported` 时为空串 */
+  hash: string;
+  form: PointForm;
+  /** `icon_list[0].id` —— 拼 hash 用的就是它（**不是** `task_id`，那个实测恒为 0） */
+  sourceId: string;
+  /** 资源类型号 `icon_list[0].type`；数字与字符串两种形态都实测到过，这里一律 `String()` */
+  type: string;
+  /** 站点给的类型名 `icon_list[0].type_name`，只用于日志与 UI */
+  typeName: string;
+  kind: SourceKind;
+  name: string;
+  finished: boolean;
+  chapterId: string;
+  sectionId: string;
+  /** 只有 `subsection` 形态才有值 */
+  pointId: string;
+}
+
+/** 把接口字段转成字符串。`null` / `undefined` 一律给空串，避免出现 `"undefined"` */
+function text(value: unknown): string {
+  return value === null || value === undefined ? '' : String(value);
+}
+
+/**
+ * 任务点是否已完成。
+ *
+ * ⚠️ 这个接口里 `finished` **数字 `1` 与字符串 `"1"` 两种形态都实测到过**
+ * （`local/capture/catalog-list.json` 全量 66 个任务点都是数字，但 §B.3 有历史证据），
+ * 所以一律走 `Number()`，不要用 `=== 1`。
+ */
+export function isFinished(value: unknown): boolean {
+  return Number(value) === 1;
+}
+
+/**
+ * 拼任务点的 hash（纯函数，不读 `location`）。
+ *
+ * - 三级：`#/{cid}/{章}/{节}/{sourceId}/section`
+ * - 四级：`#/{cid}/{章}/{节}/{点}/{sourceId}/subsection`
+ *
+ * 实测实例（三级，来自需求文档 §A.2）：
+ * `#/2005836044/766102022/1482506601/124739605/section`
+ * —— `1482506601` 是「节」节点自己的 id、`124739605` 是它的 `icon_list[0].id`。
+ */
+export function sourceHash(
+  cid: string,
+  ancestors: readonly string[],
+  nodeId: string,
+  sourceId: string,
+): { form: PointForm; hash: string } {
+  if (!cid || !nodeId || !sourceId) return { form: 'unsupported', hash: '' };
+  if (ancestors.length === 1) {
+    return { form: 'section', hash: `#/${cid}/${ancestors[0]}/${nodeId}/${sourceId}/section` };
+  }
+  if (ancestors.length === 2) {
+    return {
+      form: 'subsection',
+      hash: `#/${cid}/${ancestors[0]}/${ancestors[1]}/${nodeId}/${sourceId}/subsection`,
+    };
+  }
+  return { form: 'unsupported', hash: '' };
+}
+
+/**
+ * 把 `getCatalogList` 的树展平成**先序**任务点列表（§B.1 / §B.2）。
+ *
+ * 「任务点」= **`icon_list` 非空的节点**，不区分三级 / 四级。
+ * 顺序就是树本身的顺序：`data` 数组顺序 → 递归 `children`。
+ *
+ * ⚠️ **不依赖 `parent` / `pid` 往回找祖先**（§B.2）：递归时自己把祖先链带下去，
+ * 得到的就是权威的祖先链，拼 hash 直接用。
+ *
+ * `cid` 必须由调用方给（hash 的第一段），不从树里读。
+ * 入参按 `unknown` 处理：接口抽风给 `null` / 非数组时**返回空列表而不是抛错**。
+ */
+export function flattenTaskPoints(tree: unknown, cid: string): TaskPoint[] {
+  const out: TaskPoint[] = [];
+  collectTaskPoints(tree, cid, [], out);
+  return out;
+}
+
+function collectTaskPoints(
+  nodes: unknown,
+  cid: string,
+  ancestors: string[],
+  out: TaskPoint[],
+): void {
+  if (!Array.isArray(nodes)) return;
+  for (const raw of nodes) {
+    if (raw === null || typeof raw !== 'object') continue;
+    const node = raw as Record<string, unknown>;
+    const nodeId = text(node['id']);
+    const icons = node['icon_list'];
+
+    // 一个节点可以「自己就是任务点」**同时**「还有子节点」（实测有这种），所以
+    // 这里不是 else —— 先登记自己，再照常往下递归。
+    if (nodeId && Array.isArray(icons) && icons.length > 0) {
+      const icon = (icons[0] ?? {}) as Record<string, unknown>;
+      const sourceId = text(icon['id']);
+      const { form, hash } = sourceHash(cid, ancestors, nodeId, sourceId);
+      out.push({
+        nodeId,
+        ancestors: [...ancestors],
+        hash,
+        form,
+        sourceId,
+        type: text(icon['type']),
+        typeName: text(icon['type_name']),
+        kind: classifySource(icon['type']),
+        name: text(node['name']),
+        finished: isFinished(node['finished']),
+        chapterId: ancestors[0] ?? '',
+        sectionId: ancestors.length === 1 ? nodeId : (ancestors[1] ?? ''),
+        pointId: ancestors.length === 2 ? nodeId : '',
+      });
+    }
+
+    if (nodeId) collectTaskPoints(node['children'], cid, [...ancestors, nodeId], out);
+  }
+}
+
+/**
+ * 起点：**第一个未完成任务点**（§B.3）。
+ *
+ * 固定从第一个未完成开始，而不是从「当前停留在哪」开始 —— 用户拍板：
+ * 少一个状态来源，少一类 bug。手动跳着看是另一回事，下次启动仍从头扫。
+ */
+export function firstUnfinished(points: readonly TaskPoint[]): TaskPoint | null {
+  for (const point of points) {
+    if (!point.finished) return point;
+  }
+  return null;
+}
+
+export interface TaskPointSummary {
+  total: number;
+  done: number;
+}
+
+/** 进度汇总，给【监视】页的进度条用（§E.2）。分母不用等 DOM，这是新方案白捡的 */
+export function summarizeTaskPoints(points: readonly TaskPoint[]): TaskPointSummary {
+  let done = 0;
+  for (const point of points) {
+    if (point.finished) done += 1;
+  }
+  return { total: points.length, done };
 }
