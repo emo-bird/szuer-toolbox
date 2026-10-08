@@ -578,3 +578,35 @@
   font-weight: 600;
   white-space: nowrap;
 }
+
+/* ---- 课程任务点分层列表（UOOC【监视】页 §E.2）---- */
+
+.sztb-tree {
+  max-height: 240px;
+  overflow-y: auto;
+  font-size: 12px;
+  border: 1px solid var(--sztb-border);
+  border-radius: 4px;
+  padding: 2px 0;
+}
+
+.sztb-tree-row {
+  display: flex;
+  gap: 4px;
+  padding: 1px 4px;
+  line-height: 1.5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sztb-tree-row[data-current="true"] {
+  background: var(--sztb-bg-alt);
+  box-shadow: inset 2px 0 0 var(--sztb-accent);
+  font-weight: 600;
+}
+
+.sztb-tree-mark {
+  flex: none;
+  width: 1.1em;
+}

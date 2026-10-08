@@ -22,6 +22,7 @@ import {
   type QuestionProgress,
   type QuizPhase,
 } from '../ai/monitor.ts';
+import { isCurrentRow, type CourseRow } from '../catalog.ts';
 
 const log = scoped('uooc/monitor-tab');
 
@@ -56,6 +57,30 @@ function bar(done: number, total: number): HTMLElement {
   );
 }
 
+/**
+ * 「章 → 节 → 任务点」分层列表（§E.2）。
+ *
+ * 勾：✅ 完成 / ⬜ 未完成；章与「只是容器」的节不画勾（`done === null`）。
+ * 当前正在处理的那一项按 `currentId` 命中 `ids` 高亮 —— 章、节也会被点亮，
+ * 因为同一时刻你既想知道「现在在哪一段」又想知道「具体哪一项」。
+ */
+function courseTree(rows: readonly CourseRow[], currentId: string | null): HTMLElement {
+  const box = el('div', { class: 'sztb-tree' });
+  for (const row of rows) {
+    const mark = row.done === null ? '　' : row.done ? '✅' : '⬜';
+    const type = row.typeName === '' ? '' : `[${row.typeName}] `;
+    const line = el('div', {
+      class: 'sztb-tree-row',
+      attrs: { 'data-depth': String(row.depth), 'data-current': String(isCurrentRow(row, currentId)) },
+    });
+    if (row.depth > 0) line.style.paddingLeft = `${4 + row.depth * 14}px`;
+    line.appendChild(el('span', { class: 'sztb-tree-mark', text: mark }));
+    line.appendChild(el('span', { text: `${type}${row.label}` }));
+    box.appendChild(line);
+  }
+  return box;
+}
+
 function questionRow(q: QuestionProgress): HTMLElement {
   const samples = q.samples.length === 0 ? '—' : q.samples.map((s) => (s === null ? '✗' : s)).join(' → ');
   return el(
@@ -88,11 +113,15 @@ export const UOOC_MONITOR_TAB: TabRegistration = {
       const course = s.course;
       if (course === null) {
         box.appendChild(el('div', { class: 'sztb-group-title', text: '课程进度' }));
-        box.appendChild(el('div', { class: 'sztb-field-desc', text: '连播还没开始（在【连播】页点【开始连播】）' }));
+        box.appendChild(el('div', { class: 'sztb-field-desc', text: '接管还没开始（在【接管】页点【开始接管】）' }));
       } else {
         box.appendChild(el('div', { class: 'sztb-group-title', text: '课程进度' }));
         box.appendChild(el('div', { class: 'sztb-field-desc', text: course.label }));
         box.appendChild(bar(course.index, course.total));
+        const rows = course.rows;
+        if (rows !== undefined && rows.length > 0) {
+          box.appendChild(courseTree(rows, course.currentId ?? null));
+        }
       }
 
       box.appendChild(el('div', { class: 'sztb-group-title', text: 'AI 答题进度' }));

@@ -21,6 +21,10 @@
  */
 
 import { scoped } from '../../../common/core/log.ts';
+// ⚠️ 唯一一个跨模块依赖，而且是 `import type` ⇒ 编译后不产生运行时代码，
+// 文件头「只依赖 scoped 日志、谁都能引」这条仍然成立，也不会成环
+// （`catalog.ts` 谁也不引）。
+import type { CourseRow } from '../catalog.ts';
 
 const log = scoped('uooc/ai/monitor');
 
@@ -59,6 +63,15 @@ export interface CourseProgress {
   readonly total: number;
   /** 人话标题，例如 `第 3 章 第 2 节「第一章测验」` */
   readonly label: string;
+  /**
+   * 「章 → 节 → 任务点」分层列表（§E.2，用户 2026-10-08 拍板要做）。
+   *
+   * **可选**：旧连播（`autoplay.ts`）发布进度时只给上面三个字段，不给这个；
+   * 新接管（`takeover.ts`）会给。界面拿到就画列表、拿不到就只画进度条。
+   */
+  readonly rows?: readonly CourseRow[];
+  /** 当前正在处理的任务点 id（`TaskPoint.nodeId`），给列表高亮用 */
+  readonly currentId?: string | null;
 }
 
 /** 答题阶段（监视页顶部一句话） */

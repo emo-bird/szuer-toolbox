@@ -23,12 +23,15 @@
 import { describe, it, assert, assertEqual, assertDeepEqual } from '../harness.ts';
 import {
   SOURCE_TYPE,
+  buildCourseRows,
   classifySource,
   flattenTaskPoints,
   firstUnfinished,
+  isCurrentRow,
   isFinished,
   sourceHash,
   summarizeTaskPoints,
+  type CourseRow,
 } from '../../src/sites/uooc/catalog.ts';
 
 // ------------------------------------------------------------------ 合成目录树
@@ -296,5 +299,85 @@ describe('uooc/catalog › 类型分派', () => {
       CID,
     );
     assertEqual(points[0]?.typeName, '');
+  });
+});
+
+// ------------------------------------------------------------------ §E.2 分层列表
+
+describe('uooc/catalog › 监视页分层列表', () => {
+  /** 把行压成 `缩进|勾|名字` 便于肉眼比对 */
+  function shape(rows: readonly CourseRow[]): string[] {
+    return rows.map((r) => {
+      const mark = r.done === null ? '-' : r.done ? 'Y' : 'N';
+      return `${r.depth}${mark} ${r.typeName}${r.typeName === '' ? '' : ' '}${r.label}`;
+    });
+  }
+
+  it('section 形态只出「节」一行、勾打在这一行；subsection 形态出「节 + 点」两行', () => {
+    const points = flattenTaskPoints(sampleTree(), CID);
+    assertDeepEqual(shape(buildCourseRows(points)), [
+      // 章行：不是任务点，done === null
+      '0- 第1章 甲',
+      // 1011 自己带 icon ⇒ 它就是那一节的「节行」，勾打在这里
+      '1Y 视频 第1节 乙',
+      // 10111 是 1011 的子任务点 ⇒ 缩进一层单独成行
+      '2N 测验 点 丙',
+      '1Y 附件 第2节 丁',
+      '0- 第2章 戊',
+      '1N 视频 第1节 己',
+    ]);
+  });
+
+  it('没有 icon_list 的「空壳节」既不出现在任务点里、也不该凭空出现在列表里', () => {
+    const rows = buildCourseRows(flattenTaskPoints(sampleTree(), CID));
+    assertEqual(rows.some((r) => r.label.includes('空壳')), false);
+  });
+
+  it('行 id 给全：任务点行同时带 nodeId 与 sourceId，节行带 sectionId', () => {
+    const rows = buildCourseRows(flattenTaskPoints(sampleTree(), CID));
+    const sub = rows.find((r) => r.label === '点 丙');
+    assertDeepEqual(sub?.ids, ['10111', '9002']);
+    const sec = rows.find((r) => r.label === '第1节 乙');
+    assertDeepEqual(sec?.ids, ['1011']);
+  });
+
+  it('isCurrentRow 认 nodeId 也认 sourceId；currentId 为空时谁都不亮', () => {
+    const rows = buildCourseRows(flattenTaskPoints(sampleTree(), CID));
+    const sub = rows.find((r) => r.label === '点 丙')!;
+    assertEqual(isCurrentRow(sub, '10111'), true);
+    assertEqual(isCurrentRow(sub, '9002'), true);
+    assertEqual(isCurrentRow(sub, '99999'), false);
+    assertEqual(isCurrentRow(sub, null), false);
+  });
+
+  it('空任务点列表 ⇒ 空列表（不抛错）', () => {
+    assertDeepEqual(buildCourseRows([]), []);
+  });
+
+  it('同一个节下先落地「节行」再加子点行：先序保证节自己那一个勾不会被子节点吃掉', () => {
+    // 实测 836508569 就是「节自己带 icon、同时还有子任务点」的形态
+    const points = flattenTaskPoints(
+      [
+        {
+          id: 1,
+          name: '章',
+          children: [
+            {
+              id: 11,
+              name: '节',
+              finished: 1,
+              icon_list: [{ id: 91, type: 10, type_name: '视频' }],
+              children: [{ id: 111, name: '子点', finished: 0, icon_list: [{ id: 92, type: 80, type_name: '测验' }] }],
+            },
+          ],
+        },
+      ],
+      CID,
+    );
+    assertDeepEqual(shape(buildCourseRows(points)), [
+      '0- 章',
+      '1Y 视频 节',
+      '2N 测验 子点',
+    ]);
   });
 });

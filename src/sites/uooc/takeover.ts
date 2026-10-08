@@ -28,6 +28,7 @@ import type { PanelApi } from '../types.ts';
 import { quizTidOnPage, runQuizAnswer, type AiQuizResult } from './ai/index.ts';
 import { setCourseProgress } from './ai/monitor.ts';
 import {
+  buildCourseRows,
   courseIdFromLocation,
   firstUnfinished,
   summarizeTaskPoints,
@@ -320,9 +321,15 @@ function pointLabel(point: TaskPoint): string {
 }
 
 /** 进度推给【监视】页顶部那块（§E.2） */
-function publishProgress(sum: TaskPointSummary, current: TaskPoint | null): void {
+function publishProgress(points: readonly TaskPoint[], sum: TaskPointSummary, current: TaskPoint | null): void {
   const label = current === null ? '' : pointLabel(current);
-  setCourseProgress({ index: sum.done, total: sum.total, label });
+  setCourseProgress({
+    index: sum.done,
+    total: sum.total,
+    label,
+    rows: buildCourseRows(points),
+    currentId: current === null ? null : current.nodeId,
+  });
 }
 
 // ------------------------------------------------------------- 主循环
@@ -391,7 +398,7 @@ async function loop(host: PanelApi, t: { cancelled: boolean }): Promise<void> {
 
     const sum = summarizeTaskPoints(ctx.points);
     const point = firstUnfinished(ctx.points, ctx.skipped);
-    publishProgress(sum, point);
+    publishProgress(ctx.points, sum, point);
 
     if (sum.done === sum.total) {
       release();
