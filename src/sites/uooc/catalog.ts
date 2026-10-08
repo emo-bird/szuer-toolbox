@@ -78,6 +78,13 @@ export interface TaskPoint {
   nodeId: string;
   /** 祖先 id 链，**不含自己**：`[章id]` 或 `[章id, 节id]` */
   ancestors: string[];
+  /**
+   * 祖先**名字**链，与 `ancestors` 一一对应（不含自己）。
+   *
+   * 只为状态行文案存在（§E.1 的「正在播放第 2 章「1.3 绪论」」）——
+   * 光有 id 拼不出给人看的字。纯展示字段，任何判断逻辑都不许依赖它。
+   */
+  path: string[];
   /** 拼好的 `location.hash`；`unsupported` 时为空串 */
   hash: string;
   form: PointForm;
@@ -155,7 +162,7 @@ export function sourceHash(
  */
 export function flattenTaskPoints(tree: unknown, cid: string): TaskPoint[] {
   const out: TaskPoint[] = [];
-  collectTaskPoints(tree, cid, [], out);
+  collectTaskPoints(tree, cid, [], [], out);
   return out;
 }
 
@@ -163,6 +170,7 @@ function collectTaskPoints(
   nodes: unknown,
   cid: string,
   ancestors: string[],
+  names: string[],
   out: TaskPoint[],
 ): void {
   if (!Array.isArray(nodes)) return;
@@ -170,6 +178,7 @@ function collectTaskPoints(
     if (raw === null || typeof raw !== 'object') continue;
     const node = raw as Record<string, unknown>;
     const nodeId = text(node['id']);
+    const nodeName = text(node['name']);
     const icons = node['icon_list'];
 
     // 一个节点可以「自己就是任务点」**同时**「还有子节点」（实测有这种），所以
@@ -181,13 +190,14 @@ function collectTaskPoints(
       out.push({
         nodeId,
         ancestors: [...ancestors],
+        path: [...names],
         hash,
         form,
         sourceId,
         type: text(icon['type']),
         typeName: text(icon['type_name']),
         kind: classifySource(icon['type']),
-        name: text(node['name']),
+        name: nodeName,
         finished: isFinished(node['finished']),
         chapterId: ancestors[0] ?? '',
         sectionId: ancestors.length === 1 ? nodeId : (ancestors[1] ?? ''),
@@ -195,7 +205,7 @@ function collectTaskPoints(
       });
     }
 
-    if (nodeId) collectTaskPoints(node['children'], cid, [...ancestors, nodeId], out);
+    if (nodeId) collectTaskPoints(node['children'], cid, [...ancestors, nodeId], [...names, nodeName], out);
   }
 }
 
@@ -204,11 +214,39 @@ function collectTaskPoints(
  *
  * 固定从第一个未完成开始，而不是从「当前停留在哪」开始 —— 用户拍板：
  * 少一个状态来源，少一类 bug。手动跳着看是另一回事，下次启动仍从头扫。
+ *
+ * @param skipped 本次运行里**已判定「本站不自动处理」而跳过**的节点 id（附件 / 讨论 /
+ *   文本 / 未知类型 / `unsupported` 形态）。**这个参数是必需的**：这些点不会被打开，
+ *   也就永远不会变成 `finished`，不给跳过集合就会每轮都挑中同一个点 → **死循环**。
+ *   旧 DOM 方案靠自己那份 `handled` 集合绕开了，新方案没有那层，必须显式传。
  */
-export function firstUnfinished(points: readonly TaskPoint[]): TaskPoint | null {
+export function firstUnfinished(
+  points: readonly TaskPoint[],
+  skipped: ReadonlySet<string> = new Set<string>(),
+): TaskPoint | null {
   for (const point of points) {
-    if (!point.finished) return point;
+    if (point.finished) continue;
+    if (skipped.has(point.nodeId)) continue;
+    return point;
   }
+  return null;
+}
+
+/**
+ * 从地址栏认出「这是哪门课」（cid）；认不出返回 `null`。
+ *
+ * 两条来源，**pathname 优先**（新版学习页 `/home/learn/new/{cid}` 一定带）；
+ * pathname 认不出才退回 hash（旧版学习页 `/home/learn/index#/{cid}/...`）。
+ * 顺序照抄 `b701b6b` 里那份实测过的实现 —— 两边都命中时给的是同一个 cid，
+ * 不存在分歧，纯粹是「哪个先试」。
+ */
+export function courseIdFromLocation(pathname: string, hash: string): string | null {
+  const fromPath = /^\/home\/learn\/new\/(\d+)/.exec(pathname);
+  if (fromPath !== null) return fromPath[1] ?? null;
+
+  const fromHash = /^#\/(\d+)(?:\/|$)/.exec(hash);
+  if (fromHash !== null) return fromHash[1] ?? null;
+
   return null;
 }
 

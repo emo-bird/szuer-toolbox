@@ -52,7 +52,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-08T16:20:52.768Z（构建号 90） */
+/* 构建信息：2026-10-08T16:30:43.047Z（构建号 91） */
 
 "use strict";
 (() => {
@@ -846,6 +846,7 @@
       isCollapsed: () => collapsed,
       toast: (message, kind) => toasts.show(message, kind ?? "info"),
       confirm: (opts) => showConfirm(shadow, opts),
+      alert: (opts) => showModalAlert(shadow, opts),
       alertAuthExpired: () => showAuthAlert(shadow),
       activateTab: (tabId) => tabView.activate(tabId),
       setTabs: (next) => {
@@ -935,10 +936,10 @@
     return risk === "irreversible";
   }
   function coerceInput(def, raw) {
-    const text = raw.trim();
-    if (text === "") return def.default;
-    if (def.kind === "number" && !Number.isFinite(Number(text))) return def.default;
-    return text;
+    const text2 = raw.trim();
+    if (text2 === "") return def.default;
+    if (def.kind === "number" && !Number.isFinite(Number(text2))) return def.default;
+    return text2;
   }
   function checkInput(def, raw) {
     const value = coerceInput(def, raw);
@@ -1172,8 +1173,8 @@ ${options.desc ?? ""}
   function siteHasSettings(siteId) {
     return togglesOf(siteId).length > 0 || valuesOf(siteId).length > 0;
   }
-  function emptyHint(text) {
-    return el("div", { class: "sztb-empty", text });
+  function emptyHint(text2) {
+    return el("div", { class: "sztb-empty", text: text2 });
   }
   function movedHint(siteName) {
     return el("div", {
@@ -1241,9 +1242,9 @@ ${options.desc ?? ""}
       hasExec: typeof document !== "undefined" && typeof document.execCommand === "function"
     };
   }
-  function execCopy(text) {
+  function execCopy(text2) {
     const ta = document.createElement("textarea");
-    ta.value = text;
+    ta.value = text2;
     ta.setAttribute("readonly", "");
     ta.style.position = "fixed";
     ta.style.top = "-1000px";
@@ -1269,7 +1270,7 @@ ${options.desc ?? ""}
     }
     return ok;
   }
-  async function copyText(text) {
+  async function copyText(text2) {
     const methods = copyMethodOrder(detectCopyEnv());
     if (methods.length === 0) {
       return { ok: false, method: "none", detail: "当前环境没有任何可用的剪贴板写入方式" };
@@ -1280,15 +1281,15 @@ ${options.desc ?? ""}
       last = method;
       try {
         if (method === "gm") {
-          globalThis.GM_setClipboard(text);
+          globalThis.GM_setClipboard(text2);
           return { ok: true, method, detail: "" };
         }
         if (method === "exec") {
-          if (execCopy(text)) return { ok: true, method, detail: "" };
+          if (execCopy(text2)) return { ok: true, method, detail: "" };
           detail = "document.execCommand(copy) 返回 false";
           continue;
         }
-        await navigator.clipboard.writeText(text);
+        await navigator.clipboard.writeText(text2);
         return { ok: true, method, detail: "" };
       } catch (err) {
         detail = `${method} 失败：${String(err)}`;
@@ -1300,8 +1301,8 @@ ${options.desc ?? ""}
   // src/common/ui/tabs/log.ts
   var LEVELS = ["debug", "info", "warn", "error"];
   async function copyAll() {
-    const text = entries().map(formatEntry).join("\n");
-    await copyText(text);
+    const text2 = entries().map(formatEntry).join("\n");
+    await copyText(text2);
   }
   var tabCss = `
 /*
@@ -1580,8 +1581,8 @@ ${options.desc ?? ""}
       __szuSkip: true
     };
     const res = await target.fn.call(target.owner, req.url, init);
-    const text = await res.text();
-    return { status: res.status, statusText: res.statusText, text, finalUrl: res.url };
+    const text2 = await res.text();
+    return { status: res.status, statusText: res.statusText, text: text2, finalUrl: res.url };
   }
   function resolveGm() {
     const g = globalThis;
@@ -2113,13 +2114,13 @@ ${options.desc ?? ""}
       setTimeout(() => finish2(null), timeoutMs);
     });
   }
-  function dispatch(rawUrl, text) {
+  function dispatch(rawUrl, text2) {
     const isCommit = matchCommitApi(rawUrl);
     const api = isCommit ? null : matchLearnApi(rawUrl);
     if (!isCommit && api === null) return;
     let body;
     try {
-      body = JSON.parse(text);
+      body = JSON.parse(text2);
     } catch {
       log5.warn("截获到的响应不是 JSON，已忽略", rawUrl);
       return;
@@ -2158,8 +2159,8 @@ ${options.desc ?? ""}
         const self = this;
         self["addEventListener"].call(self, "load", () => {
           try {
-            const text = self["responseText"];
-            if (typeof text === "string") dispatch(url, text);
+            const text2 = self["responseText"];
+            if (typeof text2 === "string") dispatch(url, text2);
           } catch {
           }
         });
@@ -2187,7 +2188,7 @@ ${options.desc ?? ""}
       if (url === "" || !shouldSniff(url)) return p;
       p.then((res) => {
         try {
-          res.clone().text().then((text) => dispatch(url, text)).catch(() => void 0);
+          res.clone().text().then((text2) => dispatch(url, text2)).catch(() => void 0);
         } catch {
         }
       }).catch(() => void 0);
@@ -2403,10 +2404,10 @@ ${options.desc ?? ""}
   }
   var CLEAR_MARK = "data-sztb-uooc-clear";
   var CLEAR_BTN_STYLE = "margin:0 6px 0 0;padding:1px 8px;font-size:12px;line-height:18px;border:1px solid #d9d9d9;border-radius:3px;background:#fff;color:#c0392b;cursor:pointer;vertical-align:middle;";
-  function makeClearButton(text, title, onClick) {
+  function makeClearButton(text2, title, onClick) {
     const btn = document.createElement("button");
     btn.type = "button";
-    btn.textContent = text;
+    btn.textContent = text2;
     btn.title = title;
     btn.setAttribute("style", CLEAR_BTN_STYLE);
     btn.setAttribute(CLEAR_MARK, "one");
@@ -2641,18 +2642,18 @@ ${options.desc ?? ""}
     return normalizeChoice(raw);
   }
   var INLINE_RE = /(?:^|[\s（(])(\d+)\s*[.、．:：)）]\s*([A-Za-z](?:\s*[,，]\s*[A-Za-z])*)/g;
-  function scanInline(text) {
+  function scanInline(text2) {
     const found = /* @__PURE__ */ new Map();
-    for (const m of text.matchAll(INLINE_RE)) {
+    for (const m of text2.matchAll(INLINE_RE)) {
       const n = Number(m[1]);
       if (!Number.isInteger(n) || n <= 0) continue;
       if (!found.has(n)) found.set(n, (m[2] ?? "").trim());
     }
     return found;
   }
-  function parseAnswerLines(text) {
+  function parseAnswerLines(text2) {
     const out = /* @__PURE__ */ new Map();
-    const body = stripFence(text);
+    const body = stripFence(text2);
     for (const line of body.split(/\r?\n/)) {
       const inline = scanInline(line);
       if (inline.size >= 2) {
@@ -2670,11 +2671,11 @@ ${options.desc ?? ""}
     for (const [n, ans] of scanInline(body)) if (!out.has(n)) out.set(n, ans);
     return out;
   }
-  function stripFence(text) {
-    return text.replace(/^\s*```[a-zA-Z]*\s*$/gm, "").replace(/```/g, "");
+  function stripFence(text2) {
+    return text2.replace(/^\s*```[a-zA-Z]*\s*$/gm, "").replace(/```/g, "");
   }
-  function parseAnswers(text, kinds) {
-    const lines = parseAnswerLines(text);
+  function parseAnswers(text2, kinds) {
+    const lines = parseAnswerLines(text2);
     return kinds.map((kind, i) => {
       const raw = lines.get(i + 1);
       if (raw === void 0) return null;
@@ -2794,19 +2795,19 @@ ${options.desc ?? ""}
       const template = pool.pop();
       if (template === void 0) break;
       requests += 1;
-      let text = "";
+      let text2 = "";
       try {
-        text = await chat(cfg, buildPrompt([question], template, exclude === "" ? void 0 : exclude));
+        text2 = await chat(cfg, buildPrompt([question], template, exclude === "" ? void 0 : exclude));
       } catch (err) {
         lastError = err instanceof Error ? err.message : String(err);
         opts.onWarn?.(`第 ${requests} 次请求失败（模板 ${template.label}）：${lastError}`);
         samples.push(null);
         continue;
       }
-      const parsed = parseAnswers(text, [question.kind])[0] ?? null;
+      const parsed = parseAnswers(text2, [question.kind])[0] ?? null;
       samples.push(parsed);
       opts.onDebug?.(
-        `模板「${template.label}」→ ${parsed === null ? "解析不出答案" : parsed}（原始回答：${text.trim().slice(0, 60)}）`
+        `模板「${template.label}」→ ${parsed === null ? "解析不出答案" : parsed}（原始回答：${text2.trim().slice(0, 60)}）`
       );
       if (parsed === null) continue;
       if (retryMode) {
@@ -2833,11 +2834,11 @@ ${options.desc ?? ""}
   async function runPool(items2, limit, worker) {
     const out = new Array(items2.length);
     const size = Math.min(8, Math.max(1, Math.floor(limit)));
-    let cursor2 = 0;
+    let cursor = 0;
     async function pump() {
       for (; ; ) {
-        const i = cursor2;
-        cursor2 += 1;
+        const i = cursor;
+        cursor += 1;
         if (i >= items2.length) return;
         const item = items2[i];
         if (item === void 0) return;
@@ -3103,6 +3104,9 @@ ${options.desc ?? ""}
   }
   function holdAfterMs() {
     return readMs(VALUE.HOLD_AFTER_MS, 5e3);
+  }
+  function waitTimeoutMs() {
+    return readMs(VALUE.WAIT_TIMEOUT_MS, 3e4);
   }
   function readText(id) {
     return getValue(SITE_ID, id).trim();
@@ -3418,25 +3422,95 @@ ${options.desc ?? ""}
         return "unknown";
     }
   }
+  function text(value) {
+    return value === null || value === void 0 ? "" : String(value);
+  }
+  function isFinished(value) {
+    return Number(value) === 1;
+  }
+  function sourceHash(cid, ancestors, nodeId, sourceId) {
+    if (!cid || !nodeId || !sourceId) return { form: "unsupported", hash: "" };
+    if (ancestors.length === 1) {
+      return { form: "section", hash: `#/${cid}/${ancestors[0]}/${nodeId}/${sourceId}/section` };
+    }
+    if (ancestors.length === 2) {
+      return {
+        form: "subsection",
+        hash: `#/${cid}/${ancestors[0]}/${ancestors[1]}/${nodeId}/${sourceId}/subsection`
+      };
+    }
+    return { form: "unsupported", hash: "" };
+  }
+  function flattenTaskPoints(tree, cid) {
+    const out = [];
+    collectTaskPoints(tree, cid, [], [], out);
+    return out;
+  }
+  function collectTaskPoints(nodes, cid, ancestors, names, out) {
+    if (!Array.isArray(nodes)) return;
+    for (const raw of nodes) {
+      if (raw === null || typeof raw !== "object") continue;
+      const node = raw;
+      const nodeId = text(node["id"]);
+      const nodeName = text(node["name"]);
+      const icons = node["icon_list"];
+      if (nodeId && Array.isArray(icons) && icons.length > 0) {
+        const icon = icons[0] ?? {};
+        const sourceId = text(icon["id"]);
+        const { form, hash } = sourceHash(cid, ancestors, nodeId, sourceId);
+        out.push({
+          nodeId,
+          ancestors: [...ancestors],
+          path: [...names],
+          hash,
+          form,
+          sourceId,
+          type: text(icon["type"]),
+          typeName: text(icon["type_name"]),
+          kind: classifySource(icon["type"]),
+          name: nodeName,
+          finished: isFinished(node["finished"]),
+          chapterId: ancestors[0] ?? "",
+          sectionId: ancestors.length === 1 ? nodeId : ancestors[1] ?? "",
+          pointId: ancestors.length === 2 ? nodeId : ""
+        });
+      }
+      if (nodeId) collectTaskPoints(node["children"], cid, [...ancestors, nodeId], [...names, nodeName], out);
+    }
+  }
+  function firstUnfinished(points, skipped = /* @__PURE__ */ new Set()) {
+    for (const point of points) {
+      if (point.finished) continue;
+      if (skipped.has(point.nodeId)) continue;
+      return point;
+    }
+    return null;
+  }
+  function courseIdFromLocation(pathname, hash) {
+    const fromPath = /^\/home\/learn\/new\/(\d+)/.exec(pathname);
+    if (fromPath !== null) return fromPath[1] ?? null;
+    const fromHash = /^#\/(\d+)(?:\/|$)/.exec(hash);
+    if (fromHash !== null) return fromHash[1] ?? null;
+    return null;
+  }
+  function summarizeTaskPoints(points) {
+    let done = 0;
+    for (const point of points) {
+      if (point.finished) done += 1;
+    }
+    return { total: points.length, done };
+  }
 
   // src/sites/uooc/autoplay.ts
   var log9 = scoped("uooc/autoplay");
-  var NAV_WAIT_MS = 6e3;
-  var VIEW_WAIT_MS = 8e3;
   var VIDEO_SLACK_MS = 10 * 60 * 1e3;
   var VIDEO_MIN_MS = 5 * 60 * 1e3;
   var VIDEO_MAX_MS = 6 * 60 * 60 * 1e3;
-  var CATALOG_ROOT_SEL = "div.panel-catalog ul.rank-1";
-  var VIEWER_SEL = "div.showViewer";
-  var SKIP_ATTR = "data-sztb-skip";
   var listeners3 = /* @__PURE__ */ new Set();
   var host = null;
   var running = false;
   var statusText = "已停止";
   var token = null;
-  var cursor = null;
-  var rowMark = null;
-  var handled = /* @__PURE__ */ new Set();
   function notify() {
     for (const fn of [...listeners3]) {
       try {
@@ -3445,18 +3519,9 @@ ${options.desc ?? ""}
       }
     }
   }
-  function setStatus(text) {
-    statusText = text;
+  function setStatus(text2) {
+    statusText = text2;
     notify();
-  }
-  function autoplayStatus() {
-    return { running, text: statusText };
-  }
-  function subscribeAutoplay(fn) {
-    listeners3.add(fn);
-    return () => {
-      listeners3.delete(fn);
-    };
   }
   function startAutoplay(api) {
     host = api;
@@ -3467,37 +3532,6 @@ ${options.desc ?? ""}
       listeners3.clear();
     };
   }
-  function autoplayStart() {
-    if (running) return;
-    if (host === null) {
-      log9.warn("还没装载就点了【开始连播】，忽略");
-      return;
-    }
-    const root = catalogRoot();
-    if (root === null) {
-      const msg = "当前页面上找不到课程目录，无法连播（要先打开旧版课程页）";
-      log9.error(msg);
-      host.toast(msg, "error");
-      setStatus(msg);
-      return;
-    }
-    cursor = null;
-    rowMark = null;
-    handled = /* @__PURE__ */ new Set();
-    if (!primeCursor(root)) {
-      const msg = "目录里没有「当前项」标记 —— 请你先点开一节，脚本会跟着你走";
-      log9.warn(msg);
-      host.toast(msg, "warn");
-      setStatus(`已停止 —— ${msg}`);
-      return;
-    }
-    running = true;
-    const t = { cancelled: false };
-    token = t;
-    setStatus("连播中：正在定位当前项…");
-    log9.info("连播开始");
-    void loop(t);
-  }
   function autoplayStop() {
     if (!running && token === null) return;
     running = false;
@@ -3507,611 +3541,6 @@ ${options.desc ?? ""}
     setCourseProgress(null);
     log9.info("连播已停止");
     notify();
-  }
-  function sleep(ms, t) {
-    return new Promise((resolve2) => {
-      if (t.cancelled) {
-        resolve2();
-        return;
-      }
-      const timer3 = window.setTimeout(() => {
-        window.clearTimeout(timer3);
-        resolve2();
-      }, ms);
-      const off = subscribeAutoplay(() => {
-        if (!t.cancelled) return;
-        off();
-        window.clearTimeout(timer3);
-        resolve2();
-      });
-    });
-  }
-  function yieldToBrowser() {
-    return new Promise((resolve2) => {
-      window.setTimeout(resolve2, 0);
-    });
-  }
-  async function waitFor(pred, timeoutMs, t, intervalMs2 = 200) {
-    const deadline = Date.now() + timeoutMs;
-    for (; ; ) {
-      if (t.cancelled) return false;
-      if (pred()) return true;
-      if (Date.now() >= deadline) return false;
-      await sleep(intervalMs2, t);
-    }
-  }
-  function textOf(node) {
-    return (node?.textContent ?? "").replace(/\s+/g, " ").trim();
-  }
-  function isComplete(el2) {
-    return el2.classList.contains("complete");
-  }
-  function isActive(el2) {
-    return el2.classList.contains("active");
-  }
-  async function clickNav(el2, t) {
-    const before = location.hash;
-    try {
-      el2.click();
-    } catch (err) {
-      log9.warn("click 抛异常", err instanceof Error ? err.message : String(err));
-    }
-    if (before !== location.hash) return true;
-    const href = el2.getAttribute("href");
-    if (href !== null && href !== "" && href !== before) {
-      log9.debug(`click 没换 hash，改用 href 兜底：${href}`);
-      location.hash = href;
-      await sleep(120, t);
-      return location.hash !== before;
-    }
-    return false;
-  }
-  function catalogRoot() {
-    return document.querySelector(CATALOG_ROOT_SEL);
-  }
-  function chapterLis(root) {
-    return [...root.children].filter(
-      (n) => n instanceof HTMLElement && n.classList.contains("catalogItem")
-    );
-  }
-  function chapterTitle(li) {
-    return li.querySelector(":scope > div.basic.chapter");
-  }
-  function chapterBody(li) {
-    return li.querySelector(":scope > ul.rank-2");
-  }
-  function sectionLis(chapterLi) {
-    const body = chapterBody(chapterLi);
-    if (body === null) return [];
-    return [...body.children].filter((n) => n instanceof HTMLElement);
-  }
-  function sectionTitle(li) {
-    return li.querySelector(":scope > div.basic");
-  }
-  function resourceList(sectionLi) {
-    return sectionLi.querySelector(":scope > div.resourcelist");
-  }
-  function resourceRows(sectionLi) {
-    const list = resourceList(sectionLi);
-    if (list === null) return [];
-    return [...list.children].filter(
-      (n) => n instanceof HTMLElement && n.classList.contains("basic")
-    );
-  }
-  function kindOf2(row3) {
-    const ico = row3.querySelector("span.tag-source-ico");
-    if (ico !== null) {
-      const ngIf = ico.getAttribute("ng-if") ?? "";
-      const m = /source\.type\s*==\s*(\d+)/.exec(ngIf);
-      if (m !== null && m[1] !== void 0) return classifySource(Number(m[1]));
-      for (const cls of [...ico.classList]) {
-        if (cls === "icon-video") return "video";
-        if (cls === "icon-huixingzhen") return "attach";
-        if (cls === "icon-wendang1") return "text";
-        if (cls === "icon-discuss") return "discussion";
-        if (cls === "icon-dingdanguanli") return "quiz";
-      }
-    }
-    return "unknown";
-  }
-  function rowName(row3) {
-    return textOf(row3.querySelector("span.tag-source-name")) || textOf(row3);
-  }
-  function chapterKey(li, idx) {
-    return li.id !== "" ? li.id : `c${idx}`;
-  }
-  function sectionKey(li, idx) {
-    return li.id !== "" ? li.id : `s${idx}`;
-  }
-  function findChapterById(id) {
-    const root = catalogRoot();
-    if (root === null) return null;
-    const chs = chapterLis(root);
-    for (let i = 0; i < chs.length; i += 1) {
-      const li = chs[i];
-      if (li !== void 0 && chapterKey(li, i) === id) return li;
-    }
-    return null;
-  }
-  function findSectionById(chapterLi, id) {
-    const secs = sectionLis(chapterLi);
-    for (let i = 0; i < secs.length; i += 1) {
-      const li = secs[i];
-      if (li !== void 0 && sectionKey(li, i) === id) return li;
-    }
-    return null;
-  }
-  function rowAt(chapterId, sectionId, resourceIdx) {
-    return { chapterId, sectionId, resourceIdx };
-  }
-  function keyOf(c) {
-    return `${c.chapterId}/${c.sectionId}/${c.resourceIdx}`;
-  }
-  function snapshot(root) {
-    const chs = chapterLis(root);
-    let ci = -1;
-    if (cursor !== null) {
-      for (let i = 0; i < chs.length; i += 1) {
-        const li = chs[i];
-        if (li !== void 0 && chapterKey(li, i) === cursor.chapterId && chapterBody(li) !== null) {
-          ci = i;
-          break;
-        }
-      }
-    }
-    if (ci < 0) ci = chs.findIndex((li) => chapterBody(li) !== null);
-    if (ci < 0) {
-      ci = chs.findIndex((li) => {
-        const t = chapterTitle(li);
-        return t !== null && isActive(t);
-      });
-    }
-    const chapLi = ci >= 0 ? chs[ci] ?? null : null;
-    if (chapLi === null) {
-      return {
-        chs,
-        ci: -1,
-        chapLi: null,
-        chapterId: "",
-        secs: [],
-        si: -1,
-        secLi: null,
-        sectionId: "",
-        rows: []
-      };
-    }
-    const chapterId = chapterKey(chapLi, ci);
-    const secs = sectionLis(chapLi);
-    let si = -1;
-    if (cursor !== null && cursor.chapterId === chapterId && cursor.sectionId !== "") {
-      for (let i = 0; i < secs.length; i += 1) {
-        const li = secs[i];
-        if (li !== void 0 && sectionKey(li, i) === cursor.sectionId) {
-          si = i;
-          break;
-        }
-      }
-    }
-    if (si < 0) si = secs.findIndex((li) => resourceList(li) !== null);
-    if (si < 0) {
-      si = secs.findIndex((li) => {
-        const t = sectionTitle(li);
-        return t !== null && isActive(t);
-      });
-    }
-    if (si < 0 && secs.length > 0) si = 0;
-    const secLi = si >= 0 ? secs[si] ?? null : null;
-    return {
-      chs,
-      ci,
-      chapLi,
-      chapterId,
-      secs,
-      si,
-      secLi,
-      sectionId: secLi !== null ? sectionKey(secLi, si) : "",
-      rows: secLi !== null ? resourceRows(secLi) : []
-    };
-  }
-  function primeCursor(root) {
-    const s = snapshot(root);
-    if (s.chapLi === null) return false;
-    const act = s.rows.find((r) => isActive(r));
-    if (act !== void 0) {
-      cursor = rowAt(s.chapterId, s.sectionId, s.rows.indexOf(act));
-      log9.debug(`起点 = 站点标出的当前项：${rowName(act)}`);
-      return true;
-    }
-    log9.debug("目录里没有活动的资源行，按渲染出来的章节从头判断");
-    return true;
-  }
-  function nextChapter(s, ci) {
-    for (let i = ci + 1; i < s.chs.length; i += 1) {
-      const li = s.chs[i];
-      if (li === void 0) continue;
-      if (li.hasAttribute(SKIP_ATTR)) continue;
-      const t = chapterTitle(li);
-      if (t !== null && isComplete(t)) continue;
-      return {
-        kind: "expand-chapter",
-        el: t ?? li,
-        li,
-        name: textOf(t) || `第 ${i + 1} 章`,
-        chapterId: chapterKey(li, i)
-      };
-    }
-    return { kind: "end" };
-  }
-  function nextFrom(s, from) {
-    const { chapLi, secLi, chapterId, sectionId, rows, secs, ci, si } = s;
-    if (chapLi === null || secLi === null) return { kind: "end" };
-    for (let k = from + 1; k < rows.length; k += 1) {
-      const r = rows[k];
-      if (r === void 0) continue;
-      if (r.hasAttribute(SKIP_ATTR)) continue;
-      if (isComplete(r)) continue;
-      if (handled.has(keyOf(rowAt(chapterId, sectionId, k)))) continue;
-      return { kind: "click-row", chapterId, sectionId, resourceIdx: k, row: r, name: rowName(r) };
-    }
-    for (let j = si + 1; j < secs.length; j += 1) {
-      const li = secs[j];
-      if (li === void 0) continue;
-      if (li.hasAttribute(SKIP_ATTR)) continue;
-      const t = sectionTitle(li);
-      if (t !== null && isComplete(t)) continue;
-      return {
-        kind: "expand-section",
-        el: t ?? li,
-        li,
-        name: textOf(t) || `第 ${j + 1} 节`,
-        chapterId,
-        sectionId: sectionKey(li, j)
-      };
-    }
-    return nextChapter(s, ci);
-  }
-  function nextStep(s) {
-    if (s.chs.length === 0) return { kind: "stop", why: "找不到课程目录" };
-    if (s.chapLi === null) {
-      return {
-        kind: "stop",
-        why: "目录里没有「当前项」标记 —— 请你先点开一节，脚本会跟着你走"
-      };
-    }
-    const chapLi = s.chapLi;
-    const chapName = textOf(chapterTitle(chapLi)) || `第 ${s.ci + 1} 章`;
-    if (chapterBody(chapLi) === null) {
-      if (chapLi.hasAttribute(SKIP_ATTR)) return nextChapter(s, s.ci);
-      return {
-        kind: "expand-chapter",
-        el: chapterTitle(chapLi) ?? chapLi,
-        li: chapLi,
-        name: chapName,
-        chapterId: s.chapterId
-      };
-    }
-    if (s.secs.length === 0) return nextChapter(s, s.ci);
-    const secLi = s.secLi;
-    if (secLi === null) return nextChapter(s, s.ci);
-    const secName = textOf(sectionTitle(secLi)) || `第 ${s.si + 1} 节`;
-    if (resourceList(secLi) === null) {
-      if (secLi.hasAttribute(SKIP_ATTR)) return nextFrom(s, s.rows.length);
-      return {
-        kind: "expand-section",
-        el: sectionTitle(secLi) ?? secLi,
-        li: secLi,
-        name: secName,
-        chapterId: s.chapterId,
-        sectionId: s.sectionId
-      };
-    }
-    const rows = s.rows;
-    const at = (idx) => ({
-      chapterId: s.chapterId,
-      sectionId: s.sectionId,
-      resourceIdx: idx,
-      row: rows[idx],
-      name: rowName(rows[idx])
-    });
-    const done = (idx) => handled.has(keyOf(rowAt(s.chapterId, s.sectionId, idx)));
-    const here = cursor !== null && cursor.chapterId === s.chapterId && cursor.sectionId === s.sectionId ? cursor.resourceIdx : -1;
-    if (here >= 0 && rows[here] !== void 0) {
-      const k = keyOf(rowAt(s.chapterId, s.sectionId, here));
-      if (rowMark !== null && rowMark.phase === "clicked" && rowMark.key === k) {
-        return { kind: "handle", ...at(here) };
-      }
-    }
-    const act = rows.findIndex((r) => isActive(r));
-    if (act >= 0) {
-      if (!done(act)) return { kind: "handle", ...at(act) };
-      return nextFrom(s, act);
-    }
-    if (here >= 0 && rows[here] !== void 0) {
-      if (!done(here)) return { kind: "handle", ...at(here) };
-      return nextFrom(s, here);
-    }
-    return nextFrom(s, -1);
-  }
-  function markSkip(step) {
-    step.el.setAttribute(SKIP_ATTR, "1");
-    step.li.setAttribute(SKIP_ATTR, "1");
-  }
-  function stepSignature(step) {
-    switch (step.kind) {
-      case "expand-chapter":
-        return `expand-chapter:${step.chapterId}`;
-      case "expand-section":
-        return `expand-section:${step.chapterId}/${step.sectionId}`;
-      case "click-row":
-        return `click-row:${step.chapterId}/${step.sectionId}/${step.resourceIdx}`;
-      case "handle":
-        return `handle:${step.chapterId}/${step.sectionId}/${step.resourceIdx}`;
-      case "end":
-        return "end";
-      case "stop":
-        return `stop:${step.why}`;
-    }
-  }
-  function describeStep(step) {
-    switch (step.kind) {
-      case "expand-chapter":
-        return `展开章「${step.name}」`;
-      case "expand-section":
-        return `展开节「${step.name}」`;
-      case "click-row":
-        return `点开「${step.name}」`;
-      case "handle":
-        return `等待「${step.name}」结束`;
-      case "end":
-        return "收尾";
-      case "stop":
-        return step.why;
-    }
-  }
-  function viewerOf() {
-    const box = document.querySelector(VIEWER_SEL) ?? document.body;
-    const video = box.querySelector("video");
-    const frames = [...box.querySelectorAll("iframe")];
-    const hasQuizFrame = frames.some((f) => (f.getAttribute("src") ?? "").includes("/exam/"));
-    return { video, hasFrame: frames.length > 0, hasQuizFrame };
-  }
-  function viewerReady() {
-    const box = document.querySelector(VIEWER_SEL);
-    if (box === null) return false;
-    if (box.querySelector("video") !== null) return true;
-    if (box.querySelector("iframe") !== null) return true;
-    return textOf(box).length > 0;
-  }
-  function waitVideoEnd(video, t) {
-    return new Promise((resolve2) => {
-      if (video.ended) {
-        resolve2(true);
-        return;
-      }
-      const rate = video.playbackRate > 0 ? video.playbackRate : 1;
-      const remaining = Number.isFinite(video.duration) ? (video.duration - video.currentTime) / rate : 0;
-      const budget = Math.min(VIDEO_MAX_MS, Math.max(VIDEO_MIN_MS, remaining * 1e3 + VIDEO_SLACK_MS));
-      let done = false;
-      const finish2 = (ok) => {
-        if (done) return;
-        done = true;
-        window.clearTimeout(timer3);
-        video.removeEventListener("ended", onEnded);
-        video.removeEventListener("error", onError);
-        off();
-        resolve2(ok);
-      };
-      const onEnded = () => finish2(true);
-      const onError = () => finish2(false);
-      const timer3 = window.setTimeout(() => finish2(video.ended), budget);
-      const off = subscribeAutoplay(() => {
-        if (t.cancelled) finish2(false);
-      });
-      video.addEventListener("ended", onEnded);
-      video.addEventListener("error", onError);
-      if (t.cancelled) finish2(false);
-    });
-  }
-  var KIND_TEXT = {
-    video: "视频",
-    attach: "附件",
-    text: "文本",
-    discussion: "讨论",
-    quiz: "测验",
-    unknown: "认不出来"
-  };
-  async function halt(t, reason) {
-    t.cancelled = true;
-    running = false;
-    token = null;
-    setStatus(`已停止 —— ${reason}`);
-    setCourseProgress(null);
-    log9.warn(reason);
-    host?.toast(reason, "warn");
-    notify();
-  }
-  async function handleRow(row3, name, t) {
-    if (isComplete(row3)) {
-      log9.debug(`这一项站点标了完成，跳过：${name}`);
-      return;
-    }
-    const kind = kindOf2(row3);
-    setStatus(`连播中：正在处理「${name}」（${KIND_TEXT[kind]}）`);
-    await waitFor(() => viewerReady(), VIEW_WAIT_MS, t);
-    if (!running || t.cancelled) return;
-    const v = viewerOf();
-    if (kind === "video" || v.video !== null) {
-      if (v.video === null) {
-        log9.warn(`看着像视频但没找到 <video>，等一会儿就往下走：「${name}」`);
-      } else {
-        const ok = await waitVideoEnd(v.video, t);
-        log9.info(`视频「${name}」${ok ? "已播完" : "没等到播完（被停止或出错）"}`);
-        if (!running || t.cancelled) return;
-      }
-    } else if (kind === "quiz" || v.hasQuizFrame) {
-      if (!isEnabled(SITE_ID, TOGGLE.AI_ANSWER)) {
-        await halt(t, `走到测验「${name}」，AI 答题没开 —— 连播停下，你处理完再点【开始连播】`);
-        return;
-      }
-      const tid = quizTidOnPage();
-      if (tid === null) {
-        await halt(t, `走到测验「${name}」但读不出 tid —— 连播停下等你`);
-        return;
-      }
-      if (host === null) return;
-      setStatus(`连播中：正在作答「${name}」`);
-      log9.info(`测验「${name}」→ tid=${tid}，交给 AI 作答`);
-      await runQuizAnswer(tid, host);
-      if (!running || t.cancelled) return;
-    } else if (kind === "discussion") {
-      await halt(t, `走到讨论「${name}」—— 连播停下，你处理完再点【开始连播】`);
-      return;
-    } else if (kind === "attach") {
-      log9.debug(`附件「${name}」：不打开文件，直接下一项`);
-    } else if (kind !== "text") {
-      if (v.hasFrame) log9.warn(`这一项是个 iframe 但没有 tid，认不出来是什么：「${name}」`);
-      else log9.warn(`认不出这一项是什么（类型 ${kind}）：「${name}」`);
-      setStatus(`连播中：认不出「${name}」，稍等就继续`);
-    }
-    await sleep(holdAfterMs(), t);
-  }
-  async function loop(t) {
-    const STUCK_LIMIT = 20;
-    let lastSig = "";
-    let sameCount = 0;
-    let lastLog = "";
-    for (; ; ) {
-      if (!running || t.cancelled) return;
-      await yieldToBrowser();
-      const root = catalogRoot();
-      if (root === null) {
-        await halt(t, "找不到课程目录 DOM（div.panel-catalog ul.rank-1），连播停止");
-        return;
-      }
-      const s = snapshot(root);
-      publishCourseProgress(s);
-      const step = nextStep(s);
-      const sig = stepSignature(step);
-      if (sig === lastSig) sameCount += 1;
-      else {
-        lastSig = sig;
-        sameCount = 0;
-      }
-      if (sig !== lastLog) {
-        log9.debug(`下一步：${step.kind}`);
-        lastLog = sig;
-      }
-      if (step.kind !== "end" && step.kind !== "stop" && sameCount >= STUCK_LIMIT) {
-        await halt(
-          t,
-          `连播卡住了：连续 ${sameCount + 1} 轮都停在「${describeStep(step)}」，已停止`
-        );
-        return;
-      }
-      switch (step.kind) {
-        case "stop":
-          await halt(t, step.why);
-          return;
-        case "end":
-          await halt(t, "已经是最后一章最后一节，连播结束");
-          return;
-        case "expand-chapter": {
-          setStatus(`连播中：正在展开 ${step.name}`);
-          cursor = rowAt(step.chapterId, "", -1);
-          rowMark = null;
-          const ok = await clickNav(step.el, t);
-          if (!ok) {
-            markSkip(step);
-            log9.warn(`这一章点不动，跳过去：${step.name}`);
-            break;
-          }
-          const shown = await waitFor(() => {
-            const li = findChapterById(step.chapterId);
-            return li !== null && chapterBody(li) !== null;
-          }, NAV_WAIT_MS, t);
-          if (!shown) {
-            markSkip(step);
-            log9.warn(`这一章展开不出来，跳过去：${step.name}`);
-            break;
-          }
-          await sleep(waitBeforeMs(), t);
-          break;
-        }
-        case "expand-section": {
-          setStatus(`连播中：正在展开 ${step.name}`);
-          cursor = rowAt(step.chapterId, step.sectionId, -1);
-          rowMark = null;
-          const ok = await clickNav(step.el, t);
-          if (!ok) {
-            markSkip(step);
-            log9.warn(`这一节点不动，跳过去：${step.name}`);
-            break;
-          }
-          const shown = await waitFor(() => {
-            const chap = findChapterById(step.chapterId);
-            if (chap === null) return false;
-            const li = findSectionById(chap, step.sectionId);
-            return li !== null && resourceList(li) !== null;
-          }, NAV_WAIT_MS, t);
-          if (!shown) {
-            markSkip(step);
-            log9.warn(`这一节展开不出来，跳过去：${step.name}`);
-            break;
-          }
-          await sleep(waitBeforeMs(), t);
-          break;
-        }
-        case "click-row": {
-          setStatus(`连播中：正在进入「${step.name}」`);
-          const c = rowAt(step.chapterId, step.sectionId, step.resourceIdx);
-          cursor = c;
-          rowMark = { key: keyOf(c), phase: "clicked" };
-          const ok = await clickNav(step.row, t);
-          if (!ok) {
-            step.row.setAttribute(SKIP_ATTR, "1");
-            rowMark = null;
-            log9.warn(`这一项点不动，跳过：${step.name}`);
-            break;
-          }
-          await sleep(waitBeforeMs(), t);
-          break;
-        }
-        case "handle": {
-          const c = rowAt(step.chapterId, step.sectionId, step.resourceIdx);
-          cursor = c;
-          await handleRow(step.row, step.name, t);
-          handled.add(keyOf(c));
-          rowMark = { key: keyOf(c), phase: "done" };
-          if (!running || t.cancelled) return;
-          break;
-        }
-      }
-    }
-  }
-  function publishCourseProgress(s) {
-    if (s.chapLi === null) {
-      setCourseProgress(null);
-      return;
-    }
-    const chapName = textOf(chapterTitle(s.chapLi));
-    const parts = [];
-    if (chapName !== "") parts.push(chapName);
-    if (s.secLi === null) {
-      setCourseProgress({ index: s.ci + 1, total: s.chs.length, label: parts.join(" ") });
-      return;
-    }
-    const secName = textOf(sectionTitle(s.secLi));
-    if (secName !== "") parts.push(secName);
-    const rows = s.rows;
-    let ri = cursor !== null && cursor.chapterId === s.chapterId && cursor.sectionId === s.sectionId ? cursor.resourceIdx : -1;
-    if (ri < 0) ri = rows.findIndex((r) => isActive(r));
-    if (ri >= 0 && rows[ri] !== void 0) {
-      const nm = rowName(rows[ri]);
-      if (nm !== "") parts.push(`「${nm}」`);
-      setCourseProgress({ index: ri + 1, total: rows.length, label: parts.join(" ") });
-      return;
-    }
-    setCourseProgress({ index: s.si + 1, total: s.secs.length, label: parts.join(" ") });
   }
 
   // src/sites/uooc/tabs/ai.ts
@@ -4188,37 +3617,579 @@ ${options.desc ?? ""}
     }
   };
 
+  // src/sites/uooc/fetch-catalog.ts
+  var log11 = scoped("uooc/fetch-catalog");
+  var CATALOG_PATH = "/home/learn/getCatalogList";
+  var FALLBACK_ORIGIN = "https://www.uooc.net.cn";
+  var CATALOG_ATTEMPTS = 3;
+  var CATALOG_RETRY_DELAY_MS = 2e3;
+  var CATALOG_TIMEOUT_MS = 3e4;
+  var DETAIL_MAX_CHARS = 200;
+  function defaultOrigin() {
+    const loc = globalThis.location;
+    const origin = loc?.origin;
+    return typeof origin === "string" && origin !== "" ? origin : FALLBACK_ORIGIN;
+  }
+  function catalogListUrl(cid, origin = defaultOrigin()) {
+    return `${origin}${CATALOG_PATH}?cid=${encodeURIComponent(cid)}&hidemsg_=true`;
+  }
+  var defaultSender = async (url, timeoutMs) => {
+    const res = await request({
+      url,
+      method: "GET",
+      responseType: "json",
+      timeoutMs,
+      priority: PRIORITY.NORMAL,
+      channel: "page"
+    });
+    return { status: res.status, text: res.text, json: res.json };
+  };
+  function truncateDetail(text2) {
+    const flat = text2.replace(/\s+/g, " ").trim();
+    return flat.length <= DETAIL_MAX_CHARS ? flat : `${flat.slice(0, DETAIL_MAX_CHARS)}…`;
+  }
+  function errorText(err) {
+    if (err instanceof Error) return err.message;
+    return String(err);
+  }
+  function parseCatalogResponse(json, cid) {
+    if (json === null || typeof json !== "object") {
+      return { ok: false, failure: { kind: "shape", detail: "响应不是对象" } };
+    }
+    const root = json;
+    if (Number(root.code) !== 1) {
+      return {
+        ok: false,
+        failure: {
+          kind: "business",
+          code: root.code,
+          detail: `code=${String(root.code)} msg=${String(root.msg ?? "")}`
+        }
+      };
+    }
+    if (!Array.isArray(root.data)) {
+      return { ok: false, failure: { kind: "shape", detail: "code=1 但 data 不是数组" } };
+    }
+    return { ok: true, points: flattenTaskPoints(root.data, cid), raw: json };
+  }
+  function describeFailure(failure) {
+    switch (failure.kind) {
+      case "network":
+        return `网络错误：${failure.detail}`;
+      case "http":
+        return `HTTP ${failure.status}：${failure.detail}`;
+      case "business":
+        return `业务码异常：${failure.detail}`;
+      case "shape":
+        return `响应结构异常：${failure.detail}`;
+      case "aborted":
+        return `已中止：${failure.detail}`;
+      default:
+        return "未知失败";
+    }
+  }
+  function defaultSleep(ms) {
+    return new Promise((resolve2) => {
+      setTimeout(resolve2, ms);
+    });
+  }
+  async function attemptOnce(send, url, cid) {
+    let res;
+    try {
+      res = await send(url, CATALOG_TIMEOUT_MS);
+    } catch (err) {
+      return { ok: false, failure: { kind: "network", detail: errorText(err) } };
+    }
+    if (res.status < 200 || res.status >= 300) {
+      return {
+        ok: false,
+        failure: { kind: "http", status: res.status, detail: truncateDetail(res.text) }
+      };
+    }
+    return parseCatalogResponse(res.json, cid);
+  }
+  async function fetchCatalogPoints(options) {
+    const { cid } = options;
+    const send = options.send ?? defaultSender;
+    const sleep3 = options.sleep ?? defaultSleep;
+    const url = catalogListUrl(cid, options.origin);
+    let attempts = 0;
+    let lastFailure = { kind: "network", detail: "一次都没发出去" };
+    const aborted = () => ({
+      ok: false,
+      attempts,
+      failure: { kind: "aborted", detail: "等待重试期间用户停止了接管" }
+    });
+    for (let attempt2 = 1; attempt2 <= CATALOG_ATTEMPTS; attempt2 += 1) {
+      attempts = attempt2;
+      if (attempt2 > 1 && options.shouldAbort?.() === true) return aborted();
+      const outcome = await attemptOnce(send, url, cid);
+      if (outcome.ok) {
+        log11.info(`取到课程树：${outcome.points.length} 个任务点（第 ${attempt2}/${CATALOG_ATTEMPTS} 次）`);
+        return { ok: true, attempts: attempt2, points: outcome.points, raw: outcome.raw };
+      }
+      lastFailure = outcome.failure;
+      log11.warn(`取课程树第 ${attempt2}/${CATALOG_ATTEMPTS} 次失败 —— ${describeFailure(lastFailure)}`);
+      if (attempt2 >= CATALOG_ATTEMPTS) break;
+      if (options.shouldAbort?.() === true) return aborted();
+      await sleep3(CATALOG_RETRY_DELAY_MS);
+      if (options.shouldAbort?.() === true) return aborted();
+    }
+    log11.error(`取课程树彻底失败（共 ${attempts} 次）—— ${describeFailure(lastFailure)}`);
+    return { ok: false, attempts, failure: lastFailure };
+  }
+
+  // src/sites/uooc/takeover.ts
+  var log12 = scoped("uooc/takeover");
+  var VIEWER_SEL = "div.showViewer";
+  var POLL_MS = 200;
+  var STUCK_LIMIT = 3;
+  var QUIZ_MAX_ROUNDS = 3;
+  var ALERT_DEDUPE = "sztb-uooc-takeover-alert";
+  var VIDEO_SLACK_MS2 = 10 * 60 * 1e3;
+  var VIDEO_MIN_MS2 = 5 * 60 * 1e3;
+  var VIDEO_MAX_MS2 = 6 * 60 * 60 * 1e3;
+  var IDLE_TEXT = "已停止 —— 点【开始接管】从第一个未完成任务点接着走";
+  var running2 = false;
+  var statusText2 = IDLE_TEXT;
+  var token2 = null;
+  var listeners4 = /* @__PURE__ */ new Set();
+  function notify2() {
+    for (const fn of [...listeners4]) {
+      try {
+        fn();
+      } catch {
+      }
+    }
+  }
+  function setStatus2(text2) {
+    statusText2 = text2;
+    notify2();
+  }
+  function takeoverStatus() {
+    return { running: running2, text: statusText2 };
+  }
+  function subscribeTakeover(fn) {
+    listeners4.add(fn);
+    return () => {
+      listeners4.delete(fn);
+    };
+  }
+  function takeoverStart(host2) {
+    if (running2) {
+      log12.warn("接管已经在跑，这次【开始接管】被忽略");
+      return;
+    }
+    const t = { cancelled: false };
+    token2 = t;
+    running2 = true;
+    setStatus2("接管中：正在读取课程目录…");
+    void loop(host2, t).catch((err) => {
+      const detail = err instanceof Error ? err.message : String(err);
+      log12.error("接管循环异常退出", detail);
+      void fatal(host2, `已停止 —— 接管内部出错：${detail}`, `接管循环抛了异常：
+
+${detail}`);
+    });
+  }
+  function takeoverStop() {
+    const t = token2;
+    if (t === null) return;
+    t.cancelled = true;
+    release();
+    setStatus2(IDLE_TEXT);
+  }
+  function release() {
+    running2 = false;
+    token2 = null;
+    setCourseProgress(null);
+  }
+  function stop(text2) {
+    release();
+    setStatus2(text2);
+  }
+  async function fatal(host2, status, body) {
+    release();
+    setStatus2(status);
+    log12.warn(status);
+    host2.toast(status, "warn");
+    await host2.alert({
+      title: "接管已停止",
+      body,
+      danger: true,
+      dedupeClass: ALERT_DEDUPE,
+      actions: [{ key: "ok", label: "知道了", variant: "primary" }]
+    });
+  }
+  async function fatalCatalog(host2, failure, attempts) {
+    const detail = describeFailure(failure);
+    log12.error(`取课程目录失败（已试 ${attempts} 次）：${detail}`);
+    await fatal(
+      host2,
+      "已停止 —— 读取课程目录失败",
+      `连着试了 ${attempts} 次都没能拿到课程目录（间隔 2 秒、单次超时 30 秒）。
+
+${detail}
+
+多半是断网或登录态失效。处理完之后点【开始接管】重来。`
+    );
+  }
+  function sleep(ms, t) {
+    return new Promise((resolve2) => {
+      if (t.cancelled || ms <= 0) {
+        resolve2();
+        return;
+      }
+      let done = false;
+      const finish2 = () => {
+        if (done) return;
+        done = true;
+        window.clearTimeout(timer3);
+        window.clearInterval(iv);
+        resolve2();
+      };
+      const timer3 = window.setTimeout(finish2, ms);
+      const iv = window.setInterval(() => {
+        if (t.cancelled) finish2();
+      }, POLL_MS);
+    });
+  }
+  async function waitFor(pred, timeoutMs, t) {
+    const deadline = Date.now() + timeoutMs;
+    for (; ; ) {
+      if (t.cancelled) return false;
+      if (pred()) return true;
+      if (Date.now() >= deadline) return false;
+      await sleep(POLL_MS, t);
+    }
+  }
+  function viewerSignature() {
+    const box = document.querySelector(VIEWER_SEL);
+    if (box === null) return "";
+    const parts = [];
+    box.querySelectorAll("video").forEach((v) => parts.push(`v:${v.getAttribute("src") ?? ""}`));
+    box.querySelectorAll("iframe").forEach((f) => parts.push(`i:${f.getAttribute("src") ?? ""}`));
+    return parts.join("|");
+  }
+  function viewerReady(kind) {
+    const box = document.querySelector(VIEWER_SEL);
+    if (box === null) return false;
+    if (kind === "video") return box.querySelector("video") !== null;
+    return box.querySelector("iframe") !== null && quizTidOnPage() !== null;
+  }
+  async function gotoPoint(point, kind, t) {
+    const needsChange = location.hash !== point.hash;
+    const before = needsChange ? viewerSignature() : "";
+    if (needsChange) {
+      log12.info(`跳转 ${point.hash}`);
+      location.hash = point.hash;
+    } else {
+      log12.debug(`已经在这一项上了（${point.hash}），不再改 hash`);
+    }
+    await sleep(waitBeforeMs(), t);
+    if (t.cancelled) return false;
+    const ok = await waitFor(() => {
+      if (!viewerReady(kind)) return false;
+      return !needsChange || viewerSignature() !== before;
+    }, waitTimeoutMs(), t);
+    if (ok) log12.info(`内容已就绪：${pointLabel(point)}`);
+    return ok;
+  }
+  function waitVideoEnd(video, t) {
+    return new Promise((resolve2) => {
+      if (video.ended) {
+        resolve2(true);
+        return;
+      }
+      const rate = video.playbackRate > 0 ? video.playbackRate : 1;
+      const remaining = Number.isFinite(video.duration) ? (video.duration - video.currentTime) / rate : 0;
+      const budget = Math.min(VIDEO_MAX_MS2, Math.max(VIDEO_MIN_MS2, remaining * 1e3 + VIDEO_SLACK_MS2));
+      let done = false;
+      const finish2 = (ok) => {
+        if (done) return;
+        done = true;
+        window.clearTimeout(timer3);
+        window.clearInterval(iv);
+        video.removeEventListener("ended", onEnded);
+        video.removeEventListener("error", onError);
+        resolve2(ok);
+      };
+      const onEnded = () => finish2(true);
+      const onError = () => finish2(false);
+      const timer3 = window.setTimeout(() => finish2(video.ended), budget);
+      const iv = window.setInterval(() => {
+        if (t.cancelled) finish2(false);
+      }, POLL_MS);
+      video.addEventListener("ended", onEnded);
+      video.addEventListener("error", onError);
+    });
+  }
+  function pointLabel(point) {
+    const parts = point.path.filter((s) => s !== "");
+    const tail = point.name === "" ? "" : `「${point.name}」`;
+    const head = parts.length === 0 ? "" : parts.join(" ");
+    return `${head}${tail}` === "" ? point.typeName || point.nodeId : `${head}${tail}`;
+  }
+  function publishProgress(sum, current) {
+    const label = current === null ? "" : pointLabel(current);
+    setCourseProgress({ index: sum.done, total: sum.total, label });
+  }
+  async function reload(ctx, t) {
+    const res = await fetchCatalogPoints({ cid: ctx.cid, shouldAbort: () => t.cancelled });
+    if (res.ok) {
+      ctx.points = res.points;
+      return true;
+    }
+    if (res.failure.kind === "aborted") return false;
+    await fatalCatalog(ctx.host, res.failure, res.attempts);
+    return false;
+  }
+  function stillUnfinished(ctx, nodeId) {
+    const found = ctx.points.find((p) => p.nodeId === nodeId);
+    return found !== void 0 && !found.finished;
+  }
+  async function loop(host2, t) {
+    const cid = courseIdFromLocation(location.pathname, location.hash);
+    if (cid === null) {
+      stop("已停止 —— 认不出这是哪门课（地址栏里没有 cid）");
+      log12.warn(`认不出 cid：pathname=${location.pathname} hash=${location.hash}`);
+      return;
+    }
+    const ctx = { host: host2, cid, skipped: /* @__PURE__ */ new Set(), warnedTypes: /* @__PURE__ */ new Set(), points: [] };
+    const first = await fetchCatalogPoints({ cid, shouldAbort: () => t.cancelled });
+    if (!first.ok) {
+      if (first.failure.kind === "aborted") return;
+      await fatalCatalog(host2, first.failure, first.attempts);
+      return;
+    }
+    ctx.points = first.points;
+    log12.info(`课程 ${cid} 共 ${first.points.length} 个任务点`);
+    if (first.points.length === 0) {
+      stop("已停止 —— 这门课一个任务点都没有");
+      return;
+    }
+    let lastNodeId = "";
+    let stuck = 0;
+    for (; ; ) {
+      if (t.cancelled) return;
+      const sum = summarizeTaskPoints(ctx.points);
+      const point = firstUnfinished(ctx.points, ctx.skipped);
+      publishProgress(sum, point);
+      if (sum.done === sum.total) {
+        release();
+        setStatus2("已停止 —— 全部任务点都完成了 🎉");
+        log12.info("全部任务点都完成了");
+        return;
+      }
+      if (point === null) {
+        stop(`已停止 —— 剩 ${sum.total - sum.done} 个任务点本站不自动处理，其余都完成了`);
+        log12.info(`没有可自动处理的任务点了，跳过 ${ctx.skipped.size} 个`);
+        return;
+      }
+      stuck = point.nodeId === lastNodeId ? stuck + 1 : 1;
+      lastNodeId = point.nodeId;
+      if (stuck > STUCK_LIMIT) {
+        await fatal(
+          host2,
+          `已停止 —— 任务点「${point.name}」连续 ${STUCK_LIMIT} 轮没有进展`,
+          `同一个任务点被连续挑中 ${STUCK_LIMIT} 次都没能往下走，判定为卡死。
+
+位置：${pointLabel(point)}
+形态：${point.form}
+这多半是本工具的 bug（而不是站点的问题），可以带着上面的信息反馈。`
+        );
+        return;
+      }
+      if (point.form === "unsupported") {
+        log12.warn(`任务点「${point.name}」(${point.nodeId}) 的路径形态不支持，已跳过`);
+        ctx.skipped.add(point.nodeId);
+        continue;
+      }
+      if (point.kind === "attach" || point.kind === "text" || point.kind === "discussion") {
+        log12.debug(`${point.typeName || point.kind}「${point.name}」：不打开，直接跳过`);
+        ctx.skipped.add(point.nodeId);
+        continue;
+      }
+      if (point.kind === "unknown") {
+        if (!ctx.warnedTypes.has(point.type)) {
+          ctx.warnedTypes.add(point.type);
+          log12.warn(`遇到未知类型 ${point.type}（${point.typeName || "无名字"}），已跳过`);
+        }
+        ctx.skipped.add(point.nodeId);
+        continue;
+      }
+      const kind = point.kind === "video" ? "video" : "quiz";
+      setStatus2(`接管中：${kind === "video" ? "正在播放" : "正在作答"} ${pointLabel(point)}（${sum.done}/${sum.total} 已完成）`);
+      const handled = kind === "video" ? await handleVideo(ctx, point, t) : await handleQuiz(ctx, point, t);
+      if (t.cancelled) return;
+      if (!handled) return;
+      if (!await reload(ctx, t)) return;
+      if (t.cancelled) return;
+      if (!stillUnfinished(ctx, point.nodeId)) continue;
+      if (kind === "video") {
+        setStatus2(`接管中：视频「${point.name}」播完了，等站点记账（最多 ${Math.round(waitTimeoutMs() / 1e3)} 秒）…`);
+        log12.info(`视频「${point.name}」播完了但还没记完成，等 ${waitTimeoutMs()}ms 再拉一次`);
+        await sleep(waitTimeoutMs(), t);
+        if (t.cancelled) return;
+        if (!await reload(ctx, t)) return;
+        if (t.cancelled) return;
+        if (!stillUnfinished(ctx, point.nodeId)) continue;
+        await fatal(
+          host2,
+          `已停止 —— 视频「${point.name}」播完两轮仍未记完成`,
+          `这一项已经完整播完，又等了两轮（${holdAfterMs()} 毫秒 + ${waitTimeoutMs()} 毫秒）重新拉取课程目录，站点那边仍然显示未完成。
+
+位置：${pointLabel(point)}
+
+可能原因：播放没真正到底（比如一直卡着 / 被暂停）、或者站点记账更慢。
+去页面看一眼这一项现在的状态，再决定要不要点【开始接管】接着走。`
+        );
+        return;
+      }
+      await fatal(
+        host2,
+        `已停止 —— 测验「${point.name}」答了 ${QUIZ_MAX_ROUNDS} 轮仍未记完成`,
+        `这个测验连着作答并提交了 ${QUIZ_MAX_ROUNDS} 轮，站点那边仍然显示未完成，多半是分数没到及格线。
+
+位置：${pointLabel(point)}
+
+去页面看一眼得分与及格线，再决定要不要点【开始接管】接着走。`
+      );
+      return;
+    }
+  }
+  async function handleVideo(ctx, point, t) {
+    if (!await gotoPoint(point, "video", t)) {
+      if (t.cancelled) return false;
+      await fatal(
+        ctx.host,
+        `已停止 —— 视频「${point.name}」等满等待超时也没出现播放器`,
+        `跳到这一项之后，等了 ${Math.round(waitTimeoutMs() / 1e3)} 秒都没等到播放器出现。
+
+位置：${pointLabel(point)}
+形态：${point.form}
+跳转地址：${point.hash}
+
+如果是四级路径（\`/subsection\`）的项，那说明这套 hash 拼法没被站点认下来 —— 这是新方案里**唯一没有实证**的地方，把上面那一行地址反馈给开发者。`
+      );
+      return false;
+    }
+    const box = document.querySelector(VIEWER_SEL);
+    const video = box?.querySelector("video");
+    if (video === void 0 || video === null) {
+      await fatal(
+        ctx.host,
+        `已停止 —— 视频「${point.name}」找到了播放器却拿不到 video 元素`,
+        `内容区里出现了 \`div.showViewer\`，但里面取不到 \`<video>\`。多半是页面结构和预期不一致，请反馈。`
+      );
+      return false;
+    }
+    log12.info(`视频「${point.name}」开始等播完（当前 ${video.currentTime.toFixed(1)}s / ${String(video.duration)}s）`);
+    const ended = await waitVideoEnd(video, t);
+    if (t.cancelled) return false;
+    if (!ended) {
+      log12.warn(`视频「${point.name}」没等到播完（被暂停 / 出错 / 超保底时长），转去核实完成状态`);
+    }
+    await sleep(holdAfterMs(), t);
+    return !t.cancelled;
+  }
+  async function handleQuiz(ctx, point, t) {
+    if (!isEnabled(SITE_ID, TOGGLE.AI_ANSWER)) {
+      await fatal(
+        ctx.host,
+        `已停止 —— 测验「${point.name}」到了，但 AI 作答没开`,
+        `走到测验了，但【AI 作答】开关是关着的。
+
+位置：${pointLabel(point)}
+
+没有替你跳过：跳过等于在不知情的情况下漏掉一整个测验。
+去【AI 作答】页把开关打开（顺便确认接口地址与模型名填好了），再点【开始接管】。`
+      );
+      return false;
+    }
+    if (!await gotoPoint(point, "quiz", t)) {
+      if (t.cancelled) return false;
+      await fatal(
+        ctx.host,
+        `已停止 —— 测验「${point.name}」等满等待超时还没出题`,
+        `跳到这一项之后，等了 ${Math.round(waitTimeoutMs() / 1e3)} 秒，测验的题目一直没渲染出来。
+
+位置：${pointLabel(point)}
+跳转地址：${point.hash}
+
+去页面看一眼这项到底是什么情况，再决定要不要点【开始接管】接着走。`
+      );
+      return false;
+    }
+    const tid = quizTidOnPage();
+    if (tid === null) {
+      stop(`已停止 —— 测验「${point.name}」读不出 tid`);
+      log12.warn(`测验「${point.name}」的内容区有 iframe 但读不出 tid`);
+      return false;
+    }
+    for (let round2 = 1; round2 <= QUIZ_MAX_ROUNDS; round2 += 1) {
+      if (t.cancelled) return false;
+      setStatus2(`接管中：正在作答 ${pointLabel(point)}（第 ${round2}/${QUIZ_MAX_ROUNDS} 轮）`);
+      const result = await runQuizAnswer(tid, ctx.host);
+      if (t.cancelled) return false;
+      if (result === null) {
+        stop(`已停止 —— 测验「${point.name}」没能开始作答（看日志与提示）`);
+        log12.warn(`runQuizAnswer 返回 null，测验「${point.name}」没跑起来`);
+        return false;
+      }
+      const verdict = result.commit?.verdict ?? null;
+      if (verdict === "pass") {
+        log12.info(`测验「${point.name}」第 ${round2} 轮通过（得分 ${result.commit?.score ?? "?"}）`);
+        break;
+      }
+      if (verdict === null || verdict === "unknown") {
+        log12.info(`测验「${point.name}」第 ${round2} 轮没拿到可判读的交卷结果，交给重拉核实`);
+        break;
+      }
+      log12.warn(
+        `测验「${point.name}」第 ${round2} 轮未通过：${result.commit?.message ?? ""}（得分 ${result.commit?.score ?? "?"} / 门槛 ${result.commit?.passScore ?? "?"}）`
+      );
+      if (round2 === QUIZ_MAX_ROUNDS) {
+        setStatus2(`接管中：测验「${point.name}」${QUIZ_MAX_ROUNDS} 轮都没过，交给重拉核实`);
+        break;
+      }
+      setStatus2(`接管中：测验「${point.name}」第 ${round2} 轮没过（得分 ${result.commit?.score ?? "?"}），重做…`);
+      await sleep(holdAfterMs(), t);
+    }
+    return !t.cancelled;
+  }
+
   // src/sites/uooc/tabs/autoplay.ts
   var UOOC_AUTOPLAY_TAB = {
     id: `${SITE_ID}:autoplay`,
-    title: "连播",
+    title: "接管",
     order: 210,
     mount(root, ctx) {
       const startBtn = el("button", {
         class: "sztb-btn",
-        text: "开始连播",
+        text: "开始接管",
         attrs: { type: "button", "data-variant": "primary" }
       });
       const stopBtn = el("button", {
         class: "sztb-btn",
-        text: "停止连播",
+        text: "停止接管",
         attrs: { type: "button", "data-variant": "danger" }
       });
       startBtn.addEventListener("click", () => {
-        autoplayStart();
+        takeoverStart(ctx.host);
       });
       stopBtn.addEventListener("click", () => {
-        autoplayStop();
+        takeoverStop();
       });
       const statusLine = el("div", { class: "sztb-field-desc" });
       const sync = () => {
-        const s = autoplayStatus();
+        const s = takeoverStatus();
         statusLine.textContent = s.text;
         startBtn.disabled = s.running;
         stopBtn.disabled = !s.running;
       };
       sync();
-      const off = subscribeAutoplay(() => {
+      const off = subscribeTakeover(() => {
         if (!root.isConnected) {
           off();
           return;
@@ -4227,12 +4198,11 @@ ${options.desc ?? ""}
       });
       root.appendChild(el("div", { class: "sztb-toolbar" }, startBtn, stopBtn));
       root.appendChild(statusLine);
-      root.appendChild(renderSiteSettings(SITE_ID, null, ctx, { onlyGroups: [GROUP.AUTOPLAY] }));
     }
   };
 
   // src/sites/uooc/tabs/monitor.ts
-  var log11 = scoped("uooc/monitor-tab");
+  var log13 = scoped("uooc/monitor-tab");
   var PHASE_TEXT = {
     idle: "空闲",
     fetching: "正在拉题…",
@@ -4335,7 +4305,7 @@ ${options.desc ?? ""}
         }
         draw();
       });
-      log11.debug("监视页已挂载");
+      log13.debug("监视页已挂载");
     }
   };
 
@@ -4349,8 +4319,18 @@ ${options.desc ?? ""}
     }
   };
 
+  // src/sites/uooc/tabs/wait.ts
+  var UOOC_WAIT_TAB = {
+    id: `${SITE_ID}:wait`,
+    title: "等待",
+    order: 240,
+    mount(root, ctx) {
+      root.appendChild(renderSiteSettings(SITE_ID, null, ctx, { onlyGroups: [GROUP.AUTOPLAY] }));
+    }
+  };
+
   // src/sites/uooc/video.ts
-  var log12 = scoped("uooc/video");
+  var log14 = scoped("uooc/video");
   var VIDEO_ID = "player_html5_api";
   var TARGET_RATE = 2;
   var RESCAN_DEBOUNCE_MS = 200;
@@ -4374,7 +4354,7 @@ ${options.desc ?? ""}
       if (stamps.length >= FIGHT_MAX) {
         mutedUntil = now + FIGHT_COOLDOWN_MS;
         stamps.length = 0;
-        log12.warn(`${label}在 ${FIGHT_WINDOW_MS / 1e3} 秒内被反复改回，暂停纠正 ${FIGHT_COOLDOWN_MS / 1e3} 秒`);
+        log14.warn(`${label}在 ${FIGHT_WINDOW_MS / 1e3} 秒内被反复改回，暂停纠正 ${FIGHT_COOLDOWN_MS / 1e3} 秒`);
         return false;
       }
       stamps.push(now);
@@ -4407,7 +4387,7 @@ ${options.desc ?? ""}
       const found = asVideo(doc.getElementById(VIDEO_ID)) ?? asVideo(doc.querySelector("video"));
       if (found !== null) {
         cachedFrameVideo = found;
-        log12.debug("播放器在同源 iframe 内，已切换查找目标");
+        log14.debug("播放器在同源 iframe 内，已切换查找目标");
         return found;
       }
     }
@@ -4442,7 +4422,7 @@ ${options.desc ?? ""}
     applied.set(v, state2);
     if (!announced.has(v)) {
       announced.add(v);
-      log12.info(
+      log14.info(
         `播放器助手已就绪：二倍速=${wantRate ? "开" : "关"}，静音=${wantMute ? "开" : "关"}，防失焦=${isEnabled(SITE_ID, TOGGLE.KEEP_PLAYING) ? "开" : "关"}（当前速率 ${v.playbackRate}x）`
       );
     }
@@ -4456,7 +4436,7 @@ ${options.desc ?? ""}
     const p = v.play();
     if (p !== void 0 && typeof p.catch === "function") {
       p.catch((err) => {
-        log12.debug(`抢播被拒绝：${err instanceof Error ? err.message : String(err)}`);
+        log14.debug(`抢播被拒绝：${err instanceof Error ? err.message : String(err)}`);
       });
     }
   }
@@ -4518,7 +4498,7 @@ ${options.desc ?? ""}
     document.addEventListener("volumechange", onMediaEvent, true);
     window.addEventListener("hashchange", schedule2);
     window.addEventListener("popstate", schedule2);
-    log12.debug("视频助手已挂载（二倍速 / 静音 / 防失焦）");
+    log14.debug("视频助手已挂载（二倍速 / 静音 / 防失焦）");
     return () => {
       stopped = true;
       if (timer3 !== null) {
@@ -4535,7 +4515,7 @@ ${options.desc ?? ""}
   }
 
   // src/sites/uooc/video-quiz.ts
-  var log13 = scoped("uooc/video-quiz");
+  var log15 = scoped("uooc/video-quiz");
   var LAYER_SEL = "#quizLayer";
   var DONE_ATTR = "data-sztb-quiz-done";
   var INPUT_SEL = 'input[name^="answer_"]';
@@ -4584,7 +4564,7 @@ ${options.desc ?? ""}
         try {
           parsed = JSON.parse(raw);
         } catch {
-          log13.warn("视频容器的 source 属性不是合法 JSON，跳过");
+          log15.warn("视频容器的 source 属性不是合法 JSON，跳过");
           continue;
         }
         if (parsed === null || typeof parsed !== "object") continue;
@@ -4604,7 +4584,7 @@ ${options.desc ?? ""}
     if (inputs.length === 0) return null;
     const answers = videoQuizAnswers();
     if (answers.size === 0) {
-      log13.warn("弹层里有题，但页面上找不到 quiz 数据（视频容器的 source 属性变了？），留给用户");
+      log15.warn("弹层里有题，但页面上找不到 quiz 数据（视频容器的 source 属性变了？），留给用户");
       return null;
     }
     const groups = /* @__PURE__ */ new Map();
@@ -4622,7 +4602,7 @@ ${options.desc ?? ""}
       const want = answers.get(id);
       if (want === void 0) {
         missing += 1;
-        log13.warn(`小测 ${id} 在页面的 quiz 数据里找不到，留给用户`);
+        log15.warn(`小测 ${id} 在页面的 quiz 数据里找不到，留给用户`);
         continue;
       }
       const wantSet = new Set(want.map((s) => s.toUpperCase()));
@@ -4635,26 +4615,26 @@ ${options.desc ?? ""}
       if (hit > 0) answered += 1;
       else {
         missing += 1;
-        log13.warn(`小测 ${id} 的答案 [${want.join(",")}] 在选项里找不到对应项，留给用户`);
+        log15.warn(`小测 ${id} 的答案 [${want.join(",")}] 在选项里找不到对应项，留给用户`);
       }
     }
     if (answered === 0) return { questions: groups.size, answered: 0, sure: false };
     const box = layer.closest(".layui-layer") ?? layer;
     const sure = box.querySelector(SURE_SEL) ?? box.querySelector(SURE_FALLBACK_SEL);
     if (sure === null) {
-      log13.warn("小测弹层里没有【确定】按钮，答案已选好，请你点一下");
+      log15.warn("小测弹层里没有【确定】按钮，答案已选好，请你点一下");
       return { questions: groups.size, answered, sure: false };
     }
     layer.setAttribute(DONE_ATTR, "1");
     sure.click();
-    log13.info(
+    log15.info(
       `视频小测已作答：${answered}/${groups.size} 题（${missing} 题没对上），已点【确定】`
     );
     await new Promise((resolve2) => {
       window.setTimeout(resolve2, AFTER_SURE_MS);
     });
     if (layer.isConnected) {
-      log13.warn("点了【确定】但小测弹层还在 —— 可能答案不对，交给用户处理（不重试）");
+      log15.warn("点了【确定】但小测弹层还在 —— 可能答案不对，交给用户处理（不重试）");
     }
     return { questions: groups.size, answered, sure: true };
   }
@@ -4679,7 +4659,7 @@ ${options.desc ?? ""}
     const observer = new MutationObserver(schedule2);
     observer.observe(document.documentElement, { childList: true, subtree: true });
     window.addEventListener("hashchange", schedule2);
-    log13.debug("视频小测助手已挂载（读 DOM 里的答案，无声作答）");
+    log15.debug("视频小测助手已挂载（读 DOM 里的答案，无声作答）");
     return () => {
       stopped = true;
       if (timer3 !== null) {
@@ -4692,7 +4672,7 @@ ${options.desc ?? ""}
   }
 
   // src/sites/uooc/index.ts
-  var log14 = scoped("site/uooc");
+  var log16 = scoped("site/uooc");
   var HOSTS = ["uooc.net.cn", "*.uooc.net.cn"];
   var PAGES = ["/home/learn/index*", "/home/learn/new/*"];
   var OLD_LEARN_PATH = "/home/learn/index";
@@ -4719,7 +4699,7 @@ ${options.desc ?? ""}
     name: "UOOC 优课联盟",
     hosts: HOSTS,
     pages: PAGES,
-    tabs: [UOOC_VIDEO_TAB, UOOC_AUTOPLAY_TAB, UOOC_AI_TAB, UOOC_MONITOR_TAB],
+    tabs: [UOOC_VIDEO_TAB, UOOC_AUTOPLAY_TAB, UOOC_AI_TAB, UOOC_MONITOR_TAB, UOOC_WAIT_TAB],
     /**
      * 本站的设置**拆成了多个标签页**（视频 / 连播 / AI 作答 / 监视），没有任何一个 id
      * 能代表全部 ⇒ 必须显式声明，否则公共【设置】页会把同一批开关再渲染一遍。
@@ -4735,7 +4715,7 @@ ${options.desc ?? ""}
     earlyInit() {
       registerUoocSettings();
       if (isNewVersionPage()) {
-        log14.debug("新版课程页：不装接口嗅探（本次不启动任何 UOOC 功能）");
+        log16.debug("新版课程页：不装接口嗅探（本次不启动任何 UOOC 功能）");
         return;
       }
       installUoocIntercept();
@@ -4744,19 +4724,19 @@ ${options.desc ?? ""}
     init(ctx) {
       applyUoocSettings();
       if (isNewVersionPage()) {
-        log14.info("新版课程页：只弹「要不要切旧版」的提示，本次不启动任何 UOOC 功能");
+        log16.info("新版课程页：只弹「要不要切旧版」的提示，本次不启动任何 UOOC 功能");
         void promptSwitchToOld(ctx.panel);
         return;
       }
       if (!isOldVersionPage()) {
-        log14.debug(`非旧版课程页（${location.pathname}），本次不启动任何 UOOC 功能`);
+        log16.debug(`非旧版课程页（${location.pathname}），本次不启动任何 UOOC 功能`);
         return;
       }
       startVideoAssist();
       startVideoQuiz();
       startAutoplay(ctx.panel);
-      log14.info(
-        `UOOC 旧版课程页已启用：isFeaturePage=${String(ctx.isFeaturePage)}，路径=${location.pathname}，视频助手=已挂载，小测助手=已挂载，连播=已装载（等用户点开始）`
+      log16.info(
+        `UOOC 旧版课程页已启用：isFeaturePage=${String(ctx.isFeaturePage)}，路径=${location.pathname}，视频助手=已挂载，小测助手=已挂载，接管=等用户点开始`
       );
     }
   };
@@ -4768,22 +4748,22 @@ ${options.desc ?? ""}
       cancelText: "不用，我自己看"
     });
     if (!yes) {
-      log14.info("用户选择留在新版页 —— 面板挂空，不启动任何 UOOC 功能");
+      log16.info("用户选择留在新版页 —— 面板挂空，不启动任何 UOOC 功能");
       return;
     }
     const target = oldVersionUrl();
     if (target === null) {
       const msg = "拼不出旧版地址，请手动把地址栏的 /home/learn/new/<cid> 改成 /home/learn/index";
-      log14.error(msg);
+      log16.error(msg);
       host2.toast(msg, "error");
       return;
     }
-    log14.info(`切换到旧版：${target}`);
+    log16.info(`切换到旧版：${target}`);
     location.href = target;
   }
 
   // src/sites/bkxk/settings.ts
-  var log15 = scoped("bkxk/settings");
+  var log17 = scoped("bkxk/settings");
   var SITE_ID2 = "bkxk";
   var TOGGLE2 = {
     /** 🔴 写接口总开关（抢课）。旧仓库红线 R1：默认 false，不得改 */
@@ -4928,13 +4908,13 @@ ${options.desc ?? ""}
     const raw = getValue(SITE_ID2, VALUE2.INTERVAL_MS);
     const ms = clampLimit("intervalMs", raw);
     if (isBelowRecommended("intervalMs", ms)) {
-      log15.warn(`请求间隔被设为 ${ms}ms，低于建议下限 ${LIMITS.intervalMs.recommended}ms`);
+      log17.warn(`请求间隔被设为 ${ms}ms，低于建议下限 ${LIMITS.intervalMs.recommended}ms`);
     }
     setIntervalMs(ms);
   }
 
   // src/sites/bkxk/session.ts
-  var log16 = scoped("bkxk/session");
+  var log18 = scoped("bkxk/session");
   var DEFAULT_CAMPUS = "01";
   var EMPTY_SESSION = {
     studentCode: "",
@@ -4981,19 +4961,19 @@ ${options.desc ?? ""}
   function buildSession(input) {
     const info = parseStudentInfo(input.studentInfo);
     const studentCode = info?.studentCode ?? "";
-    const token2 = input.token ?? "";
+    const token3 = input.token ?? "";
     return {
       studentCode,
       batchCode: info?.batchCode ?? null,
       campus: parseCampusCode(input.campus),
-      token: token2,
-      loggedIn: studentCode !== "" && token2 !== ""
+      token: token3,
+      loggedIn: studentCode !== "" && token3 !== ""
     };
   }
   function readSession() {
     const ss = pageSessionStorage();
     if (ss === null) {
-      log16.warn("读不到 sessionStorage，按未登录处理");
+      log18.warn("读不到 sessionStorage，按未登录处理");
       return EMPTY_SESSION;
     }
     try {
@@ -5003,7 +4983,7 @@ ${options.desc ?? ""}
         token: ss.getItem("token")
       });
     } catch (err) {
-      log16.warn("读取会话失败，按未登录处理", err);
+      log18.warn("读取会话失败，按未登录处理", err);
       return EMPTY_SESSION;
     }
   }
@@ -5106,7 +5086,7 @@ ${options.desc ?? ""}
   }
 
   // src/sites/bkxk/legacy.ts
-  var log17 = scoped("bkxk/legacy");
+  var log19 = scoped("bkxk/legacy");
   var LEGACY_SETTINGS_KEY = "szubkxk.settings.v2";
   var LEGACY_STORE_PREFIX = "szubkxk.v2.";
   var LEGACY_DATA_KEY = {
@@ -5148,15 +5128,15 @@ ${options.desc ?? ""}
     if (v === null || typeof v !== "object" || Array.isArray(v)) return null;
     return v;
   }
-  function planMigration(snapshot2, alreadyMigrated) {
+  function planMigration(snapshot, alreadyMigrated) {
     const report = [];
     const notices = [];
     if (alreadyMigrated) {
       return { entries: [], report: ["旧数据已迁移过，本次跳过。"], notices: [], empty: true };
     }
     const entries2 = [];
-    const settings = asRecord3(parseJson(snapshot2.settings));
-    if (settings === null && snapshot2.settings !== null) {
+    const settings = asRecord3(parseJson(snapshot.settings));
+    if (settings === null && snapshot.settings !== null) {
       notices.push("旧设置 `szubkxk.settings.v2` 无法解析，已跳过。");
     }
     if (settings !== null) {
@@ -5185,7 +5165,7 @@ ${options.desc ?? ""}
         }
       }
     }
-    const ccRaw = parseJson(snapshot2.customCourses);
+    const ccRaw = parseJson(snapshot.customCourses);
     if (ccRaw !== null) {
       if (Array.isArray(ccRaw)) {
         const slim = parseCustomCourses(ccRaw);
@@ -5198,8 +5178,8 @@ ${options.desc ?? ""}
       }
     }
     const blobs = [
-      { raw: snapshot2.monitor, newKey: BKXK_STORE_KEY.MONITOR, label: "监控进度" },
-      { raw: snapshot2.tasks, newKey: BKXK_STORE_KEY.TASKS, label: "任务进度" }
+      { raw: snapshot.monitor, newKey: BKXK_STORE_KEY.MONITOR, label: "监控进度" },
+      { raw: snapshot.tasks, newKey: BKXK_STORE_KEY.TASKS, label: "任务进度" }
     ];
     for (const blob of blobs) {
       const parsed = parseJson(blob.raw);
@@ -5247,12 +5227,12 @@ ${options.desc ?? ""}
     const plan = planCustomCarry(site, common);
     write(CARRY_FLAG_KEY, true);
     if (plan.empty) {
-      for (const line of plan.notices) log17.warn(`搬运 · ${line}`);
+      for (const line of plan.notices) log19.warn(`搬运 · ${line}`);
       return [];
     }
     for (const e of plan.entries) write(e.key, e.value);
-    log17.info(`自定义课程搬运完成：${plan.report.join("；")}`);
-    for (const line of plan.notices) log17.warn(`搬运 · ${line}`);
+    log19.info(`自定义课程搬运完成：${plan.report.join("；")}`);
+    for (const line of plan.notices) log19.warn(`搬运 · ${line}`);
     return [...plan.report, ...plan.notices];
   }
   function readLegacySnapshot() {
@@ -5287,12 +5267,12 @@ ${options.desc ?? ""}
     if (read(MIGRATION_FLAG_KEY, false)) {
       return [];
     }
-    const snapshot2 = readLegacySnapshot();
-    const plan = planMigration(snapshot2, false);
+    const snapshot = readLegacySnapshot();
+    const plan = planMigration(snapshot, false);
     const lines = [];
     if (plan.empty && plan.notices.length === 0) {
       write(MIGRATION_FLAG_KEY, true);
-      log17.info("未发现旧版数据，跳过迁移");
+      log19.info("未发现旧版数据，跳过迁移");
       return [];
     }
     for (const e of plan.entries) {
@@ -5300,9 +5280,9 @@ ${options.desc ?? ""}
     }
     write(MIGRATION_FLAG_KEY, true);
     lines.push(...plan.report, ...plan.notices);
-    log17.info(`旧数据迁移完成：写入 ${plan.entries.length} 项`);
-    for (const line of plan.report) log17.info(`迁移 · ${line}`);
-    for (const line of plan.notices) log17.warn(`迁移 · ${line}`);
+    log19.info(`旧数据迁移完成：写入 ${plan.entries.length} 项`);
+    for (const line of plan.report) log19.info(`迁移 · ${line}`);
+    for (const line of plan.notices) log19.warn(`迁移 · ${line}`);
     return lines;
   }
 
@@ -5335,9 +5315,9 @@ ${options.desc ?? ""}
     if (parity === null) return true;
     return parity === "单" ? week % 2 === 1 : week % 2 === 0;
   }
-  function parseWeekRange(text) {
-    if (typeof text !== "string" || text === "") return null;
-    const m = WEEK_RE.exec(text);
+  function parseWeekRange(text2) {
+    if (typeof text2 !== "string" || text2 === "") return null;
+    const m = WEEK_RE.exec(text2);
     if (m === null) return null;
     const from = Number(m[1]);
     const to = m[2] === void 0 ? from : Number(m[2]);
@@ -5371,10 +5351,10 @@ ${options.desc ?? ""}
       raw: seg
     };
   }
-  function parsePlace(text) {
-    if (typeof text !== "string" || text.trim() === "") return [];
+  function parsePlace(text2) {
+    if (typeof text2 !== "string" || text2.trim() === "") return [];
     const out = [];
-    for (const piece of text.split(/[,，]/)) {
+    for (const piece of text2.split(/[,，]/)) {
       const seg = parseSegment(piece);
       if (seg !== null) out.push(seg);
     }
@@ -5487,11 +5467,11 @@ ${options.desc ?? ""}
   }
 
   // src/sites/bkxk/hijack.ts
-  var log18 = scoped("bkxk/hijack");
+  var log20 = scoped("bkxk/hijack");
   var CUSTOM_ID_PREFIX = "szu-custom-";
   var LIST_RE = /elective\/(?:programCourse|unProgramCourse|publicCourse|recommendedCourse|queryCourse|course|minorCourse|retakeCourse|sportCourse)\.do/i;
   var TIMETABLE_RE = /elective\/teachingTime\.do/i;
-  function kindOf3(url) {
+  function kindOf2(url) {
     if (typeof url !== "string" || url === "") return null;
     if (TIMETABLE_RE.test(url)) return "timetable";
     if (LIST_RE.test(url)) return "list";
@@ -5607,11 +5587,11 @@ ${options.desc ?? ""}
   function isRec(v) {
     return v !== null;
   }
-  function transformResponse(kind, text, items2) {
-    if (text === "" || items2.length === 0) return null;
+  function transformResponse(kind, text2, items2) {
+    if (text2 === "" || items2.length === 0) return null;
     let json;
     try {
-      json = JSON.parse(text);
+      json = JSON.parse(text2);
     } catch {
       return null;
     }
@@ -5620,12 +5600,12 @@ ${options.desc ?? ""}
     if (String(root["code"]) !== "1") return null;
     const res = kind === "timetable" ? augmentTimetable(root, items2) : augmentList(root, items2);
     if (res.changed === 0) return null;
-    log18.info(`[接管] ${kind} 改写了 ${res.changed} 处`);
+    log20.info(`[接管] ${kind} 改写了 ${res.changed} 处`);
     return JSON.stringify(res.json);
   }
-  function transformCurrentResponse(kind, text) {
+  function transformCurrentResponse(kind, text2) {
     if (!kindEnabled(kind)) return null;
-    const next = transformResponse(kind, text, readEnabledCustomCourses());
+    const next = transformResponse(kind, text2, readEnabledCustomCourses());
     if (next !== null && kind === "timetable") rewroteTimetable = true;
     return next;
   }
@@ -5634,18 +5614,18 @@ ${options.desc ?? ""}
     return rewroteTimetable;
   }
   function rewriteXhr(xhr) {
-    const kind = kindOf3(typeof xhr.responseURL === "string" ? xhr.responseURL : null);
+    const kind = kindOf2(typeof xhr.responseURL === "string" ? xhr.responseURL : null);
     if (kind === null) return false;
     const rt = typeof xhr.responseType === "string" ? xhr.responseType : "";
     if (rt !== "" && rt !== "text" && rt !== "json") return false;
-    let text;
+    let text2;
     try {
-      text = typeof xhr.responseText === "string" ? xhr.responseText : "";
+      text2 = typeof xhr.responseText === "string" ? xhr.responseText : "";
     } catch {
       return false;
     }
-    if (text === "") return false;
-    const next = transformCurrentResponse(kind, text);
+    if (text2 === "") return false;
+    const next = transformCurrentResponse(kind, text2);
     if (next === null) return false;
     try {
       Object.defineProperty(xhr, "responseText", { configurable: true, get: () => next });
@@ -5653,7 +5633,7 @@ ${options.desc ?? ""}
         Object.defineProperty(xhr, "response", { configurable: true, get: () => JSON.parse(next) });
       }
     } catch {
-      log18.warn("接管响应失败（无法改写 responseText）");
+      log20.warn("接管响应失败（无法改写 responseText）");
       return false;
     }
     return true;
@@ -5688,14 +5668,14 @@ ${options.desc ?? ""}
       const p = orig(input, init);
       if (init !== void 0 && init !== null && init["__szuSkip"] === true) return p;
       const url = typeof input === "string" ? input : input?.url ?? "";
-      const kind = kindOf3(url);
+      const kind = kindOf2(url);
       if (kind === null) return p;
       return p.then(async (res) => {
-        const text = await res.text();
-        const next = transformCurrentResponse(kind, text);
+        const text2 = await res.text();
+        const next = transformCurrentResponse(kind, text2);
         if (next === null) return res;
         if (typeof ResponseCtor !== "function") {
-          log18.warn("接管响应失败（环境里没有 Response 构造器）");
+          log20.warn("接管响应失败（环境里没有 Response 构造器）");
           return res;
         }
         const Ctor = ResponseCtor;
@@ -5709,7 +5689,7 @@ ${options.desc ?? ""}
   function installHijack(target = pageRealm()) {
     const xhr = installXhr2(target);
     const fetch2 = installFetch2(target);
-    if (xhr || fetch2) log18.info(`响应接管已安装（XHR=${String(xhr)} fetch=${String(fetch2)}）`);
+    if (xhr || fetch2) log20.info(`响应接管已安装（XHR=${String(xhr)} fetch=${String(fetch2)}）`);
     return xhr || fetch2;
   }
 
@@ -5957,7 +5937,7 @@ ${options.desc ?? ""}
   }
 
   // src/sites/bkxk/api.ts
-  var log19 = scoped("bkxk/api");
+  var log21 = scoped("bkxk/api");
   var BASE_PATH = "/xsxkapp/sys/xsxkapp/";
   var EP = {
     // 只读：课程查询（按类别分派）
@@ -6097,8 +6077,8 @@ ${options.desc ?? ""}
     };
     return `querySetting=${encodeURIComponent(JSON.stringify(setting))}`;
   }
-  function headers(token2) {
-    return { token: String(token2), "X-Requested-With": "XMLHttpRequest" };
+  function headers(token3) {
+    return { token: String(token3), "X-Requested-With": "XMLHttpRequest" };
   }
   function capacityRemain(data) {
     if (data === null || typeof data !== "object") return null;
@@ -6133,31 +6113,31 @@ ${options.desc ?? ""}
     return { batchCode: found, counts };
   }
   function dumpUnknown(input) {
-    const text = input.text ?? "";
+    const text2 = input.text ?? "";
     const block = `
 ──────── [未识别返回] ────────
 action: ${input.action}
 url: ${input.url}
 body: ${input.body ?? ""}
 code: ${input.code ?? ""} | msg: ${input.msg}
-长度: ${text.length} 字符
+长度: ${text2.length} 字符
 原文:
-${text}
+${text2}
 ──────────────────────────────
 `;
-    log19.error(
+    log21.error(
       `未识别返回（已全量落档） code=${input.code ?? ""}${input.msg !== "" ? ` msg=${input.msg}` : ""}`
     );
     console.log(`%c${block}`, "color:#c00");
     return block;
   }
   async function bkxkSend(o) {
-    const token2 = o.token ?? "";
+    const token3 = o.token ?? "";
     const extra = o.extraHeaders ?? {};
-    const requestHeaders = token2 !== "" ? { ...headers(token2), ...extra } : { ...extra };
+    const requestHeaders = token3 !== "" ? { ...headers(token3), ...extra } : { ...extra };
     if (o.body !== void 0) requestHeaders["Content-Type"] = "application/x-www-form-urlencoded";
     const url = o.timestamp === true ? appendTimestamp(o.url) : o.url;
-    log19.info(`[请求] ${o.action} ${o.url}`);
+    log21.info(`[请求] ${o.action} ${o.url}`);
     const raw = await request({
       url,
       method: o.method ?? "POST",
@@ -6180,7 +6160,7 @@ ${text}
   }
 
   // src/sites/bkxk/courses.ts
-  var log20 = scoped("bkxk/courses");
+  var log22 = scoped("bkxk/courses");
   function asRecord5(value) {
     if (value === null || typeof value !== "object" || Array.isArray(value)) return {};
     return value;
@@ -6273,12 +6253,12 @@ ${text}
   function flatten(json) {
     const list = listFrom(json);
     if (list === null) {
-      log20.warn("列表响应里没有顶层 dataList，返回空列表（站点改版？端点形态变了？）");
+      log22.warn("列表响应里没有顶层 dataList，返回空列表（站点改版？端点形态变了？）");
       return [];
     }
     const out = [];
     for (const item of list) out.push(...classesOf(item));
-    log20.info(`列表响应 ${list.length} 项 → ${out.length} 个教学班`);
+    log22.info(`列表响应 ${list.length} 项 → ${out.length} 个教学班`);
     return out;
   }
   function remainOf(c) {
@@ -6301,15 +6281,15 @@ ${text}
     });
     const origin = p.origin ?? currentOrigin();
     if (origin === "") {
-      log20.warn("取不到 origin，放弃拉取课程列表");
+      log22.warn("取不到 origin，放弃拉取课程列表");
       return denied("取不到 origin");
     }
     if (p.studentCode === "") {
-      log20.warn("会话里没有学号，放弃拉取课程列表");
+      log22.warn("会话里没有学号，放弃拉取课程列表");
       return denied("缺少学号");
     }
     if (p.batchCode === null || p.batchCode === "") {
-      log20.warn("没有选课批次码，放弃拉取课程列表");
+      log22.warn("没有选课批次码，放弃拉取课程列表");
       return denied("缺少选课批次码");
     }
     const url = endpointUrl(CATEGORY_EP[p.category], origin);
@@ -6703,24 +6683,24 @@ ${text}
   }
 
   // src/sites/bkxk/monitor.ts
-  var log21 = scoped("bkxk/monitor");
+  var log23 = scoped("bkxk/monitor");
   var panel = null;
   function bindMonitorPanel(p) {
     panel = p;
   }
-  var listeners4 = /* @__PURE__ */ new Set();
+  var listeners5 = /* @__PURE__ */ new Set();
   function subscribeMonitor2(fn) {
-    listeners4.add(fn);
+    listeners5.add(fn);
     return () => {
-      listeners4.delete(fn);
+      listeners5.delete(fn);
     };
   }
-  function notify2() {
-    for (const fn of [...listeners4]) {
+  function notify3() {
+    for (const fn of [...listeners5]) {
       try {
         fn();
       } catch (err) {
-        log21.warn("监控订阅回调抛错（已忽略）", err);
+        log23.warn("监控订阅回调抛错（已忽略）", err);
       }
     }
   }
@@ -6729,7 +6709,7 @@ ${text}
   }
   function saveMonitorStore(store) {
     write(BKXK_STORE_KEY.MONITOR, slimMonitor(store));
-    notify2();
+    notify3();
   }
   function updateMonitor(fn) {
     const next = fn(loadMonitorStore());
@@ -6777,9 +6757,9 @@ ${text}
       return false;
     }
     polling = true;
-    log21.info(`开始监控轮询（${currentMode()}），监控项 ${String(store.items.length)} 条`);
+    log23.info(`开始监控轮询（${currentMode()}），监控项 ${String(store.items.length)} 条`);
     panel?.toast(`开始监控（${String(store.items.length)} 条）`, "success");
-    notify2();
+    notify3();
     void loop2();
     return true;
   }
@@ -6787,9 +6767,9 @@ ${text}
     if (!polling) return false;
     polling = false;
     interruptSleep();
-    log21.info("已停止监控轮询");
+    log23.info("已停止监控轮询");
     panel?.toast("已停止监控轮询", "info");
-    notify2();
+    notify3();
     return true;
   }
   function isPolling() {
@@ -6804,10 +6784,10 @@ ${text}
       }
     } catch (err) {
       polling = false;
-      log21.error("监控轮询异常结束", err);
+      log23.error("监控轮询异常结束", err);
       panel?.toast("监控轮询异常，已停止（详见日志）", "error");
     } finally {
-      notify2();
+      notify3();
     }
   }
   async function pollOnce() {
@@ -6815,12 +6795,12 @@ ${text}
     pollCount += 1;
     const store = loadMonitorStore();
     if (store.items.length === 0) {
-      notify2();
+      notify3();
       return { checked: 0, hits: [] };
     }
     const res = currentMode() === "single" ? await pollSingle(store) : await pollCategory(store);
     await afterCheck(res);
-    notify2();
+    notify3();
     return res;
   }
   async function pollSingle(start) {
@@ -6836,7 +6816,7 @@ ${text}
   async function checkOne(store, tcId) {
     const ctx = bkxkContext();
     if (ctx.batchCode === "") {
-      log21.warn(`查容量跳过 ${tcId}：批次码为空（请刷新选课页）`);
+      log23.warn(`查容量跳过 ${tcId}：批次码为空（请刷新选课页）`);
       return {
         store,
         row: { teachingClassID: tcId, remain: null, kind: "nobatch", msg: "批次码为空（请刷新选课页）" }
@@ -6858,15 +6838,15 @@ ${text}
       msg = r.cls.msg;
       if (kind === RESP_KIND.OK) remain = capacityRemain(r.cls.data);
     } catch (err) {
-      const text = err instanceof Error ? err.message : String(err);
-      log21.warn(`查容量请求异常：${tcId}`, err);
-      const applied3 = applyCheck(store, tcId, null, Date.now(), `请求异常：${text}`);
+      const text2 = err instanceof Error ? err.message : String(err);
+      log23.warn(`查容量请求异常：${tcId}`, err);
+      const applied3 = applyCheck(store, tcId, null, Date.now(), `请求异常：${text2}`);
       saveMonitorStore(applied3.store);
-      return { store: applied3.store, row: { teachingClassID: tcId, remain: null, kind: "exception", msg: text } };
+      return { store: applied3.store, row: { teachingClassID: tcId, remain: null, kind: "exception", msg: text2 } };
     }
     if (kind !== RESP_KIND.OK) {
       noteAuthLost(kind);
-      log21.warn(`查容量失败（${kind}）：${tcId} ${msg}`);
+      log23.warn(`查容量失败（${kind}）：${tcId} ${msg}`);
       const applied3 = applyCheck(store, tcId, null, Date.now(), msg);
       saveMonitorStore(applied3.store);
       return { store: applied3.store, row: { teachingClassID: tcId, remain: null, kind, msg } };
@@ -6891,27 +6871,27 @@ ${text}
           origin: pageOrigin()
         });
       } catch (err) {
-        log21.warn(`类别 ${category} 请求异常（pageNumber=${String(page)}）`, err);
+        log23.warn(`类别 ${category} 请求异常（pageNumber=${String(page)}）`, err);
         return out.length > 0 ? out : null;
       }
       if (r.kind !== RESP_KIND.OK) {
         noteAuthLost(r.kind);
-        log21.warn(`类别 ${category} 拉取失败（pageNumber=${String(page)}，${r.kind}）：${r.msg}`);
+        log23.warn(`类别 ${category} 拉取失败（pageNumber=${String(page)}，${r.kind}）：${r.msg}`);
         return out.length > 0 ? out : null;
       }
       for (const c of r.classes) out.push(c);
       if (r.classes.length < PAGE_SIZE) return out;
     }
-    log21.warn(`类别 ${category} 超过 ${String(MAX_PAGES)} 页上限，只用前 ${String(out.length)} 条比对`);
+    log23.warn(`类别 ${category} 超过 ${String(MAX_PAGES)} 页上限，只用前 ${String(out.length)} 条比对`);
     return out;
   }
   async function pollCategory(start) {
     const { groups, skipped } = groupByCategory(start.items);
     if (skipped > 0) {
-      log21.warn(`类别监控：跳过 ${String(skipped)} 条缺类别代码的监控项（无法按类别查询）`);
+      log23.warn(`类别监控：跳过 ${String(skipped)} 条缺类别代码的监控项（无法按类别查询）`);
     }
     if (groups.length === 0) {
-      log21.warn("类别监控：监控项都缺类别代码，无法按类别查询");
+      log23.warn("类别监控：监控项都缺类别代码，无法按类别查询");
       return { checked: 0, hits: [] };
     }
     let store = start;
@@ -6947,7 +6927,7 @@ ${text}
   function noteAuthLost(kind) {
     if (kind !== RESP_KIND.UNAUTHENTICATED) return false;
     stopPolling();
-    log21.error("登录态失效，已停止监控轮询");
+    log23.error("登录态失效，已停止监控轮询");
     panel?.toast("登录态失效，已停止监控，请刷新页面重新登录", "error");
     panel?.alertAuthExpired();
     return true;
@@ -6962,10 +6942,10 @@ ${text}
     const withCount = addHitCount(loadMonitorStore(), res.hits.length);
     saveMonitorStore(withCount);
     const summary = hitSummaryText(res.hits, (tcId) => nameOf(withCount, tcId));
-    log21.info(`监控命中余量：${summary}`);
+    log23.info(`监控命中余量：${summary}`);
     panel?.toast(`发现余量：${summary}`, "success");
     if (!isEnabled(SITE_ID2, TOGGLE2.WRITE_API)) {
-      log21.warn("监控命中余量，但写接口总开关未开启，只提醒不自动抢");
+      log23.warn("监控命中余量，但写接口总开关未开启，只提醒不自动抢");
       return;
     }
     for (const row3 of res.hits) {
@@ -6997,7 +6977,7 @@ ${text}
       });
       if (r.cls.kind === RESP_KIND.OK) {
         const name = item.courseName === "" ? item.teachingClassID : item.courseName;
-        log21.info(`监控自动抢成功 ${name}`);
+        log23.info(`监控自动抢成功 ${name}`);
         panel?.toast(`监控抢到：${name}`, "success");
         const removed = removeMonitorItem(loadMonitorStore(), item.teachingClassID);
         if (removed.removed) saveMonitorStore(removed.store);
@@ -7005,13 +6985,13 @@ ${text}
       }
       const msg = r.cls.msg === "" ? r.cls.kind : r.cls.msg;
       updateMonitor((s) => patchMonitor(s, item.teachingClassID, { lastMsg: msg }));
-      log21.warn(`监控自动抢未成功（${r.cls.kind}）：${msg}`);
+      log23.warn(`监控自动抢未成功（${r.cls.kind}）：${msg}`);
       noteAuthLost(r.cls.kind);
       return { ok: false, reason: r.cls.kind, msg };
     } catch (err) {
-      const text = err instanceof Error ? err.message : String(err);
-      log21.warn(`监控自动抢请求异常：${item.teachingClassID}`, err);
-      return { ok: false, reason: "exception", msg: text };
+      const text2 = err instanceof Error ? err.message : String(err);
+      log23.warn(`监控自动抢请求异常：${item.teachingClassID}`, err);
+      return { ok: false, reason: "exception", msg: text2 };
     }
   }
 
@@ -7172,11 +7152,11 @@ ${text}
     const count = (s) => items2.filter((t) => t.status === s).length;
     const parts = [];
     const pending = count(TASK_STATUS.PENDING);
-    const running3 = count(TASK_STATUS.RUNNING);
+    const running4 = count(TASK_STATUS.RUNNING);
     const success = count(TASK_STATUS.SUCCESS);
     const failed = count(TASK_STATUS.FAILED);
     if (pending > 0) parts.push(`待抢 ${String(pending)}`);
-    if (running3 > 0) parts.push(`抢课中 ${String(running3)}`);
+    if (running4 > 0) parts.push(`抢课中 ${String(running4)}`);
     if (success > 0) parts.push(`已抢到 ${String(success)}`);
     if (failed > 0) parts.push(`已停止 ${String(failed)}`);
     const disabled = items2.filter((t) => !t.enabled).length;
@@ -7208,24 +7188,24 @@ ${text}
   }
 
   // src/sites/bkxk/tasks.ts
-  var log22 = scoped("bkxk/tasks");
+  var log24 = scoped("bkxk/tasks");
   var panel2 = null;
   function bindTaskPanel(p) {
     panel2 = p;
   }
-  var listeners5 = /* @__PURE__ */ new Set();
+  var listeners6 = /* @__PURE__ */ new Set();
   function subscribeTasks(fn) {
-    listeners5.add(fn);
+    listeners6.add(fn);
     return () => {
-      listeners5.delete(fn);
+      listeners6.delete(fn);
     };
   }
-  function notify3() {
-    for (const fn of [...listeners5]) {
+  function notify4() {
+    for (const fn of [...listeners6]) {
       try {
         fn();
       } catch (err) {
-        log22.warn("任务订阅回调抛错（已忽略）", err);
+        log24.warn("任务订阅回调抛错（已忽略）", err);
       }
     }
   }
@@ -7234,51 +7214,51 @@ ${text}
   }
   function saveTaskStore(store) {
     write(BKXK_STORE_KEY.TASKS, slimTasks(store));
-    notify3();
+    notify4();
   }
   function updateTasks(fn) {
     const next = fn(loadTaskStore());
     saveTaskStore(next);
     return next;
   }
-  var running2 = false;
+  var running3 = false;
   function isTaskRunning() {
-    return running2;
+    return running3;
   }
   function startTasks() {
     if (!isEnabled(SITE_ID2, TOGGLE2.WRITE_API)) {
-      log22.warn("写接口总开关未开启，拒绝开始抢课");
+      log24.warn("写接口总开关未开启，拒绝开始抢课");
       panel2?.toast("写接口总开关未开启，请先到【设置】里打开", "warn");
       return { ok: false, reason: "write-disabled", count: 0 };
     }
-    if (running2) {
+    if (running3) {
       return { ok: false, reason: "already-running", count: 0 };
     }
     const stale = clearStaleTasks(loadTaskStore());
     if (stale.cleared > 0) {
       saveTaskStore(stale.store);
-      log22.info(`开始前清洗了 ${String(stale.cleared)} 条「已勾选但上次跑失败」的任务，它们会重新参与`);
+      log24.info(`开始前清洗了 ${String(stale.cleared)} 条「已勾选但上次跑失败」的任务，它们会重新参与`);
     }
     const list = activeTasks(loadTaskStore().items);
     if (list.length === 0) {
       panel2?.toast("没有可抢的任务（都没勾选，或都已抢到）", "warn");
       return { ok: false, reason: "no-task", count: 0 };
     }
-    running2 = true;
-    log22.info(`开始抢课，任务数 ${String(list.length)}`);
+    running3 = true;
+    log24.info(`开始抢课，任务数 ${String(list.length)}`);
     panel2?.toast(`开始抢课（${String(list.length)} 条）`, "success");
     void loop3();
     return { ok: true, reason: "", count: list.length };
   }
   function stopTasks() {
-    if (!running2) return false;
-    running2 = false;
+    if (!running3) return false;
+    running3 = false;
     const before = loadTaskStore();
     const after = slimTasks(before);
     const changed = after.items.some((t, i) => t !== before.items[i]);
     if (changed) saveTaskStore(after);
-    else notify3();
-    log22.info("已停止抢课");
+    else notify4();
+    log24.info("已停止抢课");
     panel2?.toast("已停止抢课", "info");
     return true;
   }
@@ -7289,31 +7269,31 @@ ${text}
   }
   async function loop3() {
     try {
-      while (running2) {
+      while (running3) {
         if (activeTasks(loadTaskStore().items).length === 0) {
-          running2 = false;
-          log22.info("全部任务已结束");
+          running3 = false;
+          log24.info("全部任务已结束");
           panel2?.toast("全部任务已结束", "info");
           return;
         }
         await round();
-        if (!running2) return;
+        if (!running3) return;
         const iv = clampLimit("retryIntervalMs", getValue(SITE_ID2, VALUE2.RETRY_INTERVAL_MS));
         await sleep2(iv);
       }
     } catch (err) {
-      running2 = false;
-      log22.error("抢课循环异常结束", err);
+      running3 = false;
+      log24.error("抢课循环异常结束", err);
       panel2?.toast("抢课循环异常，已停止（详见日志）", "error");
     } finally {
-      notify3();
+      notify4();
     }
   }
   async function round() {
     const list = activeTasks(loadTaskStore().items);
-    for (const snapshot2 of list) {
-      if (!running2) return;
-      const cur = byId2(loadTaskStore(), snapshot2.id);
+    for (const snapshot of list) {
+      if (!running3) return;
+      const cur = byId2(loadTaskStore(), snapshot.id);
       if (cur === null || !cur.enabled) continue;
       await attempt(cur);
     }
@@ -7329,7 +7309,7 @@ ${text}
         lastMsg: "缺少学号或选课批次码，请在设置中补全",
         lastKind: TASK_KIND.TERMINAL
       });
-      log22.error(`抢课中止：缺少学号或批次码 ${task.teachingClassID}`);
+      log24.error(`抢课中止：缺少学号或批次码 ${task.teachingClassID}`);
       return;
     }
     if (task.category === "") {
@@ -7338,7 +7318,7 @@ ${text}
         lastMsg: "未能识别该教学班的类别代码，请重新在列表中点击「添加抢课」",
         lastKind: TASK_KIND.TERMINAL
       });
-      log22.error(`抢课中止：类别代码未知 ${task.teachingClassID}`);
+      log24.error(`抢课中止：类别代码未知 ${task.teachingClassID}`);
       return;
     }
     finish(task.id, { status: TASK_STATUS.RUNNING, attempts: task.attempts + 1 });
@@ -7363,27 +7343,27 @@ ${text}
       kind = r.cls.kind;
       msg = r.cls.msg;
     } catch (err) {
-      const text = err instanceof Error ? err.message : String(err);
+      const text2 = err instanceof Error ? err.message : String(err);
       const retry = shouldRetry(task.retryMode, TASK_KIND.UNKNOWN);
       finish(task.id, {
         status: retry ? TASK_STATUS.PENDING : TASK_STATUS.FAILED,
-        lastMsg: `请求异常：${text}`,
+        lastMsg: `请求异常：${text2}`,
         lastKind: TASK_KIND.UNKNOWN
       });
-      log22.warn(`抢课请求异常（${retry ? "稍后重试" : "已停手"}）：${task.teachingClassID}`, err);
+      log24.warn(`抢课请求异常（${retry ? "稍后重试" : "已停手"}）：${task.teachingClassID}`, err);
       return;
     }
     if (kind === RESP_KIND.OK) {
       finish(task.id, { status: TASK_STATUS.SUCCESS, lastMsg: msg, lastKind: TASK_KIND.OK });
       const name = task.courseName === "" ? task.teachingClassID : task.courseName;
-      log22.info(`抢课成功 ${name}`);
+      log24.info(`抢课成功 ${name}`);
       panel2?.toast(`抢课成功：${name}`, "success");
       return;
     }
     if (kind === RESP_KIND.UNAUTHENTICATED) {
-      running2 = false;
+      running3 = false;
       finish(task.id, { status: TASK_STATUS.FAILED, lastMsg: AUTH_MSG2, lastKind: TASK_KIND.AUTH });
-      log22.error("登录态失效，已停止全部任务");
+      log24.error("登录态失效，已停止全部任务");
       panel2?.toast("登录态失效，已停止全部任务，请刷新页面重新登录", "error");
       panel2?.alertAuthExpired();
       return;
@@ -7391,16 +7371,16 @@ ${text}
     const cls = kind === RESP_KIND.BUSINESS ? classifyMsg(msg) : TASK_KIND.UNKNOWN;
     if (shouldRetry(task.retryMode, cls)) {
       finish(task.id, { status: TASK_STATUS.PENDING, lastMsg: msg, lastKind: cls });
-      log22.warn(`抢课未成功，稍后重试（${kindLabel(cls)}）：${msg}`);
+      log24.warn(`抢课未成功，稍后重试（${kindLabel(cls)}）：${msg}`);
     } else {
       finish(task.id, { status: TASK_STATUS.FAILED, lastMsg: msg, lastKind: cls });
       const mode = RETRY_MODE_NAME[task.retryMode] ?? task.retryMode;
-      log22.warn(`抢课失败，已按「${mode}」停手（${kindLabel(cls)}）：${msg}`);
+      log24.warn(`抢课失败，已按「${mode}」停手（${kindLabel(cls)}）：${msg}`);
     }
   }
 
   // src/sites/bkxk/list.ts
-  var log23 = scoped("site/bkxk/list");
+  var log25 = scoped("site/bkxk/list");
   var LIST_PAGE_MARK = "grablessons.do";
   var RESCAN_DELAY_MS = 120;
   var MAX_BLOCKS_PER_SCAN = 400;
@@ -7415,7 +7395,7 @@ ${text}
     ev.preventDefault();
     ev.stopPropagation();
   }
-  function textOf2(node) {
+  function textOf(node) {
     return cleanText(node === null ? "" : node.textContent);
   }
   function ownDescendant(unit, selector) {
@@ -7458,7 +7438,7 @@ ${text}
   }
   function courseNameOf(row3) {
     if (row3 === null) return "";
-    return textOf2(row3.querySelector(TITLE_CELL_SELECTOR));
+    return textOf(row3.querySelector(TITLE_CELL_SELECTOR));
   }
   function placeOfUnit(unit) {
     const timeEl = ownDescendant(unit, "div[title]");
@@ -7480,9 +7460,9 @@ ${text}
     return {
       tcId,
       courseName: courseNameOf(row3),
-      teacherName: textOf2(row3.querySelector(".cv-teacher-col")),
+      teacherName: textOf(row3.querySelector(".cv-teacher-col")),
       category: categoryFor(row3),
-      teachingPlace: textOf2(row3.querySelector(".cv-time-col"))
+      teachingPlace: textOf(row3.querySelector(".cv-time-col"))
     };
   }
   function targetText(info) {
@@ -7493,11 +7473,11 @@ ${text}
   async function copyId(tcId, panel3) {
     const res = await copyText(tcId);
     if (res.ok) {
-      log23.info(`已复制教学班ID ${tcId} 到剪贴板（方式：${res.method}）`);
+      log25.info(`已复制教学班ID ${tcId} 到剪贴板（方式：${res.method}）`);
       panel3.toast("已复制教学班ID", "success");
       return;
     }
-    log23.warn(`复制教学班ID 失败：${res.detail}（可手动选中那一行复制）`);
+    log25.warn(`复制教学班ID 失败：${res.detail}（可手动选中那一行复制）`);
     panel3.toast("复制失败，请手动选中复制", "warn");
   }
   function applyGrabButton(btn, on) {
@@ -7534,13 +7514,13 @@ ${text}
     });
     applyGrabButton(btn, nowOn);
     if (nowOn) {
-      log23.info(`已加入抢课队列：${targetText(info)}（本轮只入队，不会发送任何请求）`);
+      log25.info(`已加入抢课队列：${targetText(info)}（本轮只入队，不会发送任何请求）`);
       ctx.panel.toast(
         `已加入抢课队列：${info.courseName === "" ? info.tcId : info.courseName}`,
         "success"
       );
     } else {
-      log23.info(`已移出抢课队列：${targetText(info)}（站点上已经选到的课不会被退掉）`);
+      log25.info(`已移出抢课队列：${targetText(info)}（站点上已经选到的课不会被退掉）`);
       ctx.panel.toast("已移出抢课队列（不会退掉已经选上的课）", "info");
     }
   }
@@ -7556,10 +7536,10 @@ ${text}
     });
     applyMonitorButton(btn, nowOn);
     if (nowOn) {
-      log23.info(`已加入监控列表：${targetText(info)}（到监控页点【开始监控】才会轮询）`);
+      log25.info(`已加入监控列表：${targetText(info)}（到监控页点【开始监控】才会轮询）`);
       ctx.panel.toast("已加入监控", "success");
     } else {
-      log23.info(`已移出监控列表：${targetText(info)}`);
+      log25.info(`已移出监控列表：${targetText(info)}`);
       ctx.panel.toast("已移出监控", "info");
     }
   }
@@ -7617,7 +7597,7 @@ ${text}
     if (ownsBlock(unit)) return;
     const tcId = tcIdIn(unit);
     if (tcId === null) {
-      log23.debug("卡片 .cv-info 未取到教学班 id，跳过（站点结构可能已变）");
+      log25.debug("卡片 .cv-info 未取到教学班 id，跳过（站点结构可能已变）");
       return;
     }
     const info = infoForUnit(unit, tcId);
@@ -7634,7 +7614,7 @@ ${text}
     if (cell === null) return;
     const ids = tcIdsIn(cell);
     if (ids.length === 0) {
-      log23.debug("列表行未取到教学班 id，跳过（站点结构可能已变）");
+      log25.debug("列表行未取到教学班 id，跳过（站点结构可能已变）");
       return;
     }
     const col = el("div", { class: "sztb-bkxk-col" });
@@ -7700,7 +7680,7 @@ ${text}
     const nodes = document.querySelectorAll(".sztb-bkxk-block, .sztb-bkxk-col, .sztb-bkxk-head");
     if (nodes.length === 0) return;
     for (const node of nodes) node.remove();
-    log23.info(`列表注入开关已关闭：移除 ${String(nodes.length)} 个注入节点`);
+    log25.info(`列表注入开关已关闭：移除 ${String(nodes.length)} 个注入节点`);
   }
   function scan(ctx) {
     if (!isEnabled(SITE_ID2, TOGGLE2.LIST_INJECT)) {
@@ -7720,7 +7700,7 @@ ${text}
   }
   function startListInjection(panel3) {
     if (!location.pathname.includes(LIST_PAGE_MARK)) {
-      log23.debug(`当前不是选课页（${location.pathname}），跳过列表注入`);
+      log25.debug(`当前不是选课页（${location.pathname}），跳过列表注入`);
       return () => void 0;
     }
     const ctx = {
@@ -7741,7 +7721,7 @@ ${text}
       scan(ctx);
       observer = new MutationObserver(schedule2);
       observer.observe(document.body, { childList: true, subtree: true });
-      log23.info(
+      log25.info(
         `选课列表注入已就绪：抢课队列 ${String(loadTaskStore().items.length)} 条 / 监控 ${String(loadMonitorStore().items.length)} 条（本轮点击只入队，不发请求）`
       );
     });
@@ -7786,7 +7766,7 @@ ${text}
   }
 
   // src/sites/bkxk/timetable.ts
-  var log24 = scoped("site/bkxk/timetable");
+  var log26 = scoped("site/bkxk/timetable");
   var TT_PAGE_MARK = "curriculum.do";
   var MAX_TRIES = 20;
   var RETRY_MS = 500;
@@ -7812,12 +7792,12 @@ ${text}
   function askSiteToRefetch(reason) {
     const mod = pageRecord()[SITE_TIMETABLE_MODULE];
     if (mod === void 0 || typeof mod.init !== "function") {
-      log24.warn(
+      log26.warn(
         `站点没有 ${SITE_TIMETABLE_MODULE}.init（改版了？）—— 这一轮的自定义课程不会出现，刷新页面可重来`
       );
       return false;
     }
-    log24.info(
+    log26.info(
       `请站点重新请求一次课表（${reason}；上一发响应${didRewriteTimetable() ? "已被我们改写" : "我们没赶上"}）⇒ ${SITE_TIMETABLE_MODULE}.init()`
     );
     mod.init.call(mod);
@@ -7838,7 +7818,7 @@ ${text}
     if (!ok) {
       if (!loggedDrawn && tags > 0) {
         loggedDrawn = true;
-        log24.info(
+        log26.info(
           `站点画出的课表里已经带上我们的标记 ${String(tags)} 个（自定义课程 ${String(enabled)} 门）`
         );
       }
@@ -7858,7 +7838,7 @@ ${text}
   }
   function startTimetableInjection() {
     if (!location.pathname.includes(TT_PAGE_MARK)) {
-      log24.debug(`当前不是课表页（${location.pathname}），跳过课表接管`);
+      log26.debug(`当前不是课表页（${location.pathname}），跳过课表接管`);
       return () => void 0;
     }
     let observer = null;
@@ -7882,13 +7862,13 @@ ${text}
         if (tries < MAX_TRIES) {
           retry = window.setTimeout(attempt2, RETRY_MS);
         } else {
-          log24.warn(`未找到课表容器 #${SITE_TABLE_ID}，放弃接管（站点的课表可能还没出数据）`);
+          log26.warn(`未找到课表容器 #${SITE_TABLE_ID}，放弃接管（站点的课表可能还没出数据）`);
         }
         return;
       }
       injectTagStyle();
       const courses = readEnabledCustomCourses();
-      log24.info(
+      log26.info(
         `课表页接管就绪：自定义课程 ${String(courses.length)} 门；课表由站点自己画，我们只加「自定义」标签`
       );
       autoRefetchIfNeeded(table);
@@ -8050,7 +8030,7 @@ ${text}
 `;
 
   // src/sites/bkxk/tabs/tasks.ts
-  var log25 = scoped("bkxk/tasks-tab");
+  var log27 = scoped("bkxk/tasks-tab");
   var BKXK_TASKS_TAB_ID = "bkxk:tasks";
   var MODE_ORDER = [RETRY_MODE.SMART, RETRY_MODE.NEVER, RETRY_MODE.ALWAYS];
   var GATE_POLL_MS = 1e3;
@@ -8101,18 +8081,18 @@ ${text}
     root.appendChild(listBox);
     function render() {
       const items2 = loadTaskStore().items;
-      const running3 = isTaskRunning();
+      const running4 = isTaskRunning();
       summary.textContent = summaryText2(items2);
       listTitle.textContent = `队列（${String(items2.length)} 条）`;
-      runningBox.hidden = !running3;
-      if (running3) {
+      runningBox.hidden = !running4;
+      if (running4) {
         const left = items2.filter(
           (t) => t.enabled && (t.status === TASK_STATUS.PENDING || t.status === TASK_STATUS.RUNNING)
         ).length;
         runningBox.textContent = `抢课进行中：还剩 ${String(left)} 条待抢。抢到的任务会留在队列里（不会自动移出）。循环跑在本页里，关掉页面就等于停止抢课。`;
       }
-      stopBtn.disabled = !running3;
-      startBtn.disabled = running3;
+      stopBtn.disabled = !running4;
+      startBtn.disabled = running4;
       listBox.textContent = "";
       if (items2.length === 0) {
         listBox.appendChild(
@@ -8152,7 +8132,7 @@ ${text}
       check.checked = task.enabled;
       check.addEventListener("change", () => {
         updateTasks((s) => toggleTask2(s, task.id).store);
-        log25.info(
+        log27.info(
           `${task.enabled ? "取消勾选" : "勾选"}任务「${task.courseName === "" ? task.teachingClassID : task.courseName}」`
         );
         render();
@@ -8223,7 +8203,7 @@ ${text}
       mode.value = RETRY_MODE_NAME[task.retryMode] === void 0 ? RETRY_MODE.SMART : task.retryMode;
       mode.addEventListener("change", () => {
         updateTasks((s) => setRetryMode(s, task.id, mode.value));
-        log25.info(`任务「${task.courseName || task.teachingClassID}」的重试策略改为 ${mode.value}`);
+        log27.info(`任务「${task.courseName || task.teachingClassID}」的重试策略改为 ${mode.value}`);
         render();
       });
       ops.appendChild(mode);
@@ -8234,7 +8214,7 @@ ${text}
       });
       del.addEventListener("click", () => {
         updateTasks((s) => removeTask(s, task.id).store);
-        log25.info(`已从队列删除任务「${task.courseName || task.teachingClassID}」`);
+        log27.info(`已从队列删除任务「${task.courseName || task.teachingClassID}」`);
         render();
       });
       ops.appendChild(del);
@@ -8242,7 +8222,7 @@ ${text}
       return item;
     }
     startBtn.addEventListener("click", () => {
-      if (!syncGate()) log25.warn("写接口总开关未开，拒绝开始");
+      if (!syncGate()) log27.warn("写接口总开关未开，拒绝开始");
       const res = startTasks();
       if (!res.ok && res.reason === "already-running") ctx.host.toast("已经在抢课中了", "info");
       render();
@@ -8265,7 +8245,7 @@ ${text}
       }).then((yes) => {
         if (!yes) return;
         updateTasks((s) => resetTasks(s));
-        log25.info(`已重置 ${String(stale)} 条未成功的任务`);
+        log27.info(`已重置 ${String(stale)} 条未成功的任务`);
         ctx.host.toast("已重置", "success");
         render();
       });
@@ -8285,7 +8265,7 @@ ${text}
       }).then((yes) => {
         if (!yes) return;
         updateTasks(() => clearTasks());
-        log25.info(`已清空抢课队列（${String(n)} 条）`);
+        log27.info(`已清空抢课队列（${String(n)} 条）`);
         ctx.host.toast("已清空队列", "success");
         render();
       });
@@ -8429,7 +8409,7 @@ ${text}
 `;
 
   // src/sites/bkxk/tabs/monitor.ts
-  var log26 = scoped("bkxk/monitor-tab");
+  var log28 = scoped("bkxk/monitor-tab");
   var BKXK_MONITOR_TAB_ID = "bkxk:monitor";
   var TICK_MS = 1e3;
   var GRAB_REASON = {
@@ -8465,7 +8445,7 @@ ${text}
     modeRow.appendChild(modeSelect);
     modeSelect.addEventListener("change", () => {
       setValue(SITE_ID2, VALUE2.MONITOR_MODE, modeSelect.value);
-      log26.info(`监控模式改为 ${modeSelect.value}`);
+      log28.info(`监控模式改为 ${modeSelect.value}`);
       render();
     });
     const modeHint = el("span", { class: "sztb-bkxk-mo-meta" });
@@ -8509,11 +8489,11 @@ ${text}
       const now = Date.now();
       summary.textContent = summaryText(store, now);
       listTitle.textContent = `监控项（${String(store.items.length)} 条）`;
-      const running3 = isPolling();
-      startBtn.disabled = running3;
-      stopBtn.disabled = !running3;
-      runningBox.hidden = !running3;
-      if (running3) {
+      const running4 = isPolling();
+      startBtn.disabled = running4;
+      stopBtn.disabled = !running4;
+      runningBox.hidden = !running4;
+      if (running4) {
         runningBox.textContent = `监控进行中（${mode === MONITOR_MODE.CATEGORY ? "按类别" : "逐个教学班"}）：已跑 ${String(stats.pollCount)} 轮，上次检查 ${checkedAgoText(stats.lastPollAt, now)}。命中余量时会提醒你；写接口总开关开着的话会直接帮你抢。`;
       }
       listBox.textContent = "";
@@ -8605,7 +8585,7 @@ ${text}
       });
       del.addEventListener("click", () => {
         updateMonitor((s) => removeMonitorItem(s, item.teachingClassID).store);
-        log26.info(`已移出监控列表：${item.courseName || item.teachingClassID}`);
+        log28.info(`已移出监控列表：${item.courseName || item.teachingClassID}`);
         render();
       });
       ops.appendChild(del);
@@ -8639,7 +8619,7 @@ ${text}
     });
     resetBtn.addEventListener("click", () => {
       updateMonitor((s) => resetMonitorStats(s));
-      log26.info("已重置监控统计（余量、检查时间、命中次数与上次抢课结果）");
+      log28.info("已重置监控统计（余量、检查时间、命中次数与上次抢课结果）");
       ctx.host.toast("已重置统计，下次检查会重新填", "success");
       render();
     });
@@ -8659,7 +8639,7 @@ ${text}
         if (!yes) return;
         stopPolling();
         updateMonitor(() => clearMonitor());
-        log26.info(`已清空监控列表（${String(n)} 条）`);
+        log28.info(`已清空监控列表（${String(n)} 条）`);
         ctx.host.toast("已清空监控列表", "success");
         render();
       });
@@ -8704,8 +8684,8 @@ ${text}
   function emptySegment() {
     return { ...DEFAULT_SEGMENT };
   }
-  function intOf(text) {
-    const s = text.trim();
+  function intOf(text2) {
+    const s = text2.trim();
     if (!/^-?\d+$/.test(s)) return null;
     const n = Number(s);
     return Number.isSafeInteger(n) ? n : null;
@@ -8721,8 +8701,8 @@ ${text}
       place: seg.place
     };
   }
-  function draftsFromText(text) {
-    return parsePlace(text).map((seg) => draftFromSegment(seg));
+  function draftsFromText(text2) {
+    return parsePlace(text2).map((seg) => draftFromSegment(seg));
   }
   function validateSegment(d) {
     const { WEEK_MIN, WEEK_MAX, SECTION_MIN, SECTION_MAX } = DRAFT_LIMITS;
@@ -8926,7 +8906,7 @@ ${text}
 `;
 
   // src/sites/bkxk/tabs/custom.ts
-  var log27 = scoped("bkxk/custom-tab");
+  var log29 = scoped("bkxk/custom-tab");
   var BKXK_CUSTOM_TAB_ID = "bkxk:custom";
   var PARITY_OPTIONS = [
     ["", "每周"],
@@ -9028,8 +9008,8 @@ ${text}
       box.appendChild(control);
       return box;
     }
-    function showHint(text) {
-      hint.textContent = text;
+    function showHint(text2) {
+      hint.textContent = text2;
       hint.hidden = false;
     }
     function hideHint() {
@@ -9208,7 +9188,7 @@ ${text}
       }
       const parsed = parsePlace(place);
       if (parsed.length !== segs.length) {
-        log27.warn(
+        log29.warn(
           `生成的时间文本与解析结果对不上：${place}（解析出 ${String(parsed.length)} 段，表单有 ${String(segs.length)} 段）`
         );
         const msg = "时间文本生成异常，已取消本次提交（请把这条日志报给开发者）";
@@ -9221,7 +9201,7 @@ ${text}
       const next = editing === null ? appendCourse(courses, draft, makeCourseId(Date.now(), Math.random())) : updateCourse(courses, editing, draft);
       mutate(next);
       resetForm();
-      log27.info(`${editing === null ? "添加" : "修改"}自定义课程「${name}」（${place}）`);
+      log29.info(`${editing === null ? "添加" : "修改"}自定义课程「${name}」（${place}）`);
       ctx.host.toast(editing === null ? "已添加" : "已保存修改", "success");
     }
     function beginEdit(course) {
@@ -9235,7 +9215,7 @@ ${text}
         const msg = "这门课原本的时间文本解析不出，已按默认值回填，请重新填写";
         showHint(msg);
         ctx.host.toast(msg, "warn");
-        log27.warn(`自定义课程「${course.name}」的 place 解析不出：${course.place}`);
+        log29.warn(`自定义课程「${course.name}」的 place 解析不出：${course.place}`);
       } else {
         segs = drafts.map((d) => ({ ...d }));
         hideHint();
@@ -9259,7 +9239,7 @@ ${text}
           return;
         }
         mutate(setCourseEnabled(courses, course.id, toggle.checked));
-        log27.info(`${toggle.checked ? "启用" : "停用"}自定义课程「${course.name}」`);
+        log29.info(`${toggle.checked ? "启用" : "停用"}自定义课程「${course.name}」`);
       });
       item.appendChild(toggle);
       const main2 = el("div", { class: "sztb-bkxk-itemmain" });
@@ -9293,7 +9273,7 @@ ${text}
         const wasEditing = editingId === course.id;
         mutate(removeCourse(courses, course.id));
         if (wasEditing) resetForm();
-        log27.info(`删除自定义课程「${course.name}」`);
+        log29.info(`删除自定义课程「${course.name}」`);
         ctx.host.toast("已删除", "success");
       });
       ops.appendChild(editBtn);
@@ -9329,7 +9309,7 @@ ${text}
       writeCustomCourses(next);
       renderList();
       renderConflicts();
-      if (refreshTimetable() > 0) log27.info("已请站点重画课表（这次带的课程就是你刚改的）");
+      if (refreshTimetable() > 0) log29.info("已请站点重画课表（这次带的课程就是你刚改的）");
     }
     addSegBtn.addEventListener("click", () => {
       if (!guard()) return;
@@ -9361,7 +9341,7 @@ ${text}
         if (!ok) return;
         mutate([]);
         resetForm();
-        log27.info(`清空自定义课程：删除 ${String(n)} 门`);
+        log29.info(`清空自定义课程：删除 ${String(n)} 门`);
         ctx.host.toast("已清空", "success");
       });
     });
@@ -9389,7 +9369,7 @@ ${text}
   };
 
   // src/sites/bkxk/index.ts
-  var log28 = scoped("site/bkxk");
+  var log30 = scoped("site/bkxk");
   var HOSTS2 = ["bkxk.szu.edu.cn"];
   var PAGES2 = ["*default/grablessons.do*", "*default/curriculum.do*"];
   var bkxkAdapter = {
@@ -9415,13 +9395,13 @@ ${text}
       registerBkxkSettings();
       const carried = runCustomCarry();
       if (lines.length > 0) {
-        log28.info(`已从旧版迁移 ${lines.length} 条内容，详情见日志页`);
+        log30.info(`已从旧版迁移 ${lines.length} 条内容，详情见日志页`);
       }
       if (carried.length > 0) {
-        log28.info(`自定义课程已搬到通用键（${carried.length} 条说明见日志页）`);
+        log30.info(`自定义课程已搬到通用键（${carried.length} 条说明见日志页）`);
       }
       if (lines.length === 0 && carried.length === 0) {
-        log28.debug(`无旧数据需要迁移（earlyInit @ ${ctx.url.pathname}）`);
+        log30.debug(`无旧数据需要迁移（earlyInit @ ${ctx.url.pathname}）`);
       }
     },
     /** 挂载期：DOM 已就绪，可以安全地把配置推给运行时并报登录态。 */
@@ -9431,11 +9411,11 @@ ${text}
       bindMonitorPanel(ctx.panel);
       const session = readSession();
       if (!session.loggedIn) {
-        log28.warn("未读到有效登录态：学号或 token 缺失，功能接口会失败。请先在站内完成登录。");
+        log30.warn("未读到有效登录态：学号或 token 缺失，功能接口会失败。请先在站内完成登录。");
       } else {
-        log28.info(`站点已就绪：${sessionSummary(session)}`);
+        log30.info(`站点已就绪：${sessionSummary(session)}`);
       }
-      log28.info(`功能页=${String(ctx.isFeaturePage)}（任务 / 监控 / 自定义 / 设置四个站点标签页已就绪）`);
+      log30.info(`功能页=${String(ctx.isFeaturePage)}（任务 / 监控 / 自定义 / 设置四个站点标签页已就绪）`);
       startListInjection(ctx.panel);
       startTimetableInjection();
     }
@@ -9454,10 +9434,10 @@ ${text}
   }
 
   // src/main.ts
-  var log29 = scoped("main");
+  var log31 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-08T16:20:52.768Z" : null;
-  var BUILD_NO = true ? 90 : null;
+  var BUILD_TIME = true ? "2026-10-08T16:30:43.047Z" : null;
+  var BUILD_NO = true ? 91 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();
@@ -9497,7 +9477,7 @@ ${text}
       version: VERSION
     }));
     booted = { panel: panel3, adapterId: res.adapter?.id ?? null };
-    log29.info(
+    log31.info(
       `深大人工具箱 ${VERSION_LABEL} 已装载（host=${url.hostname}，分派=${res.reason}，站点=${res.adapter?.id ?? "无"}，功能页=${res.autoExpand ? "是" : "否"}）`
     );
     res.adapter?.init?.({
@@ -9517,10 +9497,10 @@ ${text}
         return;
       }
       if (!res.inject) {
-        log29.debug(`站内跳转后不再属于支持范围，保持现有悬浮窗`);
+        log31.debug(`站内跳转后不再属于支持范围，保持现有悬浮窗`);
         return;
       }
-      log29.info(`站内跳转导致重新分派：${bootedFor} → ${location.href}`);
+      log31.info(`站内跳转导致重新分派：${bootedFor} → ${location.href}`);
       bootedFor = location.href;
       boot(url, res);
     };
@@ -9547,9 +9527,9 @@ ${text}
     if (res.adapter?.earlyInit !== void 0) {
       try {
         res.adapter.earlyInit({ adapter: res.adapter, url });
-        log29.debug(`已执行启动期钩子：${res.adapter.id}`);
+        log31.debug(`已执行启动期钩子：${res.adapter.id}`);
       } catch (err) {
-        log29.error(`启动期钩子执行失败：${res.adapter.id}`, err);
+        log31.error(`启动期钩子执行失败：${res.adapter.id}`, err);
       }
     }
     whenDomReady(() => {

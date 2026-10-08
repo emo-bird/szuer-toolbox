@@ -7,6 +7,8 @@
  *   - 站点模块**不直接操作悬浮窗 DOM**，只做声明式注册
  */
 
+import type { ModalOptions } from '../common/ui/widgets/modal.ts';
+
 /** 功能开关的风险分级，决定 UI 门禁强度（见 需求文档 §8.1 N1） */
 export type RiskLevel =
   /** 🟢 只读，无副作用，默认可用 */
@@ -36,6 +38,13 @@ export interface PanelApi {
   toast(message: string, kind?: 'info' | 'warn' | 'error' | 'success'): void;
   /** 弹二次确认框，resolve 为 true 表示用户点了确认 */
   confirm(options: ConfirmOptions): Promise<boolean>;
+  /**
+   * 弹全屏模态框（灰遮罩 + 居中盒子 + N 个按钮），resolve 为按钮的 `key`。
+   *
+   * 站点侧**拿不到 shadow root**，所以想用 `showModalAlert` 只能从这里借；
+   * 语义、判重（`dedupeClass`）、`cancelKey` 门禁全部与公共那套一致，一行不改。
+   */
+  alert(options: ModalOptions): Promise<string | null>;
   /**
    * 全屏提示「登录态已失效，请刷新页面重新登录」（灰色遮罩 + 居中提示）。
    *

@@ -34,6 +34,7 @@ import { UOOC_AI_TAB } from './tabs/ai.ts';
 import { UOOC_AUTOPLAY_TAB } from './tabs/autoplay.ts';
 import { UOOC_MONITOR_TAB } from './tabs/monitor.ts';
 import { UOOC_VIDEO_TAB } from './tabs/video.ts';
+import { UOOC_WAIT_TAB } from './tabs/wait.ts';
 import { startVideoAssist } from './video.ts';
 import { startVideoQuiz } from './video-quiz.ts';
 
@@ -101,7 +102,7 @@ export const uoocAdapter: SiteAdapter = {
   name: 'UOOC 优课联盟',
   hosts: HOSTS,
   pages: PAGES,
-  tabs: [UOOC_VIDEO_TAB, UOOC_AUTOPLAY_TAB, UOOC_AI_TAB, UOOC_MONITOR_TAB],
+  tabs: [UOOC_VIDEO_TAB, UOOC_AUTOPLAY_TAB, UOOC_AI_TAB, UOOC_MONITOR_TAB, UOOC_WAIT_TAB],
   /**
    * 本站的设置**拆成了多个标签页**（视频 / 连播 / AI 作答 / 监视），没有任何一个 id
    * 能代表全部 ⇒ 必须显式声明，否则公共【设置】页会把同一批开关再渲染一遍。
@@ -149,11 +150,13 @@ export const uoocAdapter: SiteAdapter = {
     startVideoAssist();
     // 视频随机小测：无条件自动作答（读 DOM 里的答案，用户 m06055 拍板不留开关）
     startVideoQuiz();
-    // 只装载、不启动：由用户在【连播】页点【开始连播】（用户 m04485 第二轮拍板）
+    // 只装载、不启动：由用户在【接管】页点【开始接管】（用户 m04485 第二轮拍板）
+    // ⚠️ 这是**旧的 DOM 点击连播**（`./autoplay.ts`），新版接管在 `./takeover.ts`，
+    //    入口在 `tabs/autoplay.ts`。旧的这行等 §G 清理时一起删。
     startAutoplay(ctx.panel);
     log.info(
       `UOOC 旧版课程页已启用：isFeaturePage=${String(ctx.isFeaturePage)}，` +
-        `路径=${location.pathname}，视频助手=已挂载，小测助手=已挂载，连播=已装载（等用户点开始）`,
+        `路径=${location.pathname}，视频助手=已挂载，小测助手=已挂载，接管=等用户点开始`,
     );
   },
 };

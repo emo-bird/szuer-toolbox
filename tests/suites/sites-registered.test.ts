@@ -17,7 +17,7 @@
  *   因此 `main.ts` 把注册动作导成了 `registerSites()`，本套件直接调用它。
  */
 
-import { describe, it, assert, assertEqual } from '../harness.ts';
+import { describe, it, assert, assertEqual, assertDeepEqual } from '../harness.ts';
 import {
   resolve,
   resetRegistry,
@@ -234,10 +234,15 @@ describe('sites 真实注册表 —— 站点设置标签页归属', () => {
     assertEqual(hasOwnSettingsTab('uooc'), true, '公共设置页据此跳过 uooc');
   });
 
-  it('UOOC 的四个设置页 id 都带 uooc: 前缀', () => {
+  it('UOOC 的五个设置页 id 都带 uooc: 前缀', () => {
     bootReal();
     const uooc = allAdapters().find((a) => a.id === 'uooc');
-    assertEqual(uooc!.tabs.length, 4, 'UOOC 应为 视频 / 连播 / AI 作答 / 监视 四个标签页');
+    assertEqual(uooc!.tabs.length, 5, 'UOOC 应为 视频 / 接管 / AI 作答 / 监视 / 等待 五个标签页');
+    assertDeepEqual(
+      uooc!.tabs.map((t) => t.title),
+      ['视频', '接管', 'AI 作答', '监视', '等待'],
+      'UOOC 标签页标题应与需求文档 §E.1 / §E.5 一致（"连播" 已改叫 "接管"）',
+    );
     for (const tab of uooc!.tabs) {
       assert(tab.id.startsWith('uooc:'), `站点标签页 id 应带前缀，实际=${tab.id}`);
     }
