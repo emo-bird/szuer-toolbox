@@ -10,15 +10,19 @@
  *   - 本组件没有返回值 —— 引擎在弹它之前就已经停了，这里只是让用户看清楚发生了什么，
  *     所以「稍后」不产生任何状态变化，只是把遮罩收起来。
  *
- * 一次只弹一个：靠遮罩自己的类名判重（与确认框同一套 `sztb-modal-*` 样式）。
+ * 一次只弹一个：`sztb-auth-mask` 既是判重类名，也是层级覆盖类名
+ * （遮罩比确认框更深、更高，万一确认框正开着也盖得住）。
  * 关掉之后不再复弹 —— 触发方（tasks / monitor）在登录态失效时已经停了循环，
  * 不会有第二个来源连续戳它。
  */
 
-import { el } from '../../utils/dom.ts';
+import { showModalAlert } from './modal.ts';
 
 /** 本组件专属类名：`sztb-modal-mask` 之外再加一层，用于判重与层级覆盖 */
 const AUTH_MASK_CLASS = 'sztb-auth-mask';
+
+/** 对话框本体专属类名（正文比确认框长，放宽一行） */
+const AUTH_BOX_CLASS = 'sztb-auth-box';
 
 const TITLE = '登录态已失效';
 
@@ -26,46 +30,29 @@ const BODY =
   '选课站点已经把本次会话踢下线，继续抢课 / 监控不会成功。\n' +
   '请刷新网页并重新登录，然后回到【任务】页点【开始抢课】继续。';
 
+/** 「稍后」—— 只是把遮罩收起来，不产生任何状态变化 */
+const LATER_KEY = 'later';
+
+/** 「刷新网页重新登录」—— 会话凭证在页面会话里，重登必须重新走站点登录页，刷新是唯一动作 */
+const RELOAD_KEY = 'reload';
+
 /**
  * 弹出全屏提示（已存在则什么都不做）。
  * @param shadowRoot 悬浮窗的 shadow root —— 与确认框同源，遮罩挂在它下面。
  */
 export function showAuthAlert(shadowRoot: ShadowRoot): void {
-  if (shadowRoot.querySelector(`.${AUTH_MASK_CLASS}`) !== null) return;
-
-  // 按钮的点击处理器在 mask 建好之后才挂（`mask` 是 const，不能在它之前引用）
-  const laterBtn = el('button', {
-    class: 'sztb-btn',
-    text: '稍后',
-    attrs: { type: 'button' },
+  // 刻意不给 `cancelKey`：这不是一个「点外面就取消」的框，用户必须明确选一个按钮
+  void showModalAlert(shadowRoot, {
+    title: TITLE,
+    body: BODY,
+    danger: true,
+    dedupeClass: AUTH_MASK_CLASS,
+    boxClass: AUTH_BOX_CLASS,
+    actions: [
+      { key: LATER_KEY, label: '稍后' },
+      { key: RELOAD_KEY, label: '刷新网页重新登录', variant: 'primary' },
+    ],
+  }).then((key) => {
+    if (key === RELOAD_KEY) location.reload();
   });
-
-  const reloadBtn = el('button', {
-    class: 'sztb-btn',
-    text: '刷新网页重新登录',
-    attrs: { type: 'button', 'data-variant': 'primary' },
-    on: {
-      click: () => {
-        // 会话凭证在页面会话里，重登必须重新走站点登录页 —— 刷新是唯一动作
-        location.reload();
-      },
-    },
-  });
-
-  const modal = el(
-    'div',
-    { class: 'sztb-modal sztb-auth-box' },
-    el('div', { class: 'sztb-modal-title', text: TITLE, data: { danger: 'true' } }),
-    el('div', { class: 'sztb-modal-body', text: BODY }),
-    el('div', { class: 'sztb-modal-foot' }, laterBtn, reloadBtn),
-  );
-
-  // 遮罩**刻意不响应点击**：这不是一个「点外面就取消」的框，用户必须明确选一个按钮
-  const mask = el('div', { class: `sztb-modal-mask ${AUTH_MASK_CLASS}` }, modal);
-  laterBtn.addEventListener('click', () => {
-    mask.remove();
-  });
-
-  shadowRoot.appendChild(mask);
-  reloadBtn.focus();
 }

@@ -5,79 +5,40 @@
  * （提交选课 / 提交答案 / 交卷）在真正执行前必须经过用户显式确认。
  *
  * ⚠️ 严禁把本组件做成「可跳过」的。任何给 danger 类操作加 `skipConfirm` 的想法
- * 都会直接违反 N1。
+ * 都会直接违反 N1。落到实现上：这里**只**把 `cancelKey` 用作「遮罩 / Esc 算取消」，
+ * 绝不能改成把确认按钮之外的路径也放行。
+ *
+ * 形态（遮罩层级、按钮样式、判重）全部由 `modal.ts` 提供，本文件只剩语义映射。
  */
 
-import { el } from '../../utils/dom.ts';
+import { showModalAlert } from './modal.ts';
 import type { ConfirmOptions } from '../../../sites/types.ts';
 
-const ESC_KEY = 'Escape';
+/** 取消路径回传的 key —— 与「点取消按钮」同义，调用方不需要区分 */
+const CANCEL_KEY = 'cancel';
+
+/** 确认路径回传的 key */
+const OK_KEY = 'ok';
 
 /**
  * 弹一个确认框。
  * @returns 用户点确认 → true；点取消 / 按 Esc / 点遮罩 → false
  */
 export function showConfirm(shadowRoot: ShadowRoot, options: ConfirmOptions): Promise<boolean> {
-  return new Promise<boolean>((resolve) => {
-    const danger = options.danger === true;
-    let settled = false;
+  const danger = options.danger === true;
 
-    const finish = (value: boolean): void => {
-      if (settled) return;
-      settled = true;
-      document.removeEventListener('keydown', onKeyDown, true);
-      mask.remove();
-      resolve(value);
-    };
-
-    const onKeyDown = (ev: KeyboardEvent): void => {
-      if (ev.key !== ESC_KEY) return;
-      ev.stopPropagation();
-      finish(false);
-    };
-
-    const confirmBtn = el('button', {
-      class: 'sztb-btn',
-      text: options.confirmText ?? (danger ? '我确认，执行' : '确定'),
-      attrs: { type: 'button', 'data-variant': danger ? 'danger' : 'primary' },
-      on: { click: () => finish(true) },
-    });
-
-    const cancelBtn = el('button', {
-      class: 'sztb-btn',
-      text: options.cancelText ?? '取消',
-      attrs: { type: 'button' },
-      on: { click: () => finish(false) },
-    });
-
-    const modal = el(
-      'div',
-      { class: 'sztb-modal' },
-      el('div', {
-        class: 'sztb-modal-title',
-        text: options.title,
-        data: { danger: String(danger) },
-      }),
-      el('div', { class: 'sztb-modal-body', text: options.body }),
-      el('div', { class: 'sztb-modal-foot' }, cancelBtn, confirmBtn),
-    );
-
-    const mask = el(
-      'div',
+  return showModalAlert(shadowRoot, {
+    title: options.title,
+    body: options.body,
+    danger,
+    cancelKey: CANCEL_KEY,
+    actions: [
+      { key: CANCEL_KEY, label: options.cancelText ?? '取消' },
       {
-        class: 'sztb-modal-mask',
-        on: {
-          // 只有点在遮罩本身上才算取消（点在对话框里不算）
-          click: (ev) => {
-            if (ev.target === mask) finish(false);
-          },
-        },
+        key: OK_KEY,
+        label: options.confirmText ?? (danger ? '我确认，执行' : '确定'),
+        variant: danger ? 'danger' : 'primary',
       },
-      modal,
-    );
-
-    shadowRoot.appendChild(mask);
-    document.addEventListener('keydown', onKeyDown, true);
-    confirmBtn.focus();
-  });
+    ],
+  }).then((key) => key === OK_KEY);
 }

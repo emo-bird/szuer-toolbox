@@ -52,7 +52,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-08T15:00:49.647Z（构建号 86） */
+/* 构建信息：2026-10-08T15:27:52.445Z（构建号 88） */
 
 "use strict";
 (() => {
@@ -523,100 +523,111 @@
     }
   };
 
-  // src/common/ui/widgets/confirm.ts
+  // src/common/ui/widgets/modal.ts
   var ESC_KEY = "Escape";
-  function showConfirm(shadowRoot, options) {
+  function showModalAlert(shadowRoot, options) {
     return new Promise((resolve2) => {
       const danger = options.danger === true;
+      const cancelKey = options.cancelKey;
+      const dedupeClass = options.dedupeClass ?? "";
+      const boxClass = options.boxClass ?? "";
+      if (dedupeClass !== "" && shadowRoot.querySelector(`.${dedupeClass}`) !== null) {
+        resolve2(null);
+        return;
+      }
       let settled = false;
-      const finish2 = (value) => {
+      const finish2 = (key) => {
         if (settled) return;
         settled = true;
         document.removeEventListener("keydown", onKeyDown, true);
         mask.remove();
-        resolve2(value);
+        resolve2(key);
       };
       const onKeyDown = (ev) => {
-        if (ev.key !== ESC_KEY) return;
+        if (cancelKey === void 0 || ev.key !== ESC_KEY) return;
         ev.stopPropagation();
-        finish2(false);
+        finish2(cancelKey);
       };
-      const confirmBtn = el("button", {
-        class: "sztb-btn",
-        text: options.confirmText ?? (danger ? "我确认，执行" : "确定"),
-        attrs: { type: "button", "data-variant": danger ? "danger" : "primary" },
-        on: { click: () => finish2(true) }
-      });
-      const cancelBtn = el("button", {
-        class: "sztb-btn",
-        text: options.cancelText ?? "取消",
-        attrs: { type: "button" },
-        on: { click: () => finish2(false) }
-      });
+      const buttons = options.actions.map(
+        (action) => el("button", {
+          class: "sztb-btn",
+          text: action.label,
+          attrs: { type: "button", "data-variant": action.variant },
+          on: { click: () => finish2(action.key) }
+        })
+      );
       const modal = el(
         "div",
-        { class: "sztb-modal" },
+        { class: boxClass === "" ? "sztb-modal" : `sztb-modal ${boxClass}` },
         el("div", {
           class: "sztb-modal-title",
           text: options.title,
           data: { danger: String(danger) }
         }),
         el("div", { class: "sztb-modal-body", text: options.body }),
-        el("div", { class: "sztb-modal-foot" }, cancelBtn, confirmBtn)
+        el("div", { class: "sztb-modal-foot" }, ...buttons)
       );
       const mask = el(
         "div",
         {
-          class: "sztb-modal-mask",
+          class: dedupeClass === "" ? "sztb-modal-mask" : `sztb-modal-mask ${dedupeClass}`,
           on: {
-            // 只有点在遮罩本身上才算取消（点在对话框里不算）
             click: (ev) => {
-              if (ev.target === mask) finish2(false);
+              if (cancelKey === void 0) return;
+              if (ev.target === mask) finish2(cancelKey);
             }
           }
         },
         modal
       );
       shadowRoot.appendChild(mask);
-      document.addEventListener("keydown", onKeyDown, true);
-      confirmBtn.focus();
+      if (cancelKey !== void 0) document.addEventListener("keydown", onKeyDown, true);
+      buttons[buttons.length - 1]?.focus();
     });
+  }
+
+  // src/common/ui/widgets/confirm.ts
+  var CANCEL_KEY = "cancel";
+  var OK_KEY = "ok";
+  function showConfirm(shadowRoot, options) {
+    const danger = options.danger === true;
+    return showModalAlert(shadowRoot, {
+      title: options.title,
+      body: options.body,
+      danger,
+      cancelKey: CANCEL_KEY,
+      actions: [
+        { key: CANCEL_KEY, label: options.cancelText ?? "取消" },
+        {
+          key: OK_KEY,
+          label: options.confirmText ?? (danger ? "我确认，执行" : "确定"),
+          variant: danger ? "danger" : "primary"
+        }
+      ]
+    }).then((key) => key === OK_KEY);
   }
 
   // src/common/ui/widgets/auth-alert.ts
   var AUTH_MASK_CLASS = "sztb-auth-mask";
+  var AUTH_BOX_CLASS = "sztb-auth-box";
   var TITLE = "登录态已失效";
   var BODY = "选课站点已经把本次会话踢下线，继续抢课 / 监控不会成功。\n请刷新网页并重新登录，然后回到【任务】页点【开始抢课】继续。";
+  var LATER_KEY = "later";
+  var RELOAD_KEY = "reload";
   function showAuthAlert(shadowRoot) {
-    if (shadowRoot.querySelector(`.${AUTH_MASK_CLASS}`) !== null) return;
-    const laterBtn = el("button", {
-      class: "sztb-btn",
-      text: "稍后",
-      attrs: { type: "button" }
+    void showModalAlert(shadowRoot, {
+      title: TITLE,
+      body: BODY,
+      danger: true,
+      dedupeClass: AUTH_MASK_CLASS,
+      boxClass: AUTH_BOX_CLASS,
+      actions: [
+        { key: LATER_KEY, label: "稍后" },
+        { key: RELOAD_KEY, label: "刷新网页重新登录", variant: "primary" }
+      ]
+    }).then((key) => {
+      if (key === RELOAD_KEY) location.reload();
     });
-    const reloadBtn = el("button", {
-      class: "sztb-btn",
-      text: "刷新网页重新登录",
-      attrs: { type: "button", "data-variant": "primary" },
-      on: {
-        click: () => {
-          location.reload();
-        }
-      }
-    });
-    const modal = el(
-      "div",
-      { class: "sztb-modal sztb-auth-box" },
-      el("div", { class: "sztb-modal-title", text: TITLE, data: { danger: "true" } }),
-      el("div", { class: "sztb-modal-body", text: BODY }),
-      el("div", { class: "sztb-modal-foot" }, laterBtn, reloadBtn)
-    );
-    const mask = el("div", { class: `sztb-modal-mask ${AUTH_MASK_CLASS}` }, modal);
-    laterBtn.addEventListener("click", () => {
-      mask.remove();
-    });
-    shadowRoot.appendChild(mask);
-    reloadBtn.focus();
   }
 
   // src/common/ui/panel.ts
@@ -9434,8 +9445,8 @@ ${text}
   // src/main.ts
   var log29 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-08T15:00:49.647Z" : null;
-  var BUILD_NO = true ? 86 : null;
+  var BUILD_TIME = true ? "2026-10-08T15:27:52.445Z" : null;
+  var BUILD_NO = true ? 88 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();
