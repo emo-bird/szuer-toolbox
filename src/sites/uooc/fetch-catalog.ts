@@ -22,7 +22,12 @@
 
 import { request, PRIORITY } from '../../common/core/http.ts';
 import { scoped } from '../../common/core/log.ts';
-import { flattenTaskPoints, type TaskPoint } from './catalog.ts';
+import {
+  flattenTaskPoints,
+  parseUnitSources,
+  type TaskPoint,
+  type TaskSource,
+} from './catalog.ts';
 
 const log = scoped('uooc/fetch-catalog');
 
@@ -195,14 +200,37 @@ function defaultSleep(ms: number): Promise<void> {
   });
 }
 
-/** 单次尝试的结果 */
-type AttemptResult = { ok: true; points: TaskPoint[]; raw: unknown } | { ok: false; failure: CatalogFailure };
+/** 解析一次响应的结果（不区分是哪个接口） */
+type ParseOutcome<T> =
+  | { ok: true; value: T; raw: unknown }
+  | { ok: false; failure: CatalogFailure };
+
+/** 一次「带重试的取数」的全部可注入件（纯为测试与复用而拆） */
+interface RetryPlan<T> {
+  /** 日志、弹窗里怎么称呼这份数据：「课程树」/「资源列表」 */
+  label: string;
+  url: string;
+  send: CatalogSender;
+  sleep: (ms: number) => Promise<void>;
+  shouldAbort?: (() => boolean) | undefined;
+  /** 把一次成功的 HTTP 响应变成 `T`；失败分类由它自己决定 */
+  parse: (res: RawCatalogResponse) => ParseOutcome<T>;
+  /** 重试期间被停止时的 detail 文案 */
+  abortDetail: string;
+  /** 成功日志里追加的数字，例 "66 个任务点" */
+  describeOk: (value: T) => string;
+}
+
+/** 取数结果（两个接口共用同一形状） */
+export type RetryResult<T> =
+  | { ok: true; attempts: number; value: T; raw: unknown }
+  | { ok: false; attempts: number; failure: CatalogFailure };
 
 /** 发一次并判定；**任何抛出都归到 `network`**，不往外抛 */
-async function attemptOnce(send: CatalogSender, url: string, cid: string): Promise<AttemptResult> {
+async function attemptOnce<T>(plan: RetryPlan<T>): Promise<ParseOutcome<T>> {
   let res: RawCatalogResponse;
   try {
-    res = await send(url, CATALOG_TIMEOUT_MS);
+    res = await plan.send(plan.url, CATALOG_TIMEOUT_MS);
   } catch (err) {
     return { ok: false, failure: { kind: 'network', detail: errorText(err) } };
   }
@@ -212,7 +240,51 @@ async function attemptOnce(send: CatalogSender, url: string, cid: string): Promi
       failure: { kind: 'http', status: res.status, detail: truncateDetail(res.text) },
     };
   }
-  return parseCatalogResponse(res.json, cid);
+  return plan.parse(res);
+}
+
+/**
+ * 带重试的取数主循环（§E.6 的口径：共 `CATALOG_ATTEMPTS` 次、固定间隔
+ * `CATALOG_RETRY_DELAY_MS`、单次超时 `CATALOG_TIMEOUT_MS`）。
+ *
+ * 每次失败都 `warn`（含第几次 / 失败分类），成功记一条 `info`（含实际用了几次）——
+ * 这样「是不是在重试」从日志一眼能看出来。
+ * 用户在两次请求之间按了停止，返回 `kind: 'aborted'`，**不算失败**。
+ */
+async function fetchWithRetry<T>(plan: RetryPlan<T>): Promise<RetryResult<T>> {
+  let attempts = 0;
+  let lastFailure: CatalogFailure = { kind: 'network', detail: '一次都没发出去' };
+
+  const aborted = (): RetryResult<T> => ({
+    ok: false,
+    attempts,
+    failure: { kind: 'aborted', detail: plan.abortDetail },
+  });
+
+  for (let attempt = 1; attempt <= CATALOG_ATTEMPTS; attempt += 1) {
+    attempts = attempt;
+    if (attempt > 1 && plan.shouldAbort?.() === true) return aborted();
+
+    const outcome = await attemptOnce(plan);
+    if (outcome.ok) {
+      log.info(
+        `取到${plan.label}：${plan.describeOk(outcome.value)}（第 ${attempt}/${CATALOG_ATTEMPTS} 次）`,
+      );
+      return { ok: true, attempts: attempt, value: outcome.value, raw: outcome.raw };
+    }
+
+    lastFailure = outcome.failure;
+    log.warn(`取${plan.label}第 ${attempt}/${CATALOG_ATTEMPTS} 次失败 —— ${describeFailure(lastFailure)}`);
+
+    if (attempt >= CATALOG_ATTEMPTS) break;
+    if (plan.shouldAbort?.() === true) return aborted();
+
+    await plan.sleep(CATALOG_RETRY_DELAY_MS);
+    if (plan.shouldAbort?.() === true) return aborted();
+  }
+
+  log.error(`取${plan.label}彻底失败（共 ${attempts} 次）—— ${describeFailure(lastFailure)}`);
+  return { ok: false, attempts, failure: lastFailure };
 }
 
 /**
@@ -225,39 +297,126 @@ async function attemptOnce(send: CatalogSender, url: string, cid: string): Promi
  */
 export async function fetchCatalogPoints(options: CatalogFetchOptions): Promise<CatalogFetchResult> {
   const { cid } = options;
-  const send = options.send ?? defaultSender;
-  const sleep = options.sleep ?? defaultSleep;
-  const url = catalogListUrl(cid, options.origin);
-
-  let attempts = 0;
-  let lastFailure: CatalogFailure = { kind: 'network', detail: '一次都没发出去' };
-
-  const aborted = (): CatalogFetchResult => ({
-    ok: false,
-    attempts,
-    failure: { kind: 'aborted', detail: '等待重试期间用户停止了接管' },
+  const result = await fetchWithRetry<TaskPoint[]>({
+    label: '课程树',
+    url: catalogListUrl(cid, options.origin),
+    send: options.send ?? defaultSender,
+    sleep: options.sleep ?? defaultSleep,
+    shouldAbort: options.shouldAbort,
+    abortDetail: '等待重试期间用户停止了接管',
+    parse: (res) => {
+      const parsed = parseCatalogResponse(res.json, cid);
+      return parsed.ok
+        ? { ok: true, value: parsed.points, raw: parsed.raw }
+        : { ok: false, failure: parsed.failure };
+    },
+    describeOk: (points) => `${points.length} 个任务点`,
   });
 
-  for (let attempt = 1; attempt <= CATALOG_ATTEMPTS; attempt += 1) {
-    attempts = attempt;
-    if (attempt > 1 && options.shouldAbort?.() === true) return aborted();
+  if (!result.ok) return { ok: false, attempts: result.attempts, failure: result.failure };
+  return { ok: true, attempts: result.attempts, points: result.value, raw: result.raw };
+}
 
-    const outcome = await attemptOnce(send, url, cid);
-    if (outcome.ok) {
-      log.info(`取到课程树：${outcome.points.length} 个任务点（第 ${attempt}/${CATALOG_ATTEMPTS} 次）`);
-      return { ok: true, attempts: attempt, points: outcome.points, raw: outcome.raw };
-    }
+// ------------------------------------------------------------------ 资源列表（§B.5 第二段）
 
-    lastFailure = outcome.failure;
-    log.warn(`取课程树第 ${attempt}/${CATALOG_ATTEMPTS} 次失败 —— ${describeFailure(lastFailure)}`);
+/** 资源列表接口路径（拼接见 `unitLearnUrl`） */
+export const UNIT_PATH = '/home/learn/getUnitLearn';
 
-    if (attempt >= CATALOG_ATTEMPTS) break;
-    if (options.shouldAbort?.() === true) return aborted();
+/**
+ * 某一节**逐个资源**的完成状态：`GET /home/learn/getUnitLearn`
+ * （§B.5 第二段；模板抄 `b701b6b` 的 `unitLearnUrl`，实测可用）。
+ *
+ * ⚠️ 四个 id 的来路别搞混：`catalog_id` 是**节点自己**的 id；`chapter_id` 是**章**；
+ * `section_id` 是**节** —— 三级形态（节自己就是任务点）时节 = 节点自己，
+ * 四级形态时是它父节点的 id。这三个值 `TaskPoint` 里都已经算好了
+ * （`nodeId` / `chapterId` / `sectionId`），**不要再自己推**。
+ *
+ * 实测：真正起作用的键是 `catalog_id`，`chapter_id` / `section_id` 传当前所在节
+ * 也能查到别的节点；但按祖先链传语义更正确。
+ */
+export function unitLearnUrl(
+  cid: string,
+  point: TaskPoint,
+  origin: string = defaultOrigin(),
+): string {
+  const params = [
+    `catalog_id=${encodeURIComponent(point.nodeId)}`,
+    `chapter_id=${encodeURIComponent(point.chapterId)}`,
+    `section_id=${encodeURIComponent(point.sectionId)}`,
+    `cid=${encodeURIComponent(cid)}`,
+    'hidemsg_=true',
+  ];
+  return `${origin}${UNIT_PATH}?${params.join('&')}`;
+}
 
-    await sleep(CATALOG_RETRY_DELAY_MS);
-    if (options.shouldAbort?.() === true) return aborted();
+export type UnitParseResult =
+  | { ok: true; sources: TaskSource[]; raw: unknown }
+  | { ok: false; failure: CatalogFailure };
+
+/** 判定 `getUnitLearn` 的响应；口径与 `parseCatalogResponse` 完全一致 */
+export function parseUnitResponse(json: unknown): UnitParseResult {
+  if (json === null || typeof json !== 'object') {
+    return { ok: false, failure: { kind: 'shape', detail: '响应不是对象' } };
   }
+  const root = json as { code?: unknown; msg?: unknown; data?: unknown };
+  if (Number(root.code) !== 1) {
+    return {
+      ok: false,
+      failure: {
+        kind: 'business',
+        code: root.code,
+        detail: `code=${String(root.code)} msg=${String(root.msg ?? '')}`,
+      },
+    };
+  }
+  if (!Array.isArray(root.data)) {
+    return { ok: false, failure: { kind: 'shape', detail: 'code=1 但 data 不是数组' } };
+  }
+  return { ok: true, sources: parseUnitSources(root.data), raw: json };
+}
 
-  log.error(`取课程树彻底失败（共 ${attempts} 次）—— ${describeFailure(lastFailure)}`);
-  return { ok: false, attempts, failure: lastFailure };
+export type UnitFetchResult =
+  | { ok: true; attempts: number; sources: TaskSource[]; raw: unknown }
+  | { ok: false; attempts: number; failure: CatalogFailure };
+
+export interface UnitFetchOptions {
+  cid: string;
+  /** 哪一节；URL 的三个 id 从这个对象上取 */
+  point: TaskPoint;
+  /** 注入用（测试）；默认走 `request()` */
+  send?: CatalogSender;
+  /** 注入用（测试）；默认 `setTimeout` */
+  sleep?: (ms: number) => Promise<void>;
+  /** 每次重试**之前**问一句：用户按了停止就别再发了 */
+  shouldAbort?: () => boolean;
+  /** 覆盖 URL 的 origin（测试用） */
+  origin?: string;
+}
+
+/**
+ * 拉某一节的资源列表，重试口径与课程树**完全一样**
+ * （共 `CATALOG_ATTEMPTS` 次 / 间隔 `CATALOG_RETRY_DELAY_MS` / 单次超时 `CATALOG_TIMEOUT_MS`）。
+ *
+ * 这个接口也是只读 GET，所以复用同一套重试；两个接口共用 `fetchWithRetry`。
+ */
+export async function fetchUnitSources(options: UnitFetchOptions): Promise<UnitFetchResult> {
+  const { cid, point } = options;
+  const result = await fetchWithRetry<TaskSource[]>({
+    label: '资源列表',
+    url: unitLearnUrl(cid, point, options.origin),
+    send: options.send ?? defaultSender,
+    sleep: options.sleep ?? defaultSleep,
+    shouldAbort: options.shouldAbort,
+    abortDetail: '等待重试期间用户停止了接管',
+    parse: (res) => {
+      const parsed = parseUnitResponse(res.json);
+      return parsed.ok
+        ? { ok: true, value: parsed.sources, raw: parsed.raw }
+        : { ok: false, failure: parsed.failure };
+    },
+    describeOk: (sources) => `${sources.length} 个资源`,
+  });
+
+  if (!result.ok) return { ok: false, attempts: result.attempts, failure: result.failure };
+  return { ok: true, attempts: result.attempts, sources: result.value, raw: result.raw };
 }

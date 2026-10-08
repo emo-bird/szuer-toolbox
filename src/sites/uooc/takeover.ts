@@ -28,14 +28,23 @@ import type { PanelApi } from '../types.ts';
 import { quizTidOnPage, runQuizAnswer, type AiQuizResult } from './ai/index.ts';
 import { setCourseProgress } from './ai/monitor.ts';
 import {
+  SOURCE_NAME,
   buildCourseRows,
   courseIdFromLocation,
   firstUnfinished,
+  firstUnfinishedSource,
+  hashForSource,
   summarizeTaskPoints,
   type TaskPoint,
   type TaskPointSummary,
+  type TaskSource,
 } from './catalog.ts';
-import { describeFailure, fetchCatalogPoints, type CatalogFailure } from './fetch-catalog.ts';
+import {
+  describeFailure,
+  fetchCatalogPoints,
+  fetchUnitSources,
+  type CatalogFailure,
+} from './fetch-catalog.ts';
 import { SITE_ID, TOGGLE, holdAfterMs, waitBeforeMs, waitTimeoutMs } from './settings.ts';
 
 const log = scoped('uooc/takeover');
@@ -252,18 +261,26 @@ function viewerReady(kind: 'video' | 'quiz'): boolean {
 }
 
 /**
- * 跳到一个任务点，并等内容真的换过来。
+ * 跳到某个具体资源，并等内容真的换过来。
+ *
+ * ⚠️ `hash` 是**资源级**的地址（`hashForSource()` 算出来的），不是
+ * `point.primaryHash` —— 一个节可以挂好几个任务点。
  *
  * @returns `true` = 目标内容已就绪；`false` = 等满了全局等待超时（调用方按 §D 处理）
  */
-async function gotoPoint(point: TaskPoint, kind: 'video' | 'quiz', t: { cancelled: boolean }): Promise<boolean> {
-  const needsChange = location.hash !== point.hash;
+async function gotoPoint(
+  hash: string,
+  kind: 'video' | 'quiz',
+  label: string,
+  t: { cancelled: boolean },
+): Promise<boolean> {
+  const needsChange = location.hash !== hash;
   const before = needsChange ? viewerSignature() : '';
   if (needsChange) {
-    log.info(`跳转 ${point.hash}`);
-    location.hash = point.hash;
+    log.info(`跳转 ${hash}`);
+    location.hash = hash;
   } else {
-    log.debug(`已经在这一项上了（${point.hash}），不再改 hash`);
+    log.debug(`已经在这一项上了（${hash}），不再改 hash`);
   }
 
   // §E.3：`WAIT_BEFORE_MS` = 改完 hash 后、开始等元素出现之前的固定 sleep
@@ -276,7 +293,7 @@ async function gotoPoint(point: TaskPoint, kind: 'video' | 'quiz', t: { cancelle
     return !needsChange || viewerSignature() !== before;
   }, waitTimeoutMs(), t);
 
-  if (ok) log.info(`内容已就绪：${pointLabel(point)}`);
+  if (ok) log.info(`内容已就绪：${label}`);
   return ok;
 }
 
@@ -320,6 +337,30 @@ function pointLabel(point: TaskPoint): string {
   return `${head}${tail}` === '' ? point.typeName || point.nodeId : `${head}${tail}`;
 }
 
+/**
+ * 一个**真·待办项**：节点层的一节 + 这一节里具体哪个资源（§B.5 两段式）。
+ *
+ * 为什么非要两个字段：站点把「完成状态」分成两层 —— 节点的 `finished` 是**汇总**，
+ * 逐资源的状态只有 `getUnitLearn` 有。只拿节点会认错（视频已经打勾了、但同一节里
+ * 还有个测验没做，节点级就仍是未完成）。
+ */
+interface Task {
+  /** 节点层：这一节（`finished` 是汇总，判断「还要不要做」用节点级） */
+  readonly point: TaskPoint;
+  /** 资源层：这一节里第一个没做完的**真任务点**（视频 / 测验） */
+  readonly source: TaskSource;
+  /** 资源级跳转地址（`hashForSource()` 算好的） */
+  readonly hash: string;
+}
+
+/** 给日志/状态行看的名字：节名 + 资源名，如 `…「1.3 绪论」 · 视频` */
+function taskLabel(task: Task): string {
+  const head = pointLabel(task.point);
+  const fallback = SOURCE_NAME[task.source.type] ?? '';
+  const name = task.source.name === '' ? fallback : task.source.name;
+  return name === '' ? head : `${head} · ${name}`;
+}
+
 /** 进度推给【监视】页顶部那块（§E.2） */
 function publishProgress(points: readonly TaskPoint[], sum: TaskPointSummary, current: TaskPoint | null): void {
   const label = current === null ? '' : pointLabel(current);
@@ -337,8 +378,10 @@ function publishProgress(points: readonly TaskPoint[], sum: TaskPointSummary, cu
 interface Ctx {
   readonly host: PanelApi;
   readonly cid: string;
-  /** 本次运行里「本站不自动处理、已跳过」的节点 id */
+  /** 本次运行里「本站不自动处理、已跳过」的**节** id（节点级） */
   readonly skipped: Set<string>;
+  /** 同上，但记的是**资源** id（资源级，§B.5 第二段） */
+  readonly skippedSources: Set<string>;
   /** 未知类型只 warn 一次 */
   readonly warnedTypes: Set<string>;
   points: TaskPoint[];
@@ -372,7 +415,14 @@ async function loop(host: PanelApi, t: { cancelled: boolean }): Promise<void> {
     return;
   }
 
-  const ctx: Ctx = { host, cid, skipped: new Set<string>(), warnedTypes: new Set<string>(), points: [] };
+  const ctx: Ctx = {
+    host,
+    cid,
+    skipped: new Set<string>(),
+    skippedSources: new Set<string>(),
+    warnedTypes: new Set<string>(),
+    points: [],
+  };
 
   // ---- ② 首次取树 ----
   const first = await fetchCatalogPoints({ cid, shouldAbort: () => t.cancelled });
@@ -397,8 +447,8 @@ async function loop(host: PanelApi, t: { cancelled: boolean }): Promise<void> {
     if (t.cancelled) return;
 
     const sum = summarizeTaskPoints(ctx.points);
-    const point = firstUnfinished(ctx.points, ctx.skipped);
-    publishProgress(ctx.points, sum, point);
+    const section = firstUnfinished(ctx.points, ctx.skipped);
+    publishProgress(ctx.points, sum, section);
 
     if (sum.done === sum.total) {
       release();
@@ -406,77 +456,98 @@ async function loop(host: PanelApi, t: { cancelled: boolean }): Promise<void> {
       log.info('全部任务点都完成了');
       return;
     }
-    if (point === null) {
-      // 剩下的全是本站不自动处理的类型（附件 / 讨论 / 文本 / 未知 / 形态不支持）
+    if (section === null) {
+      // 剩下的全是本站不自动处理的（附件 / 讨论 / 形态不支持 / 资源全完成）
       stop(`已停止 —— 剩 ${sum.total - sum.done} 个任务点本站不自动处理，其余都完成了`);
-      log.info(`没有可自动处理的任务点了，跳过 ${ctx.skipped.size} 个`);
+      log.info(`没有可自动处理的节了，跳过 ${ctx.skipped.size} 个`);
       return;
     }
 
-    stuck = point.nodeId === lastNodeId ? stuck + 1 : 1;
-    lastNodeId = point.nodeId;
+    stuck = section.nodeId === lastNodeId ? stuck + 1 : 1;
+    lastNodeId = section.nodeId;
     if (stuck > STUCK_LIMIT) {
       await fatal(
         host,
-        `已停止 —— 任务点「${point.name}」连续 ${STUCK_LIMIT} 轮没有进展`,
-        `同一个任务点被连续挑中 ${STUCK_LIMIT} 次都没能往下走，判定为卡死。\n\n` +
-          `位置：${pointLabel(point)}\n形态：${point.form}\n` +
+        `已停止 —— 「${section.name}」连续 ${STUCK_LIMIT} 轮没有进展`,
+        `同一节被连续挑中 ${STUCK_LIMIT} 次都没能往下走，判定为卡死。\n\n` +
+          `位置：${pointLabel(section)}\n形态：${section.form}\n任务点个数：${section.taskCount}\n` +
           '这多半是本工具的 bug（而不是站点的问题），可以带着上面的信息反馈。',
       );
       return;
     }
 
     // ---- 形态不支持：**只 warn 一次、跳过**，绝不为它中断整轮 ----
-    if (point.form === 'unsupported') {
-      log.warn(`任务点「${point.name}」(${point.nodeId}) 的路径形态不支持，已跳过`);
-      ctx.skipped.add(point.nodeId);
+    if (section.form === 'unsupported') {
+      log.warn(`「${section.name}」(${section.nodeId}) 的路径形态不支持，已跳过`);
+      ctx.skipped.add(section.nodeId);
       continue;
     }
 
-    // ---- 不打开、直接跳过的类型（§C.3 / §C.4）----
-    if (point.kind === 'attach' || point.kind === 'text' || point.kind === 'discussion') {
-      log.debug(`${point.typeName || point.kind}「${point.name}」：不打开，直接跳过`);
-      ctx.skipped.add(point.nodeId);
-      continue;
+    // ---- ② 资源级：这一节到底要打开哪一个（§B.5 第二段）----
+    const unit = await fetchUnitSources({ cid, point: section, shouldAbort: () => t.cancelled });
+    if (!unit.ok) {
+      if (unit.failure.kind === 'aborted') return; // 用户按的停止
+      await fatalCatalog(host, unit.failure, unit.attempts);
+      return;
     }
-    if (point.kind === 'unknown') {
-      if (!ctx.warnedTypes.has(point.type)) {
-        ctx.warnedTypes.add(point.type);
-        log.warn(`遇到未知类型 ${point.type}（${point.typeName || '无名字'}），已跳过`);
+
+    const target = firstUnfinishedSource(unit.sources, ctx.skippedSources);
+    if (target === null) {
+      // 站点说这一节还没做完（节点级 `finished=0`），但资源层给不出可做的项。
+      // 两种来路：① 这一节压根没有 10/80 的任务点；② 视频/测验都完成了，
+      // 只是站点的节点级汇总没跟上。无论哪种都**不能**在这儿空转，跳过它。
+      const taskSources = unit.sources.filter((s) => s.isTask);
+      for (const s of unit.sources) {
+        if (s.kind === 'unknown' && !ctx.warnedTypes.has(s.type)) {
+          ctx.warnedTypes.add(s.type);
+          log.warn(`遇到未知类型 ${s.type}（${s.typeName || '无名字'}），已跳过`);
+        }
       }
-      ctx.skipped.add(point.nodeId);
+      const reason =
+        taskSources.length === 0
+          ? '这一节没有本站能处理的任务点'
+          : '这一节的视频/测验都已完成，但目录树仍标未完成（站点记账滞后）';
+      log.warn(
+        `跳过「${section.name}」(${section.nodeId})：${reason}` +
+          `（资源 ${unit.sources.length} 个 / 任务点 ${taskSources.length} 个）`,
+      );
+      ctx.skipped.add(section.nodeId);
       continue;
     }
 
     // ---- 视频 / 测验：真干活 ----
-    const kind: 'video' | 'quiz' = point.kind === 'video' ? 'video' : 'quiz';
-    setStatus(`接管中：${kind === 'video' ? '正在播放' : '正在作答'} ${pointLabel(point)}（${sum.done}/${sum.total} 已完成）`);
+    const kind: 'video' | 'quiz' = target.kind === 'video' ? 'video' : 'quiz';
+    const task: Task = { point: section, source: target, hash: hashForSource(cid, section, target) };
+    const label = taskLabel(task);
+    setStatus(
+      `接管中：${kind === 'video' ? '正在播放' : '正在作答'} ${label}（${sum.done}/${sum.total} 已完成）`,
+    );
 
-    const handled = kind === 'video' ? await handleVideo(ctx, point, t) : await handleQuiz(ctx, point, t);
+    const handled = kind === 'video' ? await handleVideo(ctx, task, t) : await handleQuiz(ctx, task, t);
     if (t.cancelled) return;
     if (!handled) return; // 内部已经 fatal() 或 stop() 过了
 
     // ---- 统一核实（§B.5：以重拉到的 finished 为准）----
     if (!(await reload(ctx, t))) return;
     if (t.cancelled) return;
-    if (!stillUnfinished(ctx, point.nodeId)) continue;
+    if (!stillUnfinished(ctx, section.nodeId)) continue;
 
     if (kind === 'video') {
       // §C.1 第 4 步：再等一个「全局等待超时」，再重拉一次；仍不行就弹窗停下
-      setStatus(`接管中：视频「${point.name}」播完了，等站点记账（最多 ${Math.round(waitTimeoutMs() / 1000)} 秒）…`);
-      log.info(`视频「${point.name}」播完了但还没记完成，等 ${waitTimeoutMs()}ms 再拉一次`);
+      setStatus(`接管中：视频「${label}」播完了，等站点记账（最多 ${Math.round(waitTimeoutMs() / 1000)} 秒）…`);
+      log.info(`视频「${label}」播完了但还没记完成，等 ${waitTimeoutMs()}ms 再拉一次`);
       await sleep(waitTimeoutMs(), t);
       if (t.cancelled) return;
       if (!(await reload(ctx, t))) return;
       if (t.cancelled) return;
-      if (!stillUnfinished(ctx, point.nodeId)) continue;
+      if (!stillUnfinished(ctx, section.nodeId)) continue;
 
       await fatal(
         host,
-        `已停止 —— 视频「${point.name}」播完两轮仍未记完成`,
+        `已停止 —— 视频「${label}」播完两轮仍未记完成`,
         `这一项已经完整播完，又等了两轮（${holdAfterMs()} 毫秒 + ${waitTimeoutMs()} 毫秒）` +
           '重新拉取课程目录，站点那边仍然显示未完成。\n\n' +
-          `位置：${pointLabel(point)}\n\n` +
+          `位置：${label}\n\n` +
           '可能原因：播放没真正到底（比如一直卡着 / 被暂停）、或者站点记账更慢。\n' +
           '去页面看一眼这一项现在的状态，再决定要不要点【开始接管】接着走。',
       );
@@ -486,10 +557,10 @@ async function loop(host: PanelApi, t: { cancelled: boolean }): Promise<void> {
     // 测验：重做已经在 handleQuiz 里做到上限了，走到这里说明站点就是不给过
     await fatal(
       host,
-      `已停止 —— 测验「${point.name}」答了 ${QUIZ_MAX_ROUNDS} 轮仍未记完成`,
+      `已停止 —— 测验「${label}」答了 ${QUIZ_MAX_ROUNDS} 轮仍未记完成`,
       `这个测验连着作答并提交了 ${QUIZ_MAX_ROUNDS} 轮，站点那边仍然显示未完成，` +
         '多半是分数没到及格线。\n\n' +
-        `位置：${pointLabel(point)}\n\n` +
+        `位置：${label}\n\n` +
         '去页面看一眼得分与及格线，再决定要不要点【开始接管】接着走。',
     );
     return;
@@ -499,15 +570,16 @@ async function loop(host: PanelApi, t: { cancelled: boolean }): Promise<void> {
 // ------------------------------------------------------------- 视频
 
 /** @returns `false` = 已经收尾（停止 / 弹窗），调用方直接返回 */
-async function handleVideo(ctx: Ctx, point: TaskPoint, t: { cancelled: boolean }): Promise<boolean> {
-  if (!(await gotoPoint(point, 'video', t))) {
+async function handleVideo(ctx: Ctx, task: Task, t: { cancelled: boolean }): Promise<boolean> {
+  const label = taskLabel(task);
+  if (!(await gotoPoint(task.hash, 'video', label, t))) {
     if (t.cancelled) return false;
     // D1（用户拍板 a）：等不到预期元素 → 与测验同一套，弹窗 + 停
     await fatal(
       ctx.host,
-      `已停止 —— 视频「${point.name}」等满等待超时也没出现播放器`,
+      `已停止 —— 视频「${label}」等满等待超时也没出现播放器`,
       `跳到这一项之后，等了 ${Math.round(waitTimeoutMs() / 1000)} 秒都没等到播放器出现。\n\n` +
-        `位置：${pointLabel(point)}\n形态：${point.form}\n跳转地址：${point.hash}\n\n` +
+        `位置：${label}\n形态：${task.point.form}\n跳转地址：${task.hash}\n\n` +
         '如果是四级路径（`/subsection`）的项，那说明这套 hash 拼法没被站点认下来 —— ' +
         '这是新方案里**唯一没有实证**的地方，把上面那一行地址反馈给开发者。',
     );
@@ -519,19 +591,19 @@ async function handleVideo(ctx: Ctx, point: TaskPoint, t: { cancelled: boolean }
   if (video === undefined || video === null) {
     await fatal(
       ctx.host,
-      `已停止 —— 视频「${point.name}」找到了播放器却拿不到 video 元素`,
+      `已停止 —— 视频「${label}」找到了播放器却拿不到 video 元素`,
       `内容区里出现了 \`div.showViewer\`，但里面取不到 \`<video>\`。多半是页面结构和预期不一致，请反馈。`,
     );
     return false;
   }
 
-  log.info(`视频「${point.name}」开始等播完（当前 ${video.currentTime.toFixed(1)}s / ${String(video.duration)}s）`);
+  log.info(`视频「${label}」开始等播完（当前 ${video.currentTime.toFixed(1)}s / ${String(video.duration)}s）`);
   const ended = await waitVideoEnd(video, t);
   if (t.cancelled) return false;
   if (!ended) {
     // 没等到 ended：不重播、也不立刻弹窗 —— 交给后面的「重拉核实」去判断，
     // 那边发现仍未完成会走 §C.1 的两轮等待，最后弹窗，上限是明确的。
-    log.warn(`视频「${point.name}」没等到播完（被暂停 / 出错 / 超保底时长），转去核实完成状态`);
+    log.warn(`视频「${label}」没等到播完（被暂停 / 出错 / 超保底时长），转去核实完成状态`);
   }
 
   // §C.1 第 3 步：`ended` 之后等 HOLD_AFTER_MS（= 5000），站点上报完成状态需要时间
@@ -548,74 +620,81 @@ async function handleVideo(ctx: Ctx, point: TaskPoint, t: { cancelled: boolean }
  *
  * @returns `false` = 已经收尾（停止 / 弹窗），调用方直接返回
  */
-async function handleQuiz(ctx: Ctx, point: TaskPoint, t: { cancelled: boolean }): Promise<boolean> {
+async function handleQuiz(ctx: Ctx, task: Task, t: { cancelled: boolean }): Promise<boolean> {
+  const label = taskLabel(task);
   // §C.2 / §F.1-6：AI 作答关着 → 与「等满超时」完全同一套处理，只有文案不同
   if (!isEnabled(SITE_ID, TOGGLE.AI_ANSWER)) {
     await fatal(
       ctx.host,
-      `已停止 —— 测验「${point.name}」到了，但 AI 作答没开`,
+      `已停止 —— 测验「${label}」到了，但 AI 作答没开`,
       '走到测验了，但【AI 作答】开关是关着的。\n\n' +
-        `位置：${pointLabel(point)}\n\n` +
+        `位置：${label}\n\n` +
         '没有替你跳过：跳过等于在不知情的情况下漏掉一整个测验。\n' +
         '去【AI 作答】页把开关打开（顺便确认接口地址与模型名填好了），再点【开始接管】。',
     );
     return false;
   }
 
-  if (!(await gotoPoint(point, 'quiz', t))) {
+  if (!(await gotoPoint(task.hash, 'quiz', label, t))) {
     if (t.cancelled) return false;
     await fatal(
       ctx.host,
-      `已停止 —— 测验「${point.name}」等满等待超时还没出题`,
+      `已停止 —— 测验「${label}」等满等待超时还没出题`,
       `跳到这一项之后，等了 ${Math.round(waitTimeoutMs() / 1000)} 秒，测验的题目一直没渲染出来。\n\n` +
-        `位置：${pointLabel(point)}\n跳转地址：${point.hash}\n\n` +
+        `位置：${label}\n跳转地址：${task.hash}\n\n` +
         '去页面看一眼这项到底是什么情况，再决定要不要点【开始接管】接着走。',
     );
     return false;
   }
 
-  const tid = quizTidOnPage();
+  // tid 优先读页面（页面里真正打开的那份才是要动的那份），
+  // 页面上读不出来才退回 `getUnitLearn` 白给的 `task_id`（§B.5 第二段）。
+  const fromPage = quizTidOnPage();
+  const tid = fromPage ?? (task.source.taskId === '' ? null : task.source.taskId);
   if (tid === null) {
     // §D：这一条**只停 + 日志，不弹窗**
-    stop(`已停止 —— 测验「${point.name}」读不出 tid`);
-    log.warn(`测验「${point.name}」的内容区有 iframe 但读不出 tid`);
+    stop(`已停止 —— 测验「${label}」读不出 tid`);
+    log.warn(`测验「${label}」页面与接口都给不出 tid，无法作答`);
     return false;
+  }
+  if (fromPage !== null && task.source.taskId !== '' && fromPage !== task.source.taskId) {
+    log.warn(`测验「${label}」页面 tid=${fromPage} 与接口 tid=${task.source.taskId} 不一致，按页面的走`);
   }
 
   for (let round = 1; round <= QUIZ_MAX_ROUNDS; round += 1) {
     if (t.cancelled) return false;
-    setStatus(`接管中：正在作答 ${pointLabel(point)}（第 ${round}/${QUIZ_MAX_ROUNDS} 轮）`);
+    setStatus(`接管中：正在作答 ${label}（第 ${round}/${QUIZ_MAX_ROUNDS} 轮）`);
     const result: AiQuizResult | null = await runQuizAnswer(tid, ctx.host);
     if (t.cancelled) return false;
 
     if (result === null) {
       // 没跑起来（模型没配 / 拉题失败）—— `runQuizAnswer` 自己已经 toast 过原因了
-      stop(`已停止 —— 测验「${point.name}」没能开始作答（看日志与提示）`);
-      log.warn(`runQuizAnswer 返回 null，测验「${point.name}」没跑起来`);
+      stop(`已停止 —— 测验「${label}」没能开始作答（看日志与提示）`);
+      log.warn(`runQuizAnswer 返回 null，测验「${label}」没跑起来`);
       return false;
     }
 
     const verdict = result.commit?.verdict ?? null;
     if (verdict === 'pass') {
-      log.info(`测验「${point.name}」第 ${round} 轮通过（得分 ${result.commit?.score ?? '?'}）`);
+      log.info(`测验「${label}」第 ${round} 轮通过（得分 ${result.commit?.score ?? '?'}）`);
       break;
     }
     if (verdict === null || verdict === 'unknown') {
       // 截获不到交卷响应 / 站点给了不认识的 code —— **不擅自判定**，交给重拉核实
-      log.info(`测验「${point.name}」第 ${round} 轮没拿到可判读的交卷结果，交给重拉核实`);
+      log.info(`测验「${label}」第 ${round} 轮没拿到可判读的交卷结果，交给重拉核实`);
       break;
     }
 
     // verdict === 'fail'
     log.warn(
-      `测验「${point.name}」第 ${round} 轮未通过：${result.commit?.message ?? ''}` +
+      `测验「${label}」第 ${round} 轮未通过：${result.commit?.message ?? ''}` +
         `（得分 ${result.commit?.score ?? '?'} / 门槛 ${result.commit?.passScore ?? '?'}）`,
     );
     if (round === QUIZ_MAX_ROUNDS) {
-      setStatus(`接管中：测验「${point.name}」${QUIZ_MAX_ROUNDS} 轮都没过，交给重拉核实`);
+      setStatus(`接管中：测验「${label}」${QUIZ_MAX_ROUNDS} 轮都没过，交给重拉核实`);
       break;
     }
-    setStatus(`接管中：测验「${point.name}」第 ${round} 轮没过（得分 ${result.commit?.score ?? '?'}），重做…`);
+    setStatus(`接管中：测验「${label}」第 ${round} 轮没过（得分 ${result.commit?.score ?? '?'}），重做…`);
     // 重做前给站点一点时间落库，也让日志好读
     await sleep(holdAfterMs(), t);
   }

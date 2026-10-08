@@ -52,7 +52,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-08T16:35:25.695Z（构建号 92） */
+/* 构建信息：2026-10-08T17:00:57.260Z（构建号 93） */
 
 "use strict";
 (() => {
@@ -2206,6 +2206,15 @@ ${options.desc ?? ""}
   }
 
   // src/sites/uooc/ai/fill.ts
+  function isElement(node) {
+    return node !== null && node !== void 0 && node.nodeType === 1;
+  }
+  function asElement(node) {
+    return isElement(node) ? node : null;
+  }
+  function asInput(node) {
+    return isElement(node) && node.tagName === "INPUT" ? node : null;
+  }
   function isVisible(el2) {
     const he = el2;
     if (typeof he.getBoundingClientRect !== "function") return true;
@@ -2259,7 +2268,8 @@ ${options.desc ?? ""}
         list = doc.querySelectorAll(`input[name="${qid}"]`);
       }
       for (const el2 of list) {
-        if (el2 instanceof HTMLInputElement) out.push(el2);
+        const input = asInput(el2);
+        if (input !== null) out.push(input);
       }
     }
     return out;
@@ -2304,7 +2314,8 @@ ${options.desc ?? ""}
     for (const selector of SUBMIT_SELECTORS) {
       for (const doc of collectRoots(top)) {
         const el2 = doc.querySelector(selector);
-        if (el2 instanceof HTMLElement) return el2;
+        const he = asElement(el2);
+        if (he !== null) return he;
       }
     }
     return null;
@@ -2366,14 +2377,15 @@ ${options.desc ?? ""}
         continue;
       }
       for (const c of list) {
-        if (!(c instanceof HTMLElement)) continue;
-        const indexEl = c.querySelector("div.index");
-        if (!(indexEl instanceof HTMLElement)) continue;
-        const input = c.querySelector("input[name]");
+        const container = asElement(c);
+        if (container === null) continue;
+        const indexEl = asElement(container.querySelector("div.index"));
+        if (indexEl === null) continue;
+        const input = container.querySelector("input[name]");
         out.push({
           label: (indexEl.textContent ?? "").trim(),
           indexEl,
-          container: c,
+          container,
           qid: input?.getAttribute("name") ?? null
         });
       }
@@ -2396,7 +2408,8 @@ ${options.desc ?? ""}
         } catch {
           continue;
         }
-        if (el2 instanceof HTMLElement && isVisible(el2)) return el2;
+        const he = asElement(el2);
+        if (he !== null && isVisible(he)) return he;
       }
     }
     const first = findQuestionAnchors(top)[0];
@@ -3406,6 +3419,17 @@ ${options.desc ?? ""}
     DISCUSSION: "70",
     QUIZ: "80"
   };
+  var SOURCE_NAME = {
+    [SOURCE_TYPE.VIDEO]: "视频",
+    [SOURCE_TYPE.ATTACH]: "附件",
+    [SOURCE_TYPE.TEXT]: "文本",
+    [SOURCE_TYPE.DISCUSSION]: "讨论",
+    [SOURCE_TYPE.QUIZ]: "测验"
+  };
+  function isTaskType(type) {
+    const t = String(type);
+    return t === SOURCE_TYPE.VIDEO || t === SOURCE_TYPE.QUIZ;
+  }
   function classifySource(type) {
     switch (String(type)) {
       case SOURCE_TYPE.VIDEO:
@@ -3441,6 +3465,24 @@ ${options.desc ?? ""}
     }
     return { form: "unsupported", hash: "" };
   }
+  function parseIcons(raw) {
+    if (!Array.isArray(raw)) return [];
+    const out = [];
+    for (const item of raw) {
+      if (item === null || typeof item !== "object") continue;
+      const o = item;
+      const sourceId = text(o["id"]);
+      if (sourceId === "" || sourceId === "0") continue;
+      out.push({
+        sourceId,
+        type: text(o["type"]),
+        typeName: text(o["type_name"]),
+        kind: classifySource(o["type"]),
+        task: isTaskType(o["type"])
+      });
+    }
+    return out;
+  }
   function flattenTaskPoints(tree, cid) {
     const out = [];
     collectTaskPoints(tree, cid, [], [], out);
@@ -3453,26 +3495,29 @@ ${options.desc ?? ""}
       const node = raw;
       const nodeId = text(node["id"]);
       const nodeName = text(node["name"]);
-      const icons = node["icon_list"];
-      if (nodeId && Array.isArray(icons) && icons.length > 0) {
-        const icon = icons[0] ?? {};
-        const sourceId = text(icon["id"]);
-        const { form, hash } = sourceHash(cid, ancestors, nodeId, sourceId);
+      const icons = parseIcons(node["icon_list"]);
+      const declared = node["learn_task_cnt"];
+      const taskCount = declared === void 0 || declared === null ? icons.filter((i) => i.task).length : Number(declared) || 0;
+      const primary = icons.find((i) => i.task) ?? icons[0];
+      if (nodeId && taskCount > 0 && primary !== void 0) {
+        const { form, hash } = sourceHash(cid, ancestors, nodeId, primary.sourceId);
         out.push({
           nodeId,
           ancestors: [...ancestors],
           path: [...names],
-          hash,
+          primaryHash: hash,
           form,
-          sourceId,
-          type: text(icon["type"]),
-          typeName: text(icon["type_name"]),
-          kind: classifySource(icon["type"]),
+          sourceId: primary.sourceId,
+          type: primary.type,
+          typeName: primary.typeName,
+          kind: primary.kind,
           name: nodeName,
           finished: isFinished(node["finished"]),
           chapterId: ancestors[0] ?? "",
           sectionId: ancestors.length === 1 ? nodeId : ancestors[1] ?? "",
-          pointId: ancestors.length === 2 ? nodeId : ""
+          pointId: ancestors.length === 2 ? nodeId : "",
+          taskCount,
+          icons
         });
       }
       if (nodeId) collectTaskPoints(node["children"], cid, [...ancestors, nodeId], [...names, nodeName], out);
@@ -3485,6 +3530,48 @@ ${options.desc ?? ""}
       return point;
     }
     return null;
+  }
+  function parseUnitSources(data) {
+    if (!Array.isArray(data)) return [];
+    const out = [];
+    for (const item of data) {
+      if (item === null || typeof item !== "object") continue;
+      const o = item;
+      const sourceId = text(o["id"]);
+      if (sourceId === "" || sourceId === "0") continue;
+      const type = text(o["type"]);
+      const declared = o["is_task"];
+      const isTask = declared === void 0 || declared === null ? isTaskType(type) : text(declared) === "1";
+      const rawPos = o["video_pos"];
+      const pos = rawPos === void 0 || rawPos === null || rawPos === "" ? NaN : Number(rawPos);
+      const tid = text(o["task_id"]);
+      out.push({
+        sourceId,
+        type,
+        typeName: text(o["type_name"]),
+        kind: classifySource(type),
+        name: text(o["title"]) || text(o["type_name"]),
+        isTask,
+        finished: isFinished(o["finished"]),
+        videoPos: Number.isFinite(pos) ? pos : null,
+        // `task_id` 恒为 0 是 `getCatalogList` 那个接口的毛病，这里是真的 tid；
+        // 但缺字段时也会给 0，同样当「没有」处理。
+        taskId: tid === "0" ? "" : tid
+      });
+    }
+    return out;
+  }
+  function firstUnfinishedSource(sources, skipped = /* @__PURE__ */ new Set()) {
+    for (const source of sources) {
+      if (!source.isTask) continue;
+      if (source.finished) continue;
+      if (skipped.has(source.sourceId)) continue;
+      return source;
+    }
+    return null;
+  }
+  function hashForSource(cid, point, source) {
+    return sourceHash(cid, point.ancestors, point.nodeId, source.sourceId).hash;
   }
   function courseIdFromLocation(pathname, hash) {
     const fromPath = /^\/home\/learn\/new\/(\d+)/.exec(pathname);
@@ -3738,10 +3825,10 @@ ${options.desc ?? ""}
       setTimeout(resolve2, ms);
     });
   }
-  async function attemptOnce(send, url, cid) {
+  async function attemptOnce(plan) {
     let res;
     try {
-      res = await send(url, CATALOG_TIMEOUT_MS);
+      res = await plan.send(plan.url, CATALOG_TIMEOUT_MS);
     } catch (err) {
       return { ok: false, failure: { kind: "network", detail: errorText(err) } };
     }
@@ -3751,37 +3838,102 @@ ${options.desc ?? ""}
         failure: { kind: "http", status: res.status, detail: truncateDetail(res.text) }
       };
     }
-    return parseCatalogResponse(res.json, cid);
+    return plan.parse(res);
   }
-  async function fetchCatalogPoints(options) {
-    const { cid } = options;
-    const send = options.send ?? defaultSender;
-    const sleep3 = options.sleep ?? defaultSleep;
-    const url = catalogListUrl(cid, options.origin);
+  async function fetchWithRetry(plan) {
     let attempts = 0;
     let lastFailure = { kind: "network", detail: "一次都没发出去" };
     const aborted = () => ({
       ok: false,
       attempts,
-      failure: { kind: "aborted", detail: "等待重试期间用户停止了接管" }
+      failure: { kind: "aborted", detail: plan.abortDetail }
     });
     for (let attempt2 = 1; attempt2 <= CATALOG_ATTEMPTS; attempt2 += 1) {
       attempts = attempt2;
-      if (attempt2 > 1 && options.shouldAbort?.() === true) return aborted();
-      const outcome = await attemptOnce(send, url, cid);
+      if (attempt2 > 1 && plan.shouldAbort?.() === true) return aborted();
+      const outcome = await attemptOnce(plan);
       if (outcome.ok) {
-        log11.info(`取到课程树：${outcome.points.length} 个任务点（第 ${attempt2}/${CATALOG_ATTEMPTS} 次）`);
-        return { ok: true, attempts: attempt2, points: outcome.points, raw: outcome.raw };
+        log11.info(
+          `取到${plan.label}：${plan.describeOk(outcome.value)}（第 ${attempt2}/${CATALOG_ATTEMPTS} 次）`
+        );
+        return { ok: true, attempts: attempt2, value: outcome.value, raw: outcome.raw };
       }
       lastFailure = outcome.failure;
-      log11.warn(`取课程树第 ${attempt2}/${CATALOG_ATTEMPTS} 次失败 —— ${describeFailure(lastFailure)}`);
+      log11.warn(`取${plan.label}第 ${attempt2}/${CATALOG_ATTEMPTS} 次失败 —— ${describeFailure(lastFailure)}`);
       if (attempt2 >= CATALOG_ATTEMPTS) break;
-      if (options.shouldAbort?.() === true) return aborted();
-      await sleep3(CATALOG_RETRY_DELAY_MS);
-      if (options.shouldAbort?.() === true) return aborted();
+      if (plan.shouldAbort?.() === true) return aborted();
+      await plan.sleep(CATALOG_RETRY_DELAY_MS);
+      if (plan.shouldAbort?.() === true) return aborted();
     }
-    log11.error(`取课程树彻底失败（共 ${attempts} 次）—— ${describeFailure(lastFailure)}`);
+    log11.error(`取${plan.label}彻底失败（共 ${attempts} 次）—— ${describeFailure(lastFailure)}`);
     return { ok: false, attempts, failure: lastFailure };
+  }
+  async function fetchCatalogPoints(options) {
+    const { cid } = options;
+    const result = await fetchWithRetry({
+      label: "课程树",
+      url: catalogListUrl(cid, options.origin),
+      send: options.send ?? defaultSender,
+      sleep: options.sleep ?? defaultSleep,
+      shouldAbort: options.shouldAbort,
+      abortDetail: "等待重试期间用户停止了接管",
+      parse: (res) => {
+        const parsed = parseCatalogResponse(res.json, cid);
+        return parsed.ok ? { ok: true, value: parsed.points, raw: parsed.raw } : { ok: false, failure: parsed.failure };
+      },
+      describeOk: (points) => `${points.length} 个任务点`
+    });
+    if (!result.ok) return { ok: false, attempts: result.attempts, failure: result.failure };
+    return { ok: true, attempts: result.attempts, points: result.value, raw: result.raw };
+  }
+  var UNIT_PATH = "/home/learn/getUnitLearn";
+  function unitLearnUrl(cid, point, origin = defaultOrigin()) {
+    const params = [
+      `catalog_id=${encodeURIComponent(point.nodeId)}`,
+      `chapter_id=${encodeURIComponent(point.chapterId)}`,
+      `section_id=${encodeURIComponent(point.sectionId)}`,
+      `cid=${encodeURIComponent(cid)}`,
+      "hidemsg_=true"
+    ];
+    return `${origin}${UNIT_PATH}?${params.join("&")}`;
+  }
+  function parseUnitResponse(json) {
+    if (json === null || typeof json !== "object") {
+      return { ok: false, failure: { kind: "shape", detail: "响应不是对象" } };
+    }
+    const root = json;
+    if (Number(root.code) !== 1) {
+      return {
+        ok: false,
+        failure: {
+          kind: "business",
+          code: root.code,
+          detail: `code=${String(root.code)} msg=${String(root.msg ?? "")}`
+        }
+      };
+    }
+    if (!Array.isArray(root.data)) {
+      return { ok: false, failure: { kind: "shape", detail: "code=1 但 data 不是数组" } };
+    }
+    return { ok: true, sources: parseUnitSources(root.data), raw: json };
+  }
+  async function fetchUnitSources(options) {
+    const { cid, point } = options;
+    const result = await fetchWithRetry({
+      label: "资源列表",
+      url: unitLearnUrl(cid, point, options.origin),
+      send: options.send ?? defaultSender,
+      sleep: options.sleep ?? defaultSleep,
+      shouldAbort: options.shouldAbort,
+      abortDetail: "等待重试期间用户停止了接管",
+      parse: (res) => {
+        const parsed = parseUnitResponse(res.json);
+        return parsed.ok ? { ok: true, value: parsed.sources, raw: parsed.raw } : { ok: false, failure: parsed.failure };
+      },
+      describeOk: (sources) => `${sources.length} 个资源`
+    });
+    if (!result.ok) return { ok: false, attempts: result.attempts, failure: result.failure };
+    return { ok: true, attempts: result.attempts, sources: result.value, raw: result.raw };
   }
 
   // src/sites/uooc/takeover.ts
@@ -3922,14 +4074,14 @@ ${detail}
     if (kind === "video") return box.querySelector("video") !== null;
     return box.querySelector("iframe") !== null && quizTidOnPage() !== null;
   }
-  async function gotoPoint(point, kind, t) {
-    const needsChange = location.hash !== point.hash;
+  async function gotoPoint(hash, kind, label, t) {
+    const needsChange = location.hash !== hash;
     const before = needsChange ? viewerSignature() : "";
     if (needsChange) {
-      log12.info(`跳转 ${point.hash}`);
-      location.hash = point.hash;
+      log12.info(`跳转 ${hash}`);
+      location.hash = hash;
     } else {
-      log12.debug(`已经在这一项上了（${point.hash}），不再改 hash`);
+      log12.debug(`已经在这一项上了（${hash}），不再改 hash`);
     }
     await sleep(waitBeforeMs(), t);
     if (t.cancelled) return false;
@@ -3937,7 +4089,7 @@ ${detail}
       if (!viewerReady(kind)) return false;
       return !needsChange || viewerSignature() !== before;
     }, waitTimeoutMs(), t);
-    if (ok) log12.info(`内容已就绪：${pointLabel(point)}`);
+    if (ok) log12.info(`内容已就绪：${label}`);
     return ok;
   }
   function waitVideoEnd(video, t) {
@@ -3975,6 +4127,12 @@ ${detail}
     const head = parts.length === 0 ? "" : parts.join(" ");
     return `${head}${tail}` === "" ? point.typeName || point.nodeId : `${head}${tail}`;
   }
+  function taskLabel(task) {
+    const head = pointLabel(task.point);
+    const fallback = SOURCE_NAME[task.source.type] ?? "";
+    const name = task.source.name === "" ? fallback : task.source.name;
+    return name === "" ? head : `${head} · ${name}`;
+  }
   function publishProgress(points, sum, current) {
     const label = current === null ? "" : pointLabel(current);
     setCourseProgress({
@@ -4006,7 +4164,14 @@ ${detail}
       log12.warn(`认不出 cid：pathname=${location.pathname} hash=${location.hash}`);
       return;
     }
-    const ctx = { host: host2, cid, skipped: /* @__PURE__ */ new Set(), warnedTypes: /* @__PURE__ */ new Set(), points: [] };
+    const ctx = {
+      host: host2,
+      cid,
+      skipped: /* @__PURE__ */ new Set(),
+      skippedSources: /* @__PURE__ */ new Set(),
+      warnedTypes: /* @__PURE__ */ new Set(),
+      points: []
+    };
     const first = await fetchCatalogPoints({ cid, shouldAbort: () => t.cancelled });
     if (!first.ok) {
       if (first.failure.kind === "aborted") return;
@@ -4024,73 +4189,87 @@ ${detail}
     for (; ; ) {
       if (t.cancelled) return;
       const sum = summarizeTaskPoints(ctx.points);
-      const point = firstUnfinished(ctx.points, ctx.skipped);
-      publishProgress(ctx.points, sum, point);
+      const section = firstUnfinished(ctx.points, ctx.skipped);
+      publishProgress(ctx.points, sum, section);
       if (sum.done === sum.total) {
         release();
         setStatus2("已停止 —— 全部任务点都完成了 🎉");
         log12.info("全部任务点都完成了");
         return;
       }
-      if (point === null) {
+      if (section === null) {
         stop(`已停止 —— 剩 ${sum.total - sum.done} 个任务点本站不自动处理，其余都完成了`);
-        log12.info(`没有可自动处理的任务点了，跳过 ${ctx.skipped.size} 个`);
+        log12.info(`没有可自动处理的节了，跳过 ${ctx.skipped.size} 个`);
         return;
       }
-      stuck = point.nodeId === lastNodeId ? stuck + 1 : 1;
-      lastNodeId = point.nodeId;
+      stuck = section.nodeId === lastNodeId ? stuck + 1 : 1;
+      lastNodeId = section.nodeId;
       if (stuck > STUCK_LIMIT) {
         await fatal(
           host2,
-          `已停止 —— 任务点「${point.name}」连续 ${STUCK_LIMIT} 轮没有进展`,
-          `同一个任务点被连续挑中 ${STUCK_LIMIT} 次都没能往下走，判定为卡死。
+          `已停止 —— 「${section.name}」连续 ${STUCK_LIMIT} 轮没有进展`,
+          `同一节被连续挑中 ${STUCK_LIMIT} 次都没能往下走，判定为卡死。
 
-位置：${pointLabel(point)}
-形态：${point.form}
+位置：${pointLabel(section)}
+形态：${section.form}
+任务点个数：${section.taskCount}
 这多半是本工具的 bug（而不是站点的问题），可以带着上面的信息反馈。`
         );
         return;
       }
-      if (point.form === "unsupported") {
-        log12.warn(`任务点「${point.name}」(${point.nodeId}) 的路径形态不支持，已跳过`);
-        ctx.skipped.add(point.nodeId);
+      if (section.form === "unsupported") {
+        log12.warn(`「${section.name}」(${section.nodeId}) 的路径形态不支持，已跳过`);
+        ctx.skipped.add(section.nodeId);
         continue;
       }
-      if (point.kind === "attach" || point.kind === "text" || point.kind === "discussion") {
-        log12.debug(`${point.typeName || point.kind}「${point.name}」：不打开，直接跳过`);
-        ctx.skipped.add(point.nodeId);
-        continue;
+      const unit = await fetchUnitSources({ cid, point: section, shouldAbort: () => t.cancelled });
+      if (!unit.ok) {
+        if (unit.failure.kind === "aborted") return;
+        await fatalCatalog(host2, unit.failure, unit.attempts);
+        return;
       }
-      if (point.kind === "unknown") {
-        if (!ctx.warnedTypes.has(point.type)) {
-          ctx.warnedTypes.add(point.type);
-          log12.warn(`遇到未知类型 ${point.type}（${point.typeName || "无名字"}），已跳过`);
+      const target = firstUnfinishedSource(unit.sources, ctx.skippedSources);
+      if (target === null) {
+        const taskSources = unit.sources.filter((s) => s.isTask);
+        for (const s of unit.sources) {
+          if (s.kind === "unknown" && !ctx.warnedTypes.has(s.type)) {
+            ctx.warnedTypes.add(s.type);
+            log12.warn(`遇到未知类型 ${s.type}（${s.typeName || "无名字"}），已跳过`);
+          }
         }
-        ctx.skipped.add(point.nodeId);
+        const reason = taskSources.length === 0 ? "这一节没有本站能处理的任务点" : "这一节的视频/测验都已完成，但目录树仍标未完成（站点记账滞后）";
+        log12.warn(
+          `跳过「${section.name}」(${section.nodeId})：${reason}（资源 ${unit.sources.length} 个 / 任务点 ${taskSources.length} 个）`
+        );
+        ctx.skipped.add(section.nodeId);
         continue;
       }
-      const kind = point.kind === "video" ? "video" : "quiz";
-      setStatus2(`接管中：${kind === "video" ? "正在播放" : "正在作答"} ${pointLabel(point)}（${sum.done}/${sum.total} 已完成）`);
-      const handled = kind === "video" ? await handleVideo(ctx, point, t) : await handleQuiz(ctx, point, t);
+      const kind = target.kind === "video" ? "video" : "quiz";
+      const task = { point: section, source: target, hash: hashForSource(cid, section, target) };
+      const label = taskLabel(task);
+      setStatus2(
+        `接管中：${kind === "video" ? "正在播放" : "正在作答"} ${label}（${sum.done}/${sum.total} 已完成）`
+      );
+      const handled = kind === "video" ? await handleVideo(ctx, task, t) : await handleQuiz(ctx, task, t);
       if (t.cancelled) return;
       if (!handled) return;
       if (!await reload(ctx, t)) return;
       if (t.cancelled) return;
-      if (!stillUnfinished(ctx, point.nodeId)) continue;
+      if (!stillUnfinished(ctx, section.nodeId)) continue;
       if (kind === "video") {
-        setStatus2(`接管中：视频「${point.name}」播完了，等站点记账（最多 ${Math.round(waitTimeoutMs() / 1e3)} 秒）…`);
-        log12.info(`视频「${point.name}」播完了但还没记完成，等 ${waitTimeoutMs()}ms 再拉一次`);
+        setStatus2(`接管中：视频「${label}」播完了，等站点记账（最多 ${Math.round(waitTimeoutMs() / 1e3)} 秒）…`);
+        log12.info(`视频「${label}」播完了但还没记完成，等 ${waitTimeoutMs()}ms 再拉一次`);
         await sleep(waitTimeoutMs(), t);
         if (t.cancelled) return;
         if (!await reload(ctx, t)) return;
         if (t.cancelled) return;
-        if (!stillUnfinished(ctx, point.nodeId)) continue;
+        if (!stillUnfinished(ctx, section.nodeId)) continue;
         await fatal(
           host2,
-          `已停止 —— 视频「${point.name}」播完两轮仍未记完成`,
+          `已停止 —— 视频「${label}」播完两轮仍未记完成`,
           `这一项已经完整播完，又等了两轮（${holdAfterMs()} 毫秒 + ${waitTimeoutMs()} 毫秒）重新拉取课程目录，站点那边仍然显示未完成。
 
-位置：${pointLabel(point)}
+位置：${label}
 
 可能原因：播放没真正到底（比如一直卡着 / 被暂停）、或者站点记账更慢。
 去页面看一眼这一项现在的状态，再决定要不要点【开始接管】接着走。`
@@ -4099,27 +4278,28 @@ ${detail}
       }
       await fatal(
         host2,
-        `已停止 —— 测验「${point.name}」答了 ${QUIZ_MAX_ROUNDS} 轮仍未记完成`,
+        `已停止 —— 测验「${label}」答了 ${QUIZ_MAX_ROUNDS} 轮仍未记完成`,
         `这个测验连着作答并提交了 ${QUIZ_MAX_ROUNDS} 轮，站点那边仍然显示未完成，多半是分数没到及格线。
 
-位置：${pointLabel(point)}
+位置：${label}
 
 去页面看一眼得分与及格线，再决定要不要点【开始接管】接着走。`
       );
       return;
     }
   }
-  async function handleVideo(ctx, point, t) {
-    if (!await gotoPoint(point, "video", t)) {
+  async function handleVideo(ctx, task, t) {
+    const label = taskLabel(task);
+    if (!await gotoPoint(task.hash, "video", label, t)) {
       if (t.cancelled) return false;
       await fatal(
         ctx.host,
-        `已停止 —— 视频「${point.name}」等满等待超时也没出现播放器`,
+        `已停止 —— 视频「${label}」等满等待超时也没出现播放器`,
         `跳到这一项之后，等了 ${Math.round(waitTimeoutMs() / 1e3)} 秒都没等到播放器出现。
 
-位置：${pointLabel(point)}
-形态：${point.form}
-跳转地址：${point.hash}
+位置：${label}
+形态：${task.point.form}
+跳转地址：${task.hash}
 
 如果是四级路径（\`/subsection\`）的项，那说明这套 hash 拼法没被站点认下来 —— 这是新方案里**唯一没有实证**的地方，把上面那一行地址反馈给开发者。`
       );
@@ -4130,81 +4310,86 @@ ${detail}
     if (video === void 0 || video === null) {
       await fatal(
         ctx.host,
-        `已停止 —— 视频「${point.name}」找到了播放器却拿不到 video 元素`,
+        `已停止 —— 视频「${label}」找到了播放器却拿不到 video 元素`,
         `内容区里出现了 \`div.showViewer\`，但里面取不到 \`<video>\`。多半是页面结构和预期不一致，请反馈。`
       );
       return false;
     }
-    log12.info(`视频「${point.name}」开始等播完（当前 ${video.currentTime.toFixed(1)}s / ${String(video.duration)}s）`);
+    log12.info(`视频「${label}」开始等播完（当前 ${video.currentTime.toFixed(1)}s / ${String(video.duration)}s）`);
     const ended = await waitVideoEnd(video, t);
     if (t.cancelled) return false;
     if (!ended) {
-      log12.warn(`视频「${point.name}」没等到播完（被暂停 / 出错 / 超保底时长），转去核实完成状态`);
+      log12.warn(`视频「${label}」没等到播完（被暂停 / 出错 / 超保底时长），转去核实完成状态`);
     }
     await sleep(holdAfterMs(), t);
     return !t.cancelled;
   }
-  async function handleQuiz(ctx, point, t) {
+  async function handleQuiz(ctx, task, t) {
+    const label = taskLabel(task);
     if (!isEnabled(SITE_ID, TOGGLE.AI_ANSWER)) {
       await fatal(
         ctx.host,
-        `已停止 —— 测验「${point.name}」到了，但 AI 作答没开`,
+        `已停止 —— 测验「${label}」到了，但 AI 作答没开`,
         `走到测验了，但【AI 作答】开关是关着的。
 
-位置：${pointLabel(point)}
+位置：${label}
 
 没有替你跳过：跳过等于在不知情的情况下漏掉一整个测验。
 去【AI 作答】页把开关打开（顺便确认接口地址与模型名填好了），再点【开始接管】。`
       );
       return false;
     }
-    if (!await gotoPoint(point, "quiz", t)) {
+    if (!await gotoPoint(task.hash, "quiz", label, t)) {
       if (t.cancelled) return false;
       await fatal(
         ctx.host,
-        `已停止 —— 测验「${point.name}」等满等待超时还没出题`,
+        `已停止 —— 测验「${label}」等满等待超时还没出题`,
         `跳到这一项之后，等了 ${Math.round(waitTimeoutMs() / 1e3)} 秒，测验的题目一直没渲染出来。
 
-位置：${pointLabel(point)}
-跳转地址：${point.hash}
+位置：${label}
+跳转地址：${task.hash}
 
 去页面看一眼这项到底是什么情况，再决定要不要点【开始接管】接着走。`
       );
       return false;
     }
-    const tid = quizTidOnPage();
+    const fromPage = quizTidOnPage();
+    const tid = fromPage ?? (task.source.taskId === "" ? null : task.source.taskId);
     if (tid === null) {
-      stop(`已停止 —— 测验「${point.name}」读不出 tid`);
-      log12.warn(`测验「${point.name}」的内容区有 iframe 但读不出 tid`);
+      stop(`已停止 —— 测验「${label}」读不出 tid`);
+      log12.warn(`测验「${label}」页面与接口都给不出 tid，无法作答`);
       return false;
+    }
+    if (fromPage !== null && task.source.taskId !== "" && fromPage !== task.source.taskId) {
+      log12.warn(`测验「${label}」页面 tid=${fromPage} 与接口 tid=${task.source.taskId} 不一致，按页面的走`);
     }
     for (let round2 = 1; round2 <= QUIZ_MAX_ROUNDS; round2 += 1) {
       if (t.cancelled) return false;
-      setStatus2(`接管中：正在作答 ${pointLabel(point)}（第 ${round2}/${QUIZ_MAX_ROUNDS} 轮）`);
+      setStatus2(`接管中：正在作答 ${label}（第 ${round2}/${QUIZ_MAX_ROUNDS} 轮）`);
       const result = await runQuizAnswer(tid, ctx.host);
       if (t.cancelled) return false;
       if (result === null) {
-        stop(`已停止 —— 测验「${point.name}」没能开始作答（看日志与提示）`);
-        log12.warn(`runQuizAnswer 返回 null，测验「${point.name}」没跑起来`);
+        stop(`已停止 —— 测验「${label}」没能开始作答（看日志与提示）`);
+        log12.warn(`runQuizAnswer 返回 null，测验「${label}」没跑起来`);
         return false;
       }
       const verdict = result.commit?.verdict ?? null;
       if (verdict === "pass") {
-        log12.info(`测验「${point.name}」第 ${round2} 轮通过（得分 ${result.commit?.score ?? "?"}）`);
+        log12.info(`测验「${label}」第 ${round2} 轮通过（得分 ${result.commit?.score ?? "?"}）`);
         break;
       }
       if (verdict === null || verdict === "unknown") {
-        log12.info(`测验「${point.name}」第 ${round2} 轮没拿到可判读的交卷结果，交给重拉核实`);
+        log12.info(`测验「${label}」第 ${round2} 轮没拿到可判读的交卷结果，交给重拉核实`);
         break;
       }
       log12.warn(
-        `测验「${point.name}」第 ${round2} 轮未通过：${result.commit?.message ?? ""}（得分 ${result.commit?.score ?? "?"} / 门槛 ${result.commit?.passScore ?? "?"}）`
+        `测验「${label}」第 ${round2} 轮未通过：${result.commit?.message ?? ""}（得分 ${result.commit?.score ?? "?"} / 门槛 ${result.commit?.passScore ?? "?"}）`
       );
       if (round2 === QUIZ_MAX_ROUNDS) {
-        setStatus2(`接管中：测验「${point.name}」${QUIZ_MAX_ROUNDS} 轮都没过，交给重拉核实`);
+        setStatus2(`接管中：测验「${label}」${QUIZ_MAX_ROUNDS} 轮都没过，交给重拉核实`);
         break;
       }
-      setStatus2(`接管中：测验「${point.name}」第 ${round2} 轮没过（得分 ${result.commit?.score ?? "?"}），重做…`);
+      setStatus2(`接管中：测验「${label}」第 ${round2} 轮没过（得分 ${result.commit?.score ?? "?"}），重做…`);
       await sleep(holdAfterMs(), t);
     }
     return !t.cancelled;
@@ -9507,8 +9692,8 @@ ${text2}
   // src/main.ts
   var log31 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-08T16:35:25.695Z" : null;
-  var BUILD_NO = true ? 92 : null;
+  var BUILD_TIME = true ? "2026-10-08T17:00:57.260Z" : null;
+  var BUILD_NO = true ? 93 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();

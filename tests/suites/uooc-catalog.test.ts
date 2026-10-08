@@ -3,7 +3,9 @@
  *
  * 锁住的是新「API 驱动接管」方案的**取数侧不变量**（口径见
  * `docs/UOOC-API驱动连播-需求.md` §A / §B）：
- *   1. 任务点 = `icon_list` 非空的节点，**按先序**展平（`data` 顺序 → 递归 `children`）；
+ *   1. 任务点 = **`learn_task_cnt > 0` 的节点**（≡ 挂着 10 视频 / 80 测验 的节点），
+ *      **按先序**展平（`data` 顺序 → 递归 `children`）；⚠️ **不是**「`icon_list` 非空」——
+ *      只挂附件（50）的节点 `learn_task_cnt=0`、永远 `finished=0`，算进来会卡死主循环（§B.5）；
  *   2. 祖先链**自己递归带下去**，不读 `parent` / `pid`；
  *   3. hash 尾部由**祖先链长度**决定：1 ⇒ `/section`、2 ⇒ `/subsection`；
  *   4. `finished` 数字与字符串两种形态都认；
@@ -25,13 +27,19 @@ import {
   SOURCE_TYPE,
   buildCourseRows,
   classifySource,
-  flattenTaskPoints,
+  findIcon,
   firstUnfinished,
+  firstUnfinishedSource,
+  flattenTaskPoints,
+  hashForSource,
   isCurrentRow,
   isFinished,
+  isTaskType,
+  parseUnitSources,
   sourceHash,
   summarizeTaskPoints,
   type CourseRow,
+  type TaskSource,
 } from '../../src/sites/uooc/catalog.ts';
 
 // ------------------------------------------------------------------ 合成目录树
@@ -52,6 +60,7 @@ function sampleTree(): unknown {
           _level: 2,
           finished: '1', // ⚠️ 字符串形态
           // 节自己就是任务点，**同时**还有子节点
+          learn_task_cnt: 1,
           icon_list: [{ id: 9001, type: 10, type_name: '视频', catalog_id: 1011 }],
           children: [
             {
@@ -68,6 +77,10 @@ function sampleTree(): unknown {
           name: '第2节 丁',
           _level: 2,
           finished: 1,
+          // ⚠️ 只挂附件（50）⇒ 站点给的 learn_task_cnt=0 ⇒ **不是**任务点。
+          // 旧口径「icon_list 非空即任务点」会把它算进来，而它永远 finished 是 1、
+          // 换成只挂附件的未完成节点就是永远 0 ⇒ 主循环卡死（§B.5）。
+          learn_task_cnt: 0,
           icon_list: [{ id: 9003, type: 50, type_name: '附件', catalog_id: 1012 }],
         },
         {
@@ -75,6 +88,7 @@ function sampleTree(): unknown {
           name: '第3节 空壳',
           _level: 2,
           finished: 0,
+          learn_task_cnt: 0,
           icon_list: [], // 没有 icon_list ⇒ **不是**任务点，不参与进度
           children: [],
         },
@@ -92,6 +106,7 @@ function sampleTree(): unknown {
           name: '第1节 己',
           _level: 2,
           finished: '0',
+          learn_task_cnt: 1,
           icon_list: [{ id: 9004, type: 10, type_name: '视频', catalog_id: 1021 }],
         },
       ],
@@ -104,12 +119,12 @@ const CID = '2005836044';
 // ------------------------------------------------------------------ 先序与筛选
 
 describe('uooc/catalog › 展平', () => {
-  it('只收 icon_list 非空的节点，顺序是先序（章 → 节 → 该节的点 → 下一个节）', () => {
+  it('只收 learn_task_cnt > 0 的节点（≡ 挂着 10 视频 / 80 测验），顺序是先序', () => {
     const points = flattenTaskPoints(sampleTree(), CID);
     assertDeepEqual(
       points.map((p) => p.nodeId),
-      ['1011', '10111', '1012', '1021'],
-      '先序或「谁是任务点」判错了（1013 没有 icon_list，不该在列表里）',
+      ['1011', '10111', '1021'],
+      '先序或「谁是任务点」判错了：1012 只挂附件（learn_task_cnt=0）、1013 是空壳，都不该进来',
     );
   });
 
@@ -174,11 +189,11 @@ describe('uooc/catalog › 拼 hash', () => {
     assertEqual(hash, '#/2005836044/766102022/1408189092/394899706/190951828/subsection');
   });
 
-  it('展平出来的 hash 与 sourceHash 单独算的一致（两条路不会分叉）', () => {
+  it('展平出来的 primaryHash 与 sourceHash 单独算的一致（两条路不会分叉）', () => {
     const points = flattenTaskPoints(sampleTree(), CID);
     for (const point of points) {
       const again = sourceHash(CID, point.ancestors, point.nodeId, point.sourceId);
-      assertEqual(point.hash, again.hash, `${point.nodeId} 的 hash 两次算得不一样`);
+      assertEqual(point.primaryHash, again.hash, `${point.nodeId} 的 hash 两次算得不一样`);
       assertEqual(point.form, again.form, `${point.nodeId} 的 form 两次算得不一样`);
     }
   });
@@ -250,12 +265,12 @@ describe('uooc/catalog › finished 与起点', () => {
 // ------------------------------------------------------------------ 进度汇总
 
 describe('uooc/catalog › 进度汇总', () => {
-  it('total / done 的分母只算任务点（没有 icon_list 的节点不算）', () => {
+  it('total / done 的分母只算任务点（只挂附件、空壳节点都不算）', () => {
     const points = flattenTaskPoints(sampleTree(), CID);
     assertDeepEqual(
       summarizeTaskPoints(points),
-      { total: 4, done: 2 },
-      '分母应只数 icon_list 非空的节点（合成树里 1013 不算）',
+      { total: 3, done: 1 },
+      '分母应只数 learn_task_cnt > 0 的节点（合成树里 1012 只挂附件、1013 是空壳，都不算）',
     );
   });
 
@@ -285,12 +300,13 @@ describe('uooc/catalog › 类型分派', () => {
     assertEqual(classifySource(undefined), 'unknown');
   });
 
-  it('展平出的 kind 与 type 对得上', () => {
+  it('展平出的 kind 与 type 对得上（附件节点根本不在任务点列表里）', () => {
     const points = flattenTaskPoints(sampleTree(), CID);
     const byId = new Map(points.map((p) => [p.nodeId, p]));
     assertEqual(byId.get('1011')?.kind, 'video');
     assertEqual(byId.get('10111')?.kind, 'quiz');
-    assertEqual(byId.get('1012')?.kind, 'attach');
+    assertEqual(byId.get('1021')?.kind, 'video');
+    assertEqual(byId.get('1012'), undefined, '只挂附件的节点不该出现在任务点列表里');
   });
 
   it('typeName 原样带出，空值时是空串而不是 "undefined"', () => {
@@ -322,7 +338,6 @@ describe('uooc/catalog › 监视页分层列表', () => {
       '1Y 视频 第1节 乙',
       // 10111 是 1011 的子任务点 ⇒ 缩进一层单独成行
       '2N 测验 点 丙',
-      '1Y 附件 第2节 丁',
       '0- 第2章 戊',
       '1N 视频 第1节 己',
     ]);
@@ -378,6 +393,205 @@ describe('uooc/catalog › 监视页分层列表', () => {
       '0- 章',
       '1Y 视频 节',
       '2N 测验 子点',
+    ]);
+  });
+});
+
+// ------------------------------------------------------------------ §B.5 资源层（getUnitLearn）
+
+describe('uooc/catalog › 资源层', () => {
+  /**
+   * 实测原样（节点 473005785 那次 `getUnitLearn`）：视频已完成、测验未完成
+   * （`task_id` 白给 764270）、两条附件（其中一条 id 是 0 的占位）。
+   */
+  function unitData(): unknown {
+    return [
+      {
+        id: 1859489987,
+        type: '10', // ⚠️ 同一份响应里 type 数字与字符串混用
+        type_name: '视频',
+        title: '1.3 绪论（上）',
+        is_task: '1',
+        finished: 1,
+        video_pos: '505.820',
+      },
+      {
+        id: 518085319,
+        type: '80',
+        type_name: '测验',
+        title: '章节测试',
+        is_task: '1',
+        finished: 0,
+        task_id: '764270',
+      },
+      { id: 1552014835, type: 50, type_name: '附件', finished: 0 },
+      { id: 0, type: 50, document: { name: '讲义.pdf' } },
+    ];
+  }
+
+  it('parseUnitSources：丢掉 id 为 0 的占位条目，type 数字与字符串都归一化', () => {
+    const sources = parseUnitSources(unitData());
+    assertDeepEqual(sources.map((s) => s.sourceId), ['1859489987', '518085319', '1552014835']);
+    assertDeepEqual(sources.map((s) => s.kind), ['video', 'quiz', 'attach']);
+    assertEqual(sources[2]?.type, '50', '数字 50 应归一成字符串 "50"');
+  });
+
+  it('非数组 / null / 乱七八糟的入参 ⇒ 空列表，不抛错', () => {
+    assertDeepEqual(parseUnitSources(null), []);
+    assertDeepEqual(parseUnitSources(undefined), []);
+    assertDeepEqual(parseUnitSources({ code: 1 }), []);
+    assertDeepEqual(parseUnitSources('nope'), []);
+    assertDeepEqual(parseUnitSources([null, 7, 'x']), []);
+  });
+
+  it('isTask：有 is_task 就信它，没有才按 type ∈ {10,80} 猜', () => {
+    const sources = parseUnitSources(unitData());
+    assertEqual(sources[0]?.isTask, true);
+    assertEqual(sources[1]?.isTask, true);
+    assertEqual(sources[2]?.isTask, false, '附件不带 is_task，按 type 猜应为 false');
+
+    const forced = parseUnitSources([
+      { id: 1, type: 50, type_name: '附件', is_task: '1' }, // 站点说它是任务点
+      { id: 2, type: 10, type_name: '视频', is_task: '0' }, // 站点说它不是
+    ]);
+    assertEqual(forced[0]?.isTask, true, 'is_task="1" 应覆盖 type');
+    assertEqual(forced[1]?.isTask, false, 'is_task="0" 应覆盖 type');
+  });
+
+  it('name 取 title，没有 title 才退回 type_name', () => {
+    const sources = parseUnitSources(unitData());
+    assertEqual(sources[0]?.name, '1.3 绪论（上）');
+    assertEqual(sources[2]?.name, '附件', '没有 title 时用 type_name');
+    assertEqual(parseUnitSources([{ id: 9, type: 10 }])[0]?.name, '', '两个都没有 ⇒ 空串');
+  });
+
+  it('videoPos 数字化；没有 video_pos ⇒ null', () => {
+    const sources = parseUnitSources(unitData());
+    assertEqual(sources[0]?.videoPos, 505.82);
+    assertEqual(sources[1]?.videoPos, null);
+    assertEqual(parseUnitSources([{ id: 9, type: 10, video_pos: 'abc' }])[0]?.videoPos, null);
+  });
+
+  it('taskId：缺失与 "0" 都当空串（= 没有交卷 tid），数字形态也认', () => {
+    const sources = parseUnitSources(unitData());
+    assertEqual(sources[1]?.taskId, '764270', '测验的交卷 tid 是白给的');
+    assertEqual(sources[0]?.taskId, '', '视频没有 task_id');
+    assertEqual(parseUnitSources([{ id: 9, type: 80, task_id: 0 }])[0]?.taskId, '', '0 当没有');
+    assertEqual(parseUnitSources([{ id: 9, type: 80, task_id: 764270 }])[0]?.taskId, '764270');
+  });
+
+  it('firstUnfinishedSource：只挑任务点、跳过已完成的、跳过 skipped 的', () => {
+    const sources = parseUnitSources(unitData());
+    assertEqual(
+      firstUnfinishedSource(sources)?.sourceId,
+      '518085319',
+      '视频已完成、附件不是任务点 ⇒ 该挑测验',
+    );
+    assertEqual(firstUnfinishedSource(sources, new Set(['518085319'])), null, 'skipped 里的一律不算');
+    assertEqual(firstUnfinishedSource([]), null);
+  });
+
+  it('hashForSource：三级 / 四级都按同一模板拼，且用的是节点祖先链', () => {
+    const points = flattenTaskPoints(sampleTree(), CID);
+    const byId = new Map(points.map((p) => [p.nodeId, p]));
+    const section = byId.get('1011')!;
+    const sub = byId.get('10111')!;
+    assertEqual(hashForSource(CID, section, { sourceId: '9001' }), '#/2005836044/101/1011/9001/section');
+    assertEqual(
+      hashForSource(CID, sub, { sourceId: '9002' }),
+      '#/2005836044/101/1011/10111/9002/subsection',
+    );
+    assertEqual(
+      hashForSource(CID, sub, { sourceId: sub.sourceId }),
+      sub.primaryHash,
+      '拿「自己节点上的主任务资源」算出来的应当与 primaryHash 一致',
+    );
+  });
+
+  it('findIcon：认得自己节点上挂的资源，认不得就 null', () => {
+    const points = flattenTaskPoints(sampleTree(), CID);
+    const byId = new Map(points.map((p) => [p.nodeId, p]));
+    assertEqual(findIcon(byId.get('1011')!, '9001')?.kind, 'video');
+    assertEqual(findIcon(byId.get('1011')!, '9002'), null, '9002 挂在子节点上，不在这一层');
+    assertEqual(findIcon(byId.get('1011')!, '99999'), null);
+  });
+
+  it('taskCount：站点给了 learn_task_cnt 就信它，没给才数 10/80 的 icon', () => {
+    const withCount = flattenTaskPoints(
+      [{ id: 1, name: '节', finished: 0, learn_task_cnt: 2, icon_list: [{ id: 91, type: 50 }] }],
+      CID,
+    );
+    assertEqual(withCount[0]?.taskCount, 2, '站点的账为准：learn_task_cnt=2 时只挂附件也算任务点');
+
+    const noCount = flattenTaskPoints(
+      [
+        {
+          id: 1,
+          name: '节',
+          finished: 0,
+          icon_list: [
+            { id: 91, type: 50 },
+            { id: 92, type: 80 },
+          ],
+        },
+      ],
+      CID,
+    );
+    assertEqual(noCount[0]?.taskCount, 1, '没给 learn_task_cnt 就数 10/80 的 icon');
+
+    assertDeepEqual(
+      flattenTaskPoints([{ id: 1, name: '节', finished: 0, icon_list: [{ id: 91, type: 50 }] }], CID),
+      [],
+      '只挂附件、又没给 learn_task_cnt ⇒ 回退计数为 0 ⇒ 不是任务点（这条就是防死循环的那条）',
+    );
+  });
+
+  it('isTaskType：只有 10 与 80 是任务点（实测 133 个节点与站点 learn_task_cnt 零不符）', () => {
+    assertEqual(isTaskType('10'), true);
+    assertEqual(isTaskType(10), true);
+    assertEqual(isTaskType('80'), true);
+    assertEqual(isTaskType(80), true);
+    assertEqual(isTaskType('50'), false);
+    assertEqual(isTaskType('70'), false);
+    assertEqual(isTaskType('60'), false);
+    assertEqual(isTaskType(undefined), false);
+    assertEqual(isTaskType(0), false);
+  });
+
+  it('多 icon 节点：primary 取第一个「任务」icon，不是列表里第一个 icon', () => {
+    const points = flattenTaskPoints(
+      [
+        {
+          id: 1,
+          name: '节',
+          finished: 0,
+          learn_task_cnt: 2,
+          icon_list: [
+            { id: 91, type: 50, type_name: '附件' }, // 排最前，但不是任务点
+            { id: 92, type: '10', type_name: '视频' },
+            { id: 93, type: 80, type_name: '测验' },
+          ],
+        },
+      ],
+      CID,
+    );
+    assertEqual(points[0]?.sourceId, '92', 'primary 应跳过附件、取第一个任务 icon');
+    assertDeepEqual(points[0]?.icons.map((i) => i.sourceId), ['91', '92', '93'], 'icons 保留原始顺序');
+    assertDeepEqual(points[0]?.icons.map((i) => i.task), [false, true, true]);
+  });
+
+  it('TaskSource 的字段一个不缺（哪怕站点没给）', () => {
+    const [s] = parseUnitSources([{ id: 9, type: 10 }]) as [TaskSource];
+    assertDeepEqual(Object.keys(s).sort(), [
+      'finished',
+      'isTask',
+      'kind',
+      'name',
+      'sourceId',
+      'taskId',
+      'type',
+      'typeName',
+      'videoPos',
     ]);
   });
 });

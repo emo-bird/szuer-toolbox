@@ -39,6 +39,36 @@ export interface FillReport {
   readonly failed: readonly string[];
 }
 
+/**
+ * 元素判定一律**不许用 `instanceof`**（实测教训，2026-10-08）。
+ *
+ * 旧版试卷跑在 `top > iframe[src*="/exam/"]` 里，**iframe 有自己的 realm**：
+ * `top.HTMLInputElement !== iframe.contentWindow.HTMLInputElement`，于是
+ * `iframeDoc.querySelector('input') instanceof HTMLInputElement` 恒为 `false`。
+ * 实测数据：`topRealm_instanceof=false / iframeRealm_instanceof=true / sameCtor=false`。
+ *
+ * 后果曾经是「模型答出来了，但页面里点不动这一题」——`inputsFor()` 被这一行过滤成空
+ * 数组，`fillAnswers()` 把每一道题都归到 `missing`。`video.ts:81` 早就为
+ * `HTMLVideoElement` 写过同一条教训，这里补齐。
+ *
+ * 改用鸭子类型：`nodeType === 1` 认元素，`tagName` 认标签 —— 跨 realm 都成立。
+ */
+function isElement(node: Element | null | undefined): node is HTMLElement {
+  return node !== null && node !== undefined && node.nodeType === 1;
+}
+
+/** `null` 安全的元素收窄（替代 `x instanceof HTMLElement`） */
+function asElement(node: Element | null): HTMLElement | null {
+  return isElement(node) ? node : null;
+}
+
+/** 收窄成 input（替代 `x instanceof HTMLInputElement`） */
+function asInput(node: Element | null): HTMLInputElement | null {
+  return isElement(node) && node.tagName === 'INPUT'
+    ? (node as unknown as HTMLInputElement)
+    : null;
+}
+
 /** 元素是否在布局上可见（不可见的 radio 直接 `.click()` 不生效） */
 function isVisible(el: Element): boolean {
   const he = el as HTMLElement;
@@ -113,7 +143,8 @@ function inputsFor(roots: readonly Document[], qid: string): HTMLInputElement[] 
       list = doc.querySelectorAll(`input[name="${qid}"]`);
     }
     for (const el of list) {
-      if (el instanceof HTMLInputElement) out.push(el);
+      const input = asInput(el);
+      if (input !== null) out.push(input);
     }
   }
   return out;
@@ -190,7 +221,8 @@ export function findSubmitButton(top: Document = document): HTMLElement | null {
   for (const selector of SUBMIT_SELECTORS) {
     for (const doc of collectRoots(top)) {
       const el = doc.querySelector(selector);
-      if (el instanceof HTMLElement) return el;
+      const he = asElement(el);
+      if (he !== null) return he;
     }
   }
   return null;
@@ -200,7 +232,8 @@ export function findSubmitButton(top: Document = document): HTMLElement | null {
 export function findSaveButton(top: Document = document): HTMLElement | null {
   for (const doc of collectRoots(top)) {
     const el = doc.querySelector('button.btn.btn-success');
-    if (el instanceof HTMLElement) return el;
+    const he = asElement(el);
+    if (he !== null) return he;
   }
   return null;
 }
@@ -396,14 +429,15 @@ export function findQuestionAnchors(top: Document = document): QuestionAnchor[] 
       continue;
     }
     for (const c of list) {
-      if (!(c instanceof HTMLElement)) continue;
-      const indexEl = c.querySelector('div.index');
-      if (!(indexEl instanceof HTMLElement)) continue;
-      const input = c.querySelector('input[name]');
+      const container = asElement(c);
+      if (container === null) continue;
+      const indexEl = asElement(container.querySelector('div.index'));
+      if (indexEl === null) continue;
+      const input = container.querySelector('input[name]');
       out.push({
         label: (indexEl.textContent ?? '').trim(),
         indexEl,
-        container: c,
+        container,
         qid: input?.getAttribute('name') ?? null,
       });
     }
@@ -437,7 +471,8 @@ function findPaperTitleAnchor(top: Document): HTMLElement | null {
       } catch {
         continue;
       }
-      if (el instanceof HTMLElement && isVisible(el)) return el;
+      const he = asElement(el);
+      if (he !== null && isVisible(he)) return he;
     }
   }
   const first = findQuestionAnchors(top)[0];
