@@ -70,7 +70,16 @@ GET https://www.uooc.net.cn/home/learn/getCatalogList?cid={cid}&hidemsg_=true
 
 **实例验证**：`dom-uooc-exam-旧-提交未通过-单选-多选-判断.txt` 里节点 `1482506601`（icon `124739605`）当时的页面 hash 正是 `#/2005836044/766102022/1482506601/124739605/section` ✓。
 
-> ⚠️ `/subsection` 那条**只有模板、还没抓到实例**（实测数据里所有任务点都挂在 L2）。落地时必须真跑一次四级课程验证（见 §F-1）。
+> ⚠️ `/subsection` 那条**只有路由表、没有任何实际页面的实证**（2026-10-08 全量扫过
+> `local/capture/` + `local/slices/` + `local/derived/`）。三条相关证据：
+> - `local/capture/uirouter-states.json:66` — `"url": "/{sourceId:[0-9]+}/subsection"`（路由表）；
+> - `local/capture/uirouter-states.json:68` — `"absUrl": "#/2005836044/1615083612/485998255///subsection"`
+>   （**注意 `///` —— pointId 与 sourceId 都是空的**，不是五段数字）；
+> - `local/slices/uooc-learn-unit.json:160` — `…&section_id=1629578551&show=&subsection_id=0`（**恒为 0**）；
+> - 站点 JS 里确有 `if (lastLearn.subsection_id > 0) {` 的分支（在 `local/capture/uooc-完整流程.flow` 内嵌的 JS 里）。
+>
+> ⇒ **机制存在，但可能没有课程在用**。落地时按 §F-1 处理：拼错了也只影响四级课程，
+> 三级课程（`/section`）有实例，走这条路不受影响。
 
 ### A.3 类型字典
 
@@ -79,11 +88,26 @@ GET https://www.uooc.net.cn/home/learn/getCatalogList?cid={cid}&hidemsg_=true
 | type | 含义 | 本课数量 | DOM 图标 |
 | --- | --- | --- | --- |
 | `10` | 视频 | 36 | `icon-video` |
-| `50` | 附件 | 20 | `icon-wendang1`（3） |
+| `50` | 附件 | 20 | — |
+| `60` | **文本** | **0（本课）** | `icon-wendang1`（站点模板实证） |
 | `70` | 讨论 | 1 | `icon-discuss`（1） |
 | `80` | 测验 | 10 | `icon-pencil`（1） |
 
-> 早期笔记里出现过 `60` 和 `0`，本次数据里没有，**语义未知**，按 §C.4 处理。
+> **`60` = 文本**（2026-10-08 补证，两条实证）：
+> - 站点模板：`<span ng-if="source.type == 60" class="tag-source-ico iconfont icon-wendang1">`
+>   （`local/derived/20261008/pp-小测.txt:697`）；
+> - 接口响应：`"type":"60","catalog_id":637260621,"type_name":"文本"`
+>   （`local/slices/uooc-catalog-full.json:76`，全文件出现 138 次；`local/slices/uooc-catalog.json:76` 3 次）。
+>
+> **本课（cid `2005836044`）没有 `60` 节点**（`local/capture/catalog-list.json` 只有 10/50/70/80），
+> 但**别的课程有**。处理方式同 `50` / `70`：**不打开，直接跳过**（见 §C.4）。
+>
+> **`0` 仍然零实证** —— 整个 `local/` 里只搜到模板里一个空的 `<!-- ngIf: source.type == 0 -->`
+> 分支（`local/derived/20261008/pp-小测.txt:158`）。按 §C.4 的未知类型兜底处理。
+>
+> ⚠️ 站点模板里 `icon-wendang1` 绑的是 `type == 60`，而旧版目录 DOM 里实测只有 3 个
+> `icon-wendang1` 却有 20 个 `type 50` 附件 —— **图标与类型的对应关系存疑**，但不影响本方案
+> （新方案不再靠图标判断类型，只用 `icon_list[0].type`）。
 
 ---
 
@@ -150,9 +174,13 @@ location.hash = `#/${cid}/${chapterId}/${sectionId}/${sourceId}/section`;
 
 **不打开，直接跳过**（用户拍板 E）—— 不跳转、不等待，直接算下一个。
 
-### C.4 其它类型（`60` / `0` / 未来新增）
+### C.4 `60` 文本 / `0` / 未来新增
 
-**默认跳过**，并在日志里 `warn` 一次「遇到未知类型 N，已跳过」——不能默默吞掉。
+- **`60` 文本**（已实证，见 §A.3）：与 `50` / `70` 同样处理 —— **不打开，直接跳过**。
+- **其余任何 `type`**（含零实证的 `0`、以及未来新增）：**默认跳过**，并在日志里 `warn` 一次
+  「遇到未知类型 N，已跳过」——不能默默吞掉。
+
+> 代码里的「已知类型」集合 = `{10, 50, 60, 70, 80}`，只有集合外的才 `warn`。
 
 ---
 
@@ -223,13 +251,13 @@ showModalAlert(shadowRoot: ShadowRoot, options: ModalOptions): Promise<string | 
 
 | # | 事项 | 影响 |
 | --- | --- | --- |
-| 1 | **四级课程（`/subsection`）路径没实例验证过** | 拼错就跳不到。落地时必须拿一门四级课程真跑一次 |
+| 1 | **四级课程（`/subsection`）路径没实例验证过** —— 2026-10-08 已全量搜过 `local/`，**结论是「机制存在但无任何课程在用」**：路由表有（`uirouter-states.json:66`）、页面 JS 有 `if (lastLearn.subsection_id > 0)` 分支、但 `subsection_id` 恒为 0、`absUrl` 里 pointId/sourceId 全空。**建议**：代码按路由表原样支持 `/subsection`，真跑到四级课程时**只做一次 `warn` + 跳过**，不阻塞三级课程 | 只影响四级课程，三级课程（`/section`）有实例 |
 | 2 | 视频跳过去后是否 `currentTime = 0` | 「完全看到底」是否包含「从头看」 |
 | 3 | `ended` + 5 秒后 `finished` **仍是 0** 怎么办 | 重播一次？还是跳过继续？需要一个上限 |
 | 4 | `getCatalogList` 重拉失败（网络 / 登录态失效） | 重试几次？还是直接停 |
 | 5 | `HOLD_AFTER_MS`（默认 3000）与「`ended` 后 5 秒」是不是同一件事 | 是 → 改默认值为 5000；不是 → 两个常量并存 |
 | 6 | 走到测验但 **`AI_ANSWER` 关着** 时怎么办 | 停下等你，还是跳过 |
-| 7 | `type = 60` / `0` 的真实语义 | §C.4 的兜底够不够 |
+| 7 | ~~`type = 60` / `0` 的真实语义~~ —— **2026-10-08 已查清**：`60` = 文本（模板 + `type_name` 双实证，见 §A.3）；`0` = 零实证、不存在。**已并入 §C.4，不再是待定项** | ✅ 已结 |
 
 ---
 
