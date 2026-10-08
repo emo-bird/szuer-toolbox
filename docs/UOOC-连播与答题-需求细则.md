@@ -569,14 +569,111 @@ activate(el):
 **还缺的素材（拿到就能动手，不影响现在开工）**：
 
 1. ✅ （已解决）交卷「过/没过」判据 —— 由 §C.5 拦截 `/exam/commit` 响应取代，不再需要弹窗 DOM。
-2. 🟠 **四类资源的 DOM 判据**（§B.3 的表里只有「视频」和「测验」是确认过的）。
-   需要一份**旧版学习页快照**：当前节下同时挂着 附件 / 文本 / 讨论 各一个，
-   导出那一刻的目录 + 主区域 DOM。缺它的时候这三类会落到 §B.3 的「未知」兜底分支
-   （等一个固定时间就走，不会卡死，但跳过开关会暂时失效）。
+2. ✅ （已解决）**四类资源的 DOM 判据** —— `local/capture/20261008/` 那 11 份采样里，
+   站点自己渲染的 `ng-if="source.type == NN"` + 图标 + `span.tag-source-name` 完全一致，
+   字典实测吻合（详见 §G.4）。`autoplay.ts` 的 `kindOf()` 图标类名兜底本来猜错了，已按实测值修好。
 3. 🟡 **未作答状态的填空题试卷 DOM**（§D 开做时才需要；手上的采样是「已完成」态）。
 
 **还想问你**：
 
-4. **新版页提示的文案**（§A.2 表里那四句）用我拟的，还是你自己写？
-5. **未通过（code==110）自动重答的次数上限**：文档暂定**每题最多重答 1 次**，若仍 110 就停下等你（§C.5.1 第 4 步）——
-   若改成 2 次或无限重试（直到通过）需要你说一声。
+4. 🟡 **新版页提示的文案**（§A.2 表里那四句）—— 已按拟定文案落地（`index.ts` 的
+   `promptSwitchToOld`）。你没意见就这么定；要改文案说一声，改一处常量的事。
+5. 🟠 **未通过（code==110）自动重答的次数上限**：文档与代码现为**每题最多重答 1 次**，
+   且重答**只发 1 次请求**（m04950 拍板「除非与当前答案相同，否则只请求一次」），
+   若仍 110 就停下等你（§C.5.1 第 4 步）—— 要改成 2 次或直到通过，需要你说一声。
+
+---
+
+# G. 视频随机小测（**新增**，m05960 / m06055）
+
+> 这是与课程测验（§A.4 / §B.5）**完全不同**的东西：它挂在视频进度条上，
+> **纯前端、一个网络请求都没有** —— 所以不能走 `ai/` 那套「拉题 → 问模型 → 回填」。
+
+## G.0 它长什么样
+
+- 进度条上有若干个 `<span class="vjs-seekbar-point" style="left: 77.6%">`，每个是一个弹题点。
+- 视频播到那个时刻，站点自己弹一个 layui 层（`#quizLayer`，标题「小测」）。
+- 弹层出现时**视频不暂停**（播放器类名里仍是 `vjs-playing`）—— 站点自己的行为，我们不改。
+
+## G.1 答案**就写在 DOM 里**（决定性发现）
+
+视频容器的 `source="{...}"` 属性是一段 JSON（`getAttribute` 返回**已反转义**的文本）：
+
+```json
+{"quiz":[{"id":1277026166,"qid":1714608496,"set_time":"469","resource_id":"24358",
+  "question":"<p>1982年《中华人民共和国宪法》…</p>",
+  "options":"{\"A\":\"对\",\"B\":\"错\"}",
+  "answer":"[\"A\"]",              ← 正确答案（字符串化的 JSON 数组）
+  "type":"20","level":"易","_type":"判断题",
+  "voptions":{"A":"对","B":"错"},
+  "eanswer":"A",                   ← 正确答案（已解析好的）
+  "eoptions":[{"key":"A","value":"对"},{"key":"B","value":"错"}],
+  "equestion":"<p>…</p>"}]}
+```
+
+- `set_time`（秒）与进度条那个 `left: 77.6%` 对得上；`quiz` 是**数组**（一个视频可以有多题）。
+- ⇒ **不需要试错、不需要读 `wrongTip`**。用户 m05960 原本设想的
+  「选第一项 → 提交 → 错了读 `wrongTip` 拿正确答案 → 再填 → 读不到就接着枚举」
+  **整条不需要了**（用户 m06055 拍板方案 A：直接读 `answer` 填 → 点确定）。
+
+## G.2 怎么把弹层里的题对回 `quiz[]`
+
+弹层 DOM（`local/derived/20261008/pp-小测.txt` 第 464–527 行）：
+
+```
+div.layui-layer.layui-layer-page[type=page]              ← 标题「小测」
+  div#quizLayer.quizLayer.mpopup[ng-if="curQsource"]
+    div[question-common][question-object][qsource="curQsource"][pattern="30"]
+      div[question-common][question-truefalse][qsource="qsource"][ondel][onsure]
+        div.smallTest[ng-if="!qsource.hidesource"]
+          div.smallTest-tool                             ← 编辑/删除图标
+          div.smallTest-view[ng-if="pattern == 30"]      ← 另有 pattern==10 / 20 两个分支
+            .ti > .ti-q > .ti-q-c[ng-bind-html="qsource.question | to_trusted"]     ← 题干
+            .ti > .ti-alist > label.ti-a[ng-repeat="(key, value) in qsource.voptions"]
+              span.ti-a-i > input[type=radio][name="answer_1277026166"]
+                                          [ng-model="qsource.canswer"][value="A"]
+              div.ti-a-c[ng-bind-html="value | to_trusted"]                          ← 选项文本
+  div.mpopup-bottom.mpopup-bottom-r                      ← 与 #quizLayer 同级
+    button.btn.btn-success.fl_right[ng-click="sureAnswer(curQsource)"]               ←「确定」
+```
+
+- ⭐ **join key**：`input[name="answer_<id>"]` 里的 `<id>` 就是 `quiz[].id`。
+  题干是 `ng-bind-html` 渲染的富文本，拿去比对又脆又费劲 —— 不用它。
+- 选项是 `input[type=radio]` + `ng-model="qsource.canswer"`（判断/单选）。多选可能是
+  checkbox，**本次采样没碰到**，代码里按 `input` 的 `type` 通用处理。
+
+## G.3 落地口径（用户 m06055 拍板）
+
+1. **策略 = 直接读 DOM 里的答案填 → 点【确定】**（不枚举、不读 `wrongTip`）。
+2. **两个开关都不做** —— 用户原话：「已经可以直接读取答案了，不需要此功能了，从需求中移除」。
+   于是：
+   - ❌ 【AI 作答】页的「小测自动答题」（走 LLM）—— **不做**；
+   - ❌ 【视频】页的「关闭视频小测答案枚举」总闸 —— **不做**。
+   ⇒ 视频小测**无条件**自动作答。
+3. **不猜**：某一题在页面的 `quiz` 数据里找不到、或答案字母在选项里没有对应项
+   —— 一律**原样留着等用户**，绝不点第一项糊过去。
+4. **不重试**：点了【确定】之后弹层还在（答案不对 / 按钮变灰）→ 只写日志告警，交给用户。
+
+## G.4 资源类型字典实测（顺带钉死 §B.3 那张表）
+
+| type | 图标类 | 目录显示名 | `SOURCE_TYPE` |
+|---|---|---|---|
+| 0 | （无） | 空章节 / 未解锁 / 网络问题 | → `unknown` |
+| 10 | `icon-video` | 视频 | `VIDEO: '10'` ✅ |
+| 50 | `icon-huixingzhen` | 附件 | `ATTACH: '50'` ✅ |
+| 60 | `icon-wendang1` | 文本 | `TEXT: '60'` ✅ |
+| 70 | `icon-discuss` | 讨论 | `DISCUSSION: '70'` ✅ |
+| 80 | `icon-dingdanguanli` | 测验 | `QUIZ: '80'` ✅ |
+
+站点 source-view 模板的 ngIf 分支全集 = `'pay'` / `0` / `10` / `50` / `60` / `70` / `80`。
+
+---
+
+# H. 暂不实现 / 实验性（**留档，本轮不碰代码**）
+
+按用户 m06055 拍板，以下只记录，不开工：
+
+1. **（实验性）拦截课程视频请求，全部替换成与课程同长度的空白视频**，以降低带宽占用。
+   - 用户 m05960 原话，标注「暂不实现」。
+   - 留待视频小测这轮收尾后单独评估（涉及到要不要伪造 `Range` / `Content-Length`、
+     以及进度条与 `ended` 事件还能不能正常触发 —— 连播的「视频播完」判定依赖 `ended`）。
