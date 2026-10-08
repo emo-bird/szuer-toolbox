@@ -61,15 +61,7 @@ export const TOGGLE = {
   MUTE: 'mute',
   /** 🟢 防失焦暂停（U4） */
   KEEP_PLAYING: 'keep-playing',
-  /** 🟢 附件只路过，不打开文件（仍导航到该小节）—— 用户 m01816 需求 2 */
-  SKIP_ATTACHMENT: 'skip-attachment',
-  /** 🟢 文本不停留：导航过去后不等待，直接下一项 */
-  SKIP_TEXT: 'skip-text',
-  /** 🟢 讨论不停留、不暂停（需求细则 A.3「跳过讨论」，默认开） */
-  SKIP_DISCUSSION: 'skip-discussion',
-  /** 🟠 测验不自动进入：连播走到测验就停下等用户 */
-  SKIP_QUIZ: 'skip-quiz',
-  /** 🟠 AI 答题（U6–U9）—— 未实现，先占位 */
+  /** 🟠 AI 答题（U6–U9）：连播走到测验就交给它；关掉则停下等用户手动处理 */
   AI_ANSWER: 'ai-answer',
 } as const;
 
@@ -115,38 +107,6 @@ export const UOOC_TOGGLES: readonly SiteToggleDef[] = [
     risk: 'safe',
     default: true,
     group: GROUP.VIDEO,
-  },
-  {
-    id: TOGGLE.SKIP_ATTACHMENT,
-    label: '跳过附件',
-    desc: '不打开附件文件（仍导航到该小节）。打开时会尝试在后台标签页里打开',
-    risk: 'safe',
-    default: true,
-    group: GROUP.AUTOPLAY,
-  },
-  {
-    id: TOGGLE.SKIP_TEXT,
-    label: '跳过文本',
-    desc: '文本不停留：导航过去后不等待，直接下一项',
-    risk: 'safe',
-    default: false,
-    group: GROUP.AUTOPLAY,
-  },
-  {
-    id: TOGGLE.SKIP_DISCUSSION,
-    label: '跳过讨论',
-    desc: '连播遇到讨论不提醒、不暂停，等一会儿直接继续',
-    risk: 'safe',
-    default: true,
-    group: GROUP.AUTOPLAY,
-  },
-  {
-    id: TOGGLE.SKIP_QUIZ,
-    label: '跳过测验',
-    desc: '不自动进入测验：连播走到测验就停下等你（AI 作答是另一个开关）',
-    risk: 'trace',
-    default: false,
-    group: GROUP.AUTOPLAY,
   },
   {
     id: TOGGLE.AI_ANSWER,

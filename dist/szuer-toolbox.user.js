@@ -52,7 +52,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-08T11:30:04.971Z（构建号 79） */
+/* 构建信息：2026-10-08T12:19:37.582Z（构建号 84） */
 
 "use strict";
 (() => {
@@ -2822,11 +2822,11 @@ ${options.desc ?? ""}
   async function runPool(items2, limit, worker) {
     const out = new Array(items2.length);
     const size = Math.min(8, Math.max(1, Math.floor(limit)));
-    let cursor = 0;
+    let cursor2 = 0;
     async function pump() {
       for (; ; ) {
-        const i = cursor;
-        cursor += 1;
+        const i = cursor2;
+        cursor2 += 1;
         if (i >= items2.length) return;
         const item = items2[i];
         if (item === void 0) return;
@@ -2949,15 +2949,7 @@ ${options.desc ?? ""}
     MUTE: "mute",
     /** 🟢 防失焦暂停（U4） */
     KEEP_PLAYING: "keep-playing",
-    /** 🟢 附件只路过，不打开文件（仍导航到该小节）—— 用户 m01816 需求 2 */
-    SKIP_ATTACHMENT: "skip-attachment",
-    /** 🟢 文本不停留：导航过去后不等待，直接下一项 */
-    SKIP_TEXT: "skip-text",
-    /** 🟢 讨论不停留、不暂停（需求细则 A.3「跳过讨论」，默认开） */
-    SKIP_DISCUSSION: "skip-discussion",
-    /** 🟠 测验不自动进入：连播走到测验就停下等用户 */
-    SKIP_QUIZ: "skip-quiz",
-    /** 🟠 AI 答题（U6–U9）—— 未实现，先占位 */
+    /** 🟠 AI 答题（U6–U9）：连播走到测验就交给它；关掉则停下等用户手动处理 */
     AI_ANSWER: "ai-answer"
   };
   var VALUE = {
@@ -3000,38 +2992,6 @@ ${options.desc ?? ""}
       risk: "safe",
       default: true,
       group: GROUP.VIDEO
-    },
-    {
-      id: TOGGLE.SKIP_ATTACHMENT,
-      label: "跳过附件",
-      desc: "不打开附件文件（仍导航到该小节）。打开时会尝试在后台标签页里打开",
-      risk: "safe",
-      default: true,
-      group: GROUP.AUTOPLAY
-    },
-    {
-      id: TOGGLE.SKIP_TEXT,
-      label: "跳过文本",
-      desc: "文本不停留：导航过去后不等待，直接下一项",
-      risk: "safe",
-      default: false,
-      group: GROUP.AUTOPLAY
-    },
-    {
-      id: TOGGLE.SKIP_DISCUSSION,
-      label: "跳过讨论",
-      desc: "连播遇到讨论不提醒、不暂停，等一会儿直接继续",
-      risk: "safe",
-      default: true,
-      group: GROUP.AUTOPLAY
-    },
-    {
-      id: TOGGLE.SKIP_QUIZ,
-      label: "跳过测验",
-      desc: "不自动进入测验：连播走到测验就停下等你（AI 作答是另一个开关）",
-      risk: "trace",
-      default: false,
-      group: GROUP.AUTOPLAY
     },
     {
       id: TOGGLE.AI_ANSWER,
@@ -3446,11 +3406,15 @@ ${options.desc ?? ""}
   var VIDEO_MAX_MS = 6 * 60 * 60 * 1e3;
   var CATALOG_ROOT_SEL = "div.panel-catalog ul.rank-1";
   var VIEWER_SEL = "div.showViewer";
+  var SKIP_ATTR = "data-sztb-skip";
   var listeners3 = /* @__PURE__ */ new Set();
   var host = null;
   var running = false;
   var statusText = "已停止";
   var token = null;
+  var cursor = null;
+  var rowMark = null;
+  var handled = /* @__PURE__ */ new Set();
   function notify() {
     for (const fn of [...listeners3]) {
       try {
@@ -3493,6 +3457,16 @@ ${options.desc ?? ""}
       log9.error(msg);
       host.toast(msg, "error");
       setStatus(msg);
+      return;
+    }
+    cursor = null;
+    rowMark = null;
+    handled = /* @__PURE__ */ new Set();
+    if (!primeCursor(root)) {
+      const msg = "目录里没有「当前项」标记 —— 请你先点开一节，脚本会跟着你走";
+      log9.warn(msg);
+      host.toast(msg, "warn");
+      setStatus(`已停止 —— ${msg}`);
       return;
     }
     running = true;
@@ -3604,7 +3578,6 @@ ${options.desc ?? ""}
       const m = /source\.type\s*==\s*(\d+)/.exec(ngIf);
       if (m !== null && m[1] !== void 0) return classifySource(Number(m[1]));
       for (const cls of [...ico.classList]) {
-        if (!cls.startsWith("icon-")) continue;
         if (cls === "icon-video") return "video";
         if (cls === "icon-huixingzhen") return "attach";
         if (cls === "icon-wendang1") return "text";
@@ -3617,59 +3590,216 @@ ${options.desc ?? ""}
   function rowName(row3) {
     return textOf(row3.querySelector("span.tag-source-name")) || textOf(row3);
   }
-  function posOf(root) {
+  function chapterKey(li, idx) {
+    return li.id !== "" ? li.id : `c${idx}`;
+  }
+  function sectionKey(li, idx) {
+    return li.id !== "" ? li.id : `s${idx}`;
+  }
+  function findChapterById(id) {
+    const root = catalogRoot();
+    if (root === null) return null;
     const chs = chapterLis(root);
-    let chapterIdx = -1;
     for (let i = 0; i < chs.length; i += 1) {
       const li = chs[i];
-      if (li === void 0) continue;
-      const title = chapterTitle(li);
-      if (title !== null && isActive(title) || chapterBody(li) !== null) chapterIdx = i;
+      if (li !== void 0 && chapterKey(li, i) === id) return li;
     }
-    if (chapterIdx < 0) return { chapterIdx: -1, sectionIdx: -1, resourceIdx: -1 };
-    const chapLi = chs[chapterIdx];
-    if (chapLi === void 0) return { chapterIdx: -1, sectionIdx: -1, resourceIdx: -1 };
-    const secs = sectionLis(chapLi);
-    let sectionIdx = -1;
+    return null;
+  }
+  function findSectionById(chapterLi, id) {
+    const secs = sectionLis(chapterLi);
     for (let i = 0; i < secs.length; i += 1) {
       const li = secs[i];
-      if (li === void 0) continue;
-      const title = sectionTitle(li);
-      if (title !== null && isActive(title) || resourceList(li) !== null) sectionIdx = i;
+      if (li !== void 0 && sectionKey(li, i) === id) return li;
     }
-    if (sectionIdx < 0) return { chapterIdx, sectionIdx: -1, resourceIdx: -1 };
-    const secLi = secs[sectionIdx];
-    if (secLi === void 0) return { chapterIdx, sectionIdx: -1, resourceIdx: -1 };
-    const rows = resourceRows(secLi);
-    let resourceIdx = -1;
-    for (let i = 0; i < rows.length; i += 1) {
-      const r = rows[i];
-      if (r !== void 0 && isActive(r)) resourceIdx = i;
-    }
-    return { chapterIdx, sectionIdx, resourceIdx };
+    return null;
   }
-  function describe(root, pos) {
+  function rowAt(chapterId, sectionId, resourceIdx) {
+    return { chapterId, sectionId, resourceIdx };
+  }
+  function keyOf(c) {
+    return `${c.chapterId}/${c.sectionId}/${c.resourceIdx}`;
+  }
+  function snapshot(root) {
     const chs = chapterLis(root);
-    const chapLi = chs[pos.chapterIdx];
-    const chap = textOf(chapLi !== void 0 ? chapterTitle(chapLi) : null);
-    const parts = [];
-    if (chap !== "") parts.push(chap);
-    if (chapLi !== void 0 && pos.sectionIdx >= 0) {
-      const secLi = sectionLis(chapLi)[pos.sectionIdx];
-      const sec = textOf(secLi !== void 0 ? sectionTitle(secLi) : null);
-      if (sec !== "") parts.push(sec);
-    }
-    if (chapLi !== void 0 && pos.sectionIdx >= 0) {
-      const secLi = sectionLis(chapLi)[pos.sectionIdx];
-      if (secLi !== void 0 && pos.resourceIdx >= 0) {
-        const row3 = resourceRows(secLi)[pos.resourceIdx];
-        if (row3 !== void 0) {
-          const name = rowName(row3);
-          if (name !== "") parts.push(`「${name}」`);
+    let ci = -1;
+    if (cursor !== null) {
+      for (let i = 0; i < chs.length; i += 1) {
+        const li = chs[i];
+        if (li !== void 0 && chapterKey(li, i) === cursor.chapterId && chapterBody(li) !== null) {
+          ci = i;
+          break;
         }
       }
     }
-    return parts.join(" ");
+    if (ci < 0) ci = chs.findIndex((li) => chapterBody(li) !== null);
+    if (ci < 0) {
+      ci = chs.findIndex((li) => {
+        const t = chapterTitle(li);
+        return t !== null && isActive(t);
+      });
+    }
+    const chapLi = ci >= 0 ? chs[ci] ?? null : null;
+    if (chapLi === null) {
+      return {
+        chs,
+        ci: -1,
+        chapLi: null,
+        chapterId: "",
+        secs: [],
+        si: -1,
+        secLi: null,
+        sectionId: "",
+        rows: []
+      };
+    }
+    const chapterId = chapterKey(chapLi, ci);
+    const secs = sectionLis(chapLi);
+    let si = -1;
+    if (cursor !== null && cursor.chapterId === chapterId && cursor.sectionId !== "") {
+      for (let i = 0; i < secs.length; i += 1) {
+        const li = secs[i];
+        if (li !== void 0 && sectionKey(li, i) === cursor.sectionId) {
+          si = i;
+          break;
+        }
+      }
+    }
+    if (si < 0) si = secs.findIndex((li) => resourceList(li) !== null);
+    if (si < 0) {
+      si = secs.findIndex((li) => {
+        const t = sectionTitle(li);
+        return t !== null && isActive(t);
+      });
+    }
+    if (si < 0 && secs.length > 0) si = 0;
+    const secLi = si >= 0 ? secs[si] ?? null : null;
+    return {
+      chs,
+      ci,
+      chapLi,
+      chapterId,
+      secs,
+      si,
+      secLi,
+      sectionId: secLi !== null ? sectionKey(secLi, si) : "",
+      rows: secLi !== null ? resourceRows(secLi) : []
+    };
+  }
+  function primeCursor(root) {
+    const s = snapshot(root);
+    if (s.chapLi === null) return false;
+    const act = s.rows.find((r) => isActive(r));
+    if (act !== void 0) {
+      cursor = rowAt(s.chapterId, s.sectionId, s.rows.indexOf(act));
+      log9.debug(`起点 = 站点标出的当前项：${rowName(act)}`);
+      return true;
+    }
+    log9.debug("目录里没有活动的资源行，按渲染出来的章节从头判断");
+    return true;
+  }
+  function nextChapter(s, ci) {
+    for (let i = ci + 1; i < s.chs.length; i += 1) {
+      const li = s.chs[i];
+      if (li === void 0) continue;
+      if (li.hasAttribute(SKIP_ATTR)) continue;
+      const t = chapterTitle(li);
+      if (t !== null && isComplete(t)) continue;
+      return {
+        kind: "expand-chapter",
+        el: t ?? li,
+        name: textOf(t) || `第 ${i + 1} 章`,
+        chapterId: chapterKey(li, i)
+      };
+    }
+    return { kind: "end" };
+  }
+  function nextFrom(s, from) {
+    const { chapLi, secLi, chapterId, sectionId, rows, secs, ci, si } = s;
+    if (chapLi === null || secLi === null) return { kind: "end" };
+    for (let k = from + 1; k < rows.length; k += 1) {
+      const r = rows[k];
+      if (r === void 0) continue;
+      if (r.hasAttribute(SKIP_ATTR)) continue;
+      if (isComplete(r)) continue;
+      if (handled.has(keyOf(rowAt(chapterId, sectionId, k)))) continue;
+      return { kind: "click-row", chapterId, sectionId, resourceIdx: k, row: r, name: rowName(r) };
+    }
+    for (let j = si + 1; j < secs.length; j += 1) {
+      const li = secs[j];
+      if (li === void 0) continue;
+      if (li.hasAttribute(SKIP_ATTR)) continue;
+      const t = sectionTitle(li);
+      if (t !== null && isComplete(t)) continue;
+      return {
+        kind: "expand-section",
+        el: t ?? li,
+        name: textOf(t) || `第 ${j + 1} 节`,
+        chapterId,
+        sectionId: sectionKey(li, j)
+      };
+    }
+    return nextChapter(s, ci);
+  }
+  function nextStep(s) {
+    if (s.chs.length === 0) return { kind: "stop", why: "找不到课程目录" };
+    if (s.chapLi === null) {
+      return {
+        kind: "stop",
+        why: "目录里没有「当前项」标记 —— 请你先点开一节，脚本会跟着你走"
+      };
+    }
+    const chapLi = s.chapLi;
+    const chapName = textOf(chapterTitle(chapLi)) || `第 ${s.ci + 1} 章`;
+    if (chapterBody(chapLi) === null) {
+      if (chapLi.hasAttribute(SKIP_ATTR)) return nextChapter(s, s.ci);
+      return {
+        kind: "expand-chapter",
+        el: chapterTitle(chapLi) ?? chapLi,
+        name: chapName,
+        chapterId: s.chapterId
+      };
+    }
+    if (s.secs.length === 0) return nextChapter(s, s.ci);
+    const secLi = s.secLi;
+    if (secLi === null) return nextChapter(s, s.ci);
+    const secName = textOf(sectionTitle(secLi)) || `第 ${s.si + 1} 节`;
+    if (resourceList(secLi) === null) {
+      if (secLi.hasAttribute(SKIP_ATTR)) return nextFrom(s, s.rows.length);
+      return {
+        kind: "expand-section",
+        el: sectionTitle(secLi) ?? secLi,
+        name: secName,
+        chapterId: s.chapterId,
+        sectionId: s.sectionId
+      };
+    }
+    const rows = s.rows;
+    const at = (idx) => ({
+      chapterId: s.chapterId,
+      sectionId: s.sectionId,
+      resourceIdx: idx,
+      row: rows[idx],
+      name: rowName(rows[idx])
+    });
+    const done = (idx) => handled.has(keyOf(rowAt(s.chapterId, s.sectionId, idx)));
+    const here = cursor !== null && cursor.chapterId === s.chapterId && cursor.sectionId === s.sectionId ? cursor.resourceIdx : -1;
+    if (here >= 0 && rows[here] !== void 0) {
+      const k = keyOf(rowAt(s.chapterId, s.sectionId, here));
+      if (rowMark !== null && rowMark.phase === "clicked" && rowMark.key === k) {
+        return { kind: "handle", ...at(here) };
+      }
+    }
+    const act = rows.findIndex((r) => isActive(r));
+    if (act >= 0) {
+      if (!done(act)) return { kind: "handle", ...at(act) };
+      return nextFrom(s, act);
+    }
+    if (here >= 0 && rows[here] !== void 0) {
+      if (!done(here)) return { kind: "handle", ...at(here) };
+      return nextFrom(s, here);
+    }
+    return nextFrom(s, -1);
   }
   function viewerOf() {
     const box = document.querySelector(VIEWER_SEL) ?? document.body;
@@ -3677,6 +3807,13 @@ ${options.desc ?? ""}
     const frames = [...box.querySelectorAll("iframe")];
     const hasQuizFrame = frames.some((f) => (f.getAttribute("src") ?? "").includes("/exam/"));
     return { video, hasFrame: frames.length > 0, hasQuizFrame };
+  }
+  function viewerReady() {
+    const box = document.querySelector(VIEWER_SEL);
+    if (box === null) return false;
+    if (box.querySelector("video") !== null) return true;
+    if (box.querySelector("iframe") !== null) return true;
+    return textOf(box).length > 0;
   }
   function waitVideoEnd(video, t) {
     return new Promise((resolve2) => {
@@ -3708,259 +3845,6 @@ ${options.desc ?? ""}
       if (t.cancelled) finish2(false);
     });
   }
-  async function loop(t) {
-    let clickFails = 0;
-    while (running && !t.cancelled) {
-      const root = catalogRoot();
-      if (root === null) {
-        await halt(t, "找不到课程目录 DOM（div.panel-catalog ul.rank-1），连播停止");
-        return;
-      }
-      const pos = posOf(root);
-      publishCourseProgress(root, pos);
-      if (pos.chapterIdx < 0) {
-        await halt(t, "目录里没有「当前项」标记 —— 请你先点开一节，脚本会跟着你走");
-        return;
-      }
-      const chapLi = chapterLis(root)[pos.chapterIdx];
-      if (chapLi === void 0) {
-        await halt(t, "目录结构变了，连播停止");
-        return;
-      }
-      if (chapterBody(chapLi) === null) {
-        setStatus(`连播中：正在展开 ${textOf(chapterTitle(chapLi))}`);
-        await clickNav(chapterTitle(chapLi) ?? chapLi, t);
-        await waitFor(() => chapterBody(chapLi) !== null, NAV_WAIT_MS, t);
-        continue;
-      }
-      const secs = sectionLis(chapLi);
-      if (pos.sectionIdx < 0) {
-        const next = secs.findIndex((li) => {
-          if (li.hasAttribute(SKIP_ATTR)) return false;
-          const title = sectionTitle(li);
-          return title === null || !isComplete(title);
-        });
-        if (next < 0) {
-          if (!await goNextChapter(root, pos.chapterIdx, t)) return;
-          continue;
-        }
-        const target2 = sectionTitle(secs[next] ?? void 0);
-        setStatus(`连播中：正在进入 ${describe(root, { ...pos, sectionIdx: next, resourceIdx: -1 })}`);
-        if (!await clickNav(target2 ?? secs[next], t)) {
-          const failed = secs[next];
-          if (failed !== void 0) failed.setAttribute(SKIP_ATTR, "1");
-          clickFails += 1;
-          log9.warn("节点不动，标记跳过");
-          if (clickFails > 3) await halt(t, "连续几次都点不动目录，连播停止");
-          continue;
-        }
-        await sleep(waitBeforeMs(), t);
-        continue;
-      }
-      const secLi = secs[pos.sectionIdx];
-      if (secLi === void 0) {
-        if (!await goNextChapter(root, pos.chapterIdx, t)) return;
-        continue;
-      }
-      if (resourceList(secLi) === null) {
-        setStatus(`连播中：正在展开 ${describe(root, pos)}`);
-        await clickNav(sectionTitle(secLi) ?? secLi, t);
-        await waitFor(() => resourceList(secLi) !== null, NAV_WAIT_MS, t);
-        continue;
-      }
-      const rows = resourceRows(secLi);
-      let nextIdx = -1;
-      for (let i = pos.resourceIdx + 1; i < rows.length; i += 1) {
-        const r = rows[i];
-        if (r === void 0) continue;
-        if (r.hasAttribute(SKIP_ATTR)) continue;
-        if (isComplete(r)) continue;
-        nextIdx = i;
-        break;
-      }
-      if (nextIdx < 0) {
-        const after = secs.findIndex((li) => li === secLi);
-        const nextSec = secs.findIndex(
-          (li, i) => i > after && !li.hasAttribute(SKIP_ATTR) && !isComplete(sectionTitle(li) ?? li)
-        );
-        if (nextSec >= 0) {
-          const target2 = sectionTitle(secs[nextSec] ?? void 0);
-          setStatus(`连播中：正在进入 ${describe(root, { ...pos, sectionIdx: nextSec, resourceIdx: -1 })}`);
-          if (!await clickNav(target2 ?? secs[nextSec], t)) {
-            const failed = secs[nextSec];
-            if (failed !== void 0) failed.setAttribute(SKIP_ATTR, "1");
-            log9.warn("下一节点不动，标记跳过");
-          }
-          await sleep(waitBeforeMs(), t);
-          continue;
-        }
-        if (!await goNextChapter(root, pos.chapterIdx, t)) return;
-        continue;
-      }
-      const cur = pos.resourceIdx >= 0 ? rows[pos.resourceIdx] : void 0;
-      const target = rows[nextIdx] ?? void 0;
-      setStatus(`连播中：${describe(root, { ...pos, resourceIdx: nextIdx })}`);
-      if (cur !== void 0 && cur === target) {
-        await handleCurrent(target, t);
-        continue;
-      }
-      const ok = await clickNav(target, t);
-      if (!ok) {
-        clickFails += 1;
-        log9.warn(`点不动这一项，跳过：${rowName(target)}`);
-        await skipOne(t);
-        if (clickFails > 20) await halt(t, "连续点不动太多次，连播停止");
-        continue;
-      }
-      clickFails = 0;
-      await sleep(waitBeforeMs(), t);
-      await handleCurrent(target, t);
-    }
-  }
-  function publishCourseProgress(root, pos) {
-    const chs = chapterLis(root);
-    const chapLi = chs[pos.chapterIdx];
-    const label = describe(root, pos);
-    if (chapLi !== void 0 && pos.sectionIdx >= 0) {
-      const secLi = sectionLis(chapLi)[pos.sectionIdx];
-      if (secLi !== void 0 && pos.resourceIdx >= 0) {
-        const rows = resourceRows(secLi);
-        setCourseProgress({ index: pos.resourceIdx + 1, total: rows.length, label });
-        return;
-      }
-      setCourseProgress({ index: pos.sectionIdx + 1, total: sectionLis(chapLi).length, label });
-      return;
-    }
-    if (pos.chapterIdx >= 0) {
-      setCourseProgress({ index: pos.chapterIdx + 1, total: chs.length, label });
-    }
-  }
-  var SKIP_ATTR = "data-sztb-skip";
-  async function skipOne(t) {
-    const root = catalogRoot();
-    if (root === null) return;
-    const pos = posOf(root);
-    if (pos.chapterIdx < 0 || pos.sectionIdx < 0 || pos.resourceIdx < 0) {
-      await sleep(300, t);
-      return;
-    }
-    const chapLi = chapterLis(root)[pos.chapterIdx];
-    if (chapLi === void 0) return;
-    const secLi = sectionLis(chapLi)[pos.sectionIdx];
-    if (secLi === void 0) return;
-    const rows = resourceRows(secLi);
-    const idx = pos.resourceIdx + 1;
-    const row3 = rows[idx];
-    if (row3 !== void 0) {
-      row3.setAttribute(SKIP_ATTR, "1");
-      log9.debug(`标记跳过：${rowName(row3)}`);
-    }
-    await sleep(200, t);
-  }
-  async function goNextChapter(root, chapterIdx, t) {
-    const chs = chapterLis(root);
-    let nextLi;
-    for (let i = chapterIdx + 1; i < chs.length; i += 1) {
-      const li = chs[i];
-      if (li === void 0) continue;
-      if (li.hasAttribute(SKIP_ATTR)) continue;
-      nextLi = li;
-      break;
-    }
-    if (nextLi === void 0) {
-      const anyLeft = chs.slice(chapterIdx + 1).some((li) => !li.hasAttribute(SKIP_ATTR));
-      if (!anyLeft) {
-        await halt(t, "已经是最后一章最后一节，连播结束");
-        return false;
-      }
-      nextLi = chs[chapterIdx + 1];
-    }
-    if (nextLi === void 0) {
-      await halt(t, "已经是最后一章最后一节，连播结束");
-      return false;
-    }
-    const title = chapterTitle(nextLi);
-    setStatus(`连播中：正在进入下一章 ${textOf(title)}`);
-    const ok = await clickNav(title ?? nextLi, t);
-    if (!ok) {
-      log9.warn(`下一章点不动，跳过去：${textOf(title)}`);
-      nextLi.setAttribute(SKIP_ATTR, "1");
-    }
-    await waitFor(() => chapterBody(nextLi) !== null, NAV_WAIT_MS, t);
-    await sleep(waitBeforeMs(), t);
-    return true;
-  }
-  async function handleCurrent(row3, t) {
-    if (isComplete(row3)) {
-      log9.debug("这一项站点标了完成，跳过");
-      return;
-    }
-    const kind = kindOf2(row3);
-    const name = rowName(row3);
-    setStatus(`连播中：正在处理「${name}」（${KIND_TEXT[kind]}）`);
-    await waitFor(() => viewerReady(), VIEW_WAIT_MS, t);
-    const v = viewerOf();
-    if (v.video !== null || kind === "video") {
-      if (v.video === null) {
-        log9.warn(`看着像视频但没找到 <video>，等一会儿就往下走：「${name}」`);
-        await sleep(holdAfterMs(), t);
-        return;
-      }
-      const done = await waitVideoEnd(v.video, t);
-      log9.info(`视频「${name}」${done ? "已播完" : "没等到播完（被停止或出错）"}`);
-      if (t.cancelled || !running) return;
-      await sleep(holdAfterMs(), t);
-      return;
-    }
-    if (kind === "quiz" || v.hasQuizFrame) {
-      const tid = quizTidOnPage();
-      if (tid === null) {
-        log9.warn(`走到测验「${name}」但 iframe 地址里读不出 tid，停下等你`);
-        await halt(t, `走到测验「${name}」但读不出 tid，连播停下等你`);
-        return;
-      }
-      if (isEnabled(SITE_ID, TOGGLE.SKIP_QUIZ)) {
-        await halt(t, `走到测验「${name}」，【跳过测验】开着，连播停下等你`);
-        return;
-      }
-      if (!isEnabled(SITE_ID, TOGGLE.AI_ANSWER)) {
-        await halt(t, `走到测验「${name}」，AI 答题没开，连播停下等你`);
-        return;
-      }
-      if (host === null) return;
-      setStatus(`连播中：正在作答「${name}」`);
-      log9.info(`测验「${name}」→ tid=${tid}，交给 AI 作答`);
-      await runQuizAnswer(tid, host);
-      await sleep(holdAfterMs(), t);
-      return;
-    }
-    if (kind === "attach" && isEnabled(SITE_ID, TOGGLE.SKIP_ATTACHMENT)) {
-      log9.debug(`跳过附件「${name}」`);
-      return;
-    }
-    if (kind === "text" && isEnabled(SITE_ID, TOGGLE.SKIP_TEXT)) {
-      log9.debug(`跳过文本「${name}」`);
-      return;
-    }
-    if (kind === "discussion" && isEnabled(SITE_ID, TOGGLE.SKIP_DISCUSSION)) {
-      log9.debug(`跳过讨论「${name}」，不等待`);
-      return;
-    }
-    if (v.hasFrame) {
-      log9.warn(`这一项是个 iframe 但没有 tid，认不出来是什么，等一会儿就往下走：「${name}」`);
-    } else {
-      log9.warn(`认不出这一项是什么（类型 ${kind}），等一会儿就往下走：「${name}」`);
-    }
-    if (kind === "unknown") setStatus(`连播中：认不出「${name}」，稍等就继续`);
-    await sleep(holdAfterMs(), t);
-  }
-  function viewerReady() {
-    const box = document.querySelector(VIEWER_SEL);
-    if (box === null) return false;
-    if (box.querySelector("video") !== null) return true;
-    if (box.querySelector("iframe") !== null) return true;
-    return textOf(box).length > 0;
-  }
   var KIND_TEXT = {
     video: "视频",
     attach: "附件",
@@ -3978,6 +3862,168 @@ ${options.desc ?? ""}
     log9.warn(reason);
     host?.toast(reason, "warn");
     notify();
+  }
+  async function handleRow(row3, name, t) {
+    if (isComplete(row3)) {
+      log9.debug(`这一项站点标了完成，跳过：${name}`);
+      return;
+    }
+    const kind = kindOf2(row3);
+    setStatus(`连播中：正在处理「${name}」（${KIND_TEXT[kind]}）`);
+    await waitFor(() => viewerReady(), VIEW_WAIT_MS, t);
+    if (!running || t.cancelled) return;
+    const v = viewerOf();
+    if (kind === "video" || v.video !== null) {
+      if (v.video === null) {
+        log9.warn(`看着像视频但没找到 <video>，等一会儿就往下走：「${name}」`);
+      } else {
+        const ok = await waitVideoEnd(v.video, t);
+        log9.info(`视频「${name}」${ok ? "已播完" : "没等到播完（被停止或出错）"}`);
+        if (!running || t.cancelled) return;
+      }
+    } else if (kind === "quiz" || v.hasQuizFrame) {
+      if (!isEnabled(SITE_ID, TOGGLE.AI_ANSWER)) {
+        await halt(t, `走到测验「${name}」，AI 答题没开 —— 连播停下，你处理完再点【开始连播】`);
+        return;
+      }
+      const tid = quizTidOnPage();
+      if (tid === null) {
+        await halt(t, `走到测验「${name}」但读不出 tid —— 连播停下等你`);
+        return;
+      }
+      if (host === null) return;
+      setStatus(`连播中：正在作答「${name}」`);
+      log9.info(`测验「${name}」→ tid=${tid}，交给 AI 作答`);
+      await runQuizAnswer(tid, host);
+      if (!running || t.cancelled) return;
+    } else if (kind === "discussion") {
+      await halt(t, `走到讨论「${name}」—— 连播停下，你处理完再点【开始连播】`);
+      return;
+    } else if (kind === "attach") {
+      log9.debug(`附件「${name}」：不打开文件，直接下一项`);
+    } else if (kind !== "text") {
+      if (v.hasFrame) log9.warn(`这一项是个 iframe 但没有 tid，认不出来是什么：「${name}」`);
+      else log9.warn(`认不出这一项是什么（类型 ${kind}）：「${name}」`);
+      setStatus(`连播中：认不出「${name}」，稍等就继续`);
+    }
+    await sleep(holdAfterMs(), t);
+  }
+  async function loop(t) {
+    for (; ; ) {
+      if (!running || t.cancelled) return;
+      const root = catalogRoot();
+      if (root === null) {
+        await halt(t, "找不到课程目录 DOM（div.panel-catalog ul.rank-1），连播停止");
+        return;
+      }
+      const s = snapshot(root);
+      publishCourseProgress(s);
+      const step = nextStep(s);
+      log9.debug(`下一步：${step.kind}`);
+      switch (step.kind) {
+        case "stop":
+          await halt(t, step.why);
+          return;
+        case "end":
+          await halt(t, "已经是最后一章最后一节，连播结束");
+          return;
+        case "expand-chapter": {
+          setStatus(`连播中：正在展开 ${step.name}`);
+          cursor = rowAt(step.chapterId, "", -1);
+          rowMark = null;
+          const ok = await clickNav(step.el, t);
+          if (!ok) {
+            step.el.setAttribute(SKIP_ATTR, "1");
+            log9.warn(`这一章点不动，跳过去：${step.name}`);
+            break;
+          }
+          const shown = await waitFor(() => {
+            const li = findChapterById(step.chapterId);
+            return li !== null && chapterBody(li) !== null;
+          }, NAV_WAIT_MS, t);
+          if (!shown) {
+            step.el.setAttribute(SKIP_ATTR, "1");
+            log9.warn(`这一章展开不出来，跳过去：${step.name}`);
+            break;
+          }
+          await sleep(waitBeforeMs(), t);
+          break;
+        }
+        case "expand-section": {
+          setStatus(`连播中：正在展开 ${step.name}`);
+          cursor = rowAt(step.chapterId, step.sectionId, -1);
+          rowMark = null;
+          const ok = await clickNav(step.el, t);
+          if (!ok) {
+            step.el.setAttribute(SKIP_ATTR, "1");
+            log9.warn(`这一节点不动，跳过去：${step.name}`);
+            break;
+          }
+          const shown = await waitFor(() => {
+            const chap = findChapterById(step.chapterId);
+            if (chap === null) return false;
+            const li = findSectionById(chap, step.sectionId);
+            return li !== null && resourceList(li) !== null;
+          }, NAV_WAIT_MS, t);
+          if (!shown) {
+            step.el.setAttribute(SKIP_ATTR, "1");
+            log9.warn(`这一节展开不出来，跳过去：${step.name}`);
+            break;
+          }
+          await sleep(waitBeforeMs(), t);
+          break;
+        }
+        case "click-row": {
+          setStatus(`连播中：正在进入「${step.name}」`);
+          const c = rowAt(step.chapterId, step.sectionId, step.resourceIdx);
+          cursor = c;
+          rowMark = { key: keyOf(c), phase: "clicked" };
+          const ok = await clickNav(step.row, t);
+          if (!ok) {
+            step.row.setAttribute(SKIP_ATTR, "1");
+            rowMark = null;
+            log9.warn(`这一项点不动，跳过：${step.name}`);
+            break;
+          }
+          await sleep(waitBeforeMs(), t);
+          break;
+        }
+        case "handle": {
+          const c = rowAt(step.chapterId, step.sectionId, step.resourceIdx);
+          cursor = c;
+          await handleRow(step.row, step.name, t);
+          handled.add(keyOf(c));
+          rowMark = { key: keyOf(c), phase: "done" };
+          if (!running || t.cancelled) return;
+          break;
+        }
+      }
+    }
+  }
+  function publishCourseProgress(s) {
+    if (s.chapLi === null) {
+      setCourseProgress(null);
+      return;
+    }
+    const chapName = textOf(chapterTitle(s.chapLi));
+    const parts = [];
+    if (chapName !== "") parts.push(chapName);
+    if (s.secLi === null) {
+      setCourseProgress({ index: s.ci + 1, total: s.chs.length, label: parts.join(" ") });
+      return;
+    }
+    const secName = textOf(sectionTitle(s.secLi));
+    if (secName !== "") parts.push(secName);
+    const rows = s.rows;
+    let ri = cursor !== null && cursor.chapterId === s.chapterId && cursor.sectionId === s.sectionId ? cursor.resourceIdx : -1;
+    if (ri < 0) ri = rows.findIndex((r) => isActive(r));
+    if (ri >= 0 && rows[ri] !== void 0) {
+      const nm = rowName(rows[ri]);
+      if (nm !== "") parts.push(`「${nm}」`);
+      setCourseProgress({ index: ri + 1, total: rows.length, label: parts.join(" ") });
+      return;
+    }
+    setCourseProgress({ index: s.si + 1, total: s.secs.length, label: parts.join(" ") });
   }
 
   // src/sites/uooc/tabs/ai.ts
@@ -5014,15 +5060,15 @@ ${options.desc ?? ""}
     if (v === null || typeof v !== "object" || Array.isArray(v)) return null;
     return v;
   }
-  function planMigration(snapshot, alreadyMigrated) {
+  function planMigration(snapshot2, alreadyMigrated) {
     const report = [];
     const notices = [];
     if (alreadyMigrated) {
       return { entries: [], report: ["旧数据已迁移过，本次跳过。"], notices: [], empty: true };
     }
     const entries2 = [];
-    const settings = asRecord3(parseJson(snapshot.settings));
-    if (settings === null && snapshot.settings !== null) {
+    const settings = asRecord3(parseJson(snapshot2.settings));
+    if (settings === null && snapshot2.settings !== null) {
       notices.push("旧设置 `szubkxk.settings.v2` 无法解析，已跳过。");
     }
     if (settings !== null) {
@@ -5051,7 +5097,7 @@ ${options.desc ?? ""}
         }
       }
     }
-    const ccRaw = parseJson(snapshot.customCourses);
+    const ccRaw = parseJson(snapshot2.customCourses);
     if (ccRaw !== null) {
       if (Array.isArray(ccRaw)) {
         const slim = parseCustomCourses(ccRaw);
@@ -5064,8 +5110,8 @@ ${options.desc ?? ""}
       }
     }
     const blobs = [
-      { raw: snapshot.monitor, newKey: BKXK_STORE_KEY.MONITOR, label: "监控进度" },
-      { raw: snapshot.tasks, newKey: BKXK_STORE_KEY.TASKS, label: "任务进度" }
+      { raw: snapshot2.monitor, newKey: BKXK_STORE_KEY.MONITOR, label: "监控进度" },
+      { raw: snapshot2.tasks, newKey: BKXK_STORE_KEY.TASKS, label: "任务进度" }
     ];
     for (const blob of blobs) {
       const parsed = parseJson(blob.raw);
@@ -5153,8 +5199,8 @@ ${options.desc ?? ""}
     if (read(MIGRATION_FLAG_KEY, false)) {
       return [];
     }
-    const snapshot = readLegacySnapshot();
-    const plan = planMigration(snapshot, false);
+    const snapshot2 = readLegacySnapshot();
+    const plan = planMigration(snapshot2, false);
     const lines = [];
     if (plan.empty && plan.notices.length === 0) {
       write(MIGRATION_FLAG_KEY, true);
@@ -7177,9 +7223,9 @@ ${text}
   }
   async function round() {
     const list = activeTasks(loadTaskStore().items);
-    for (const snapshot of list) {
+    for (const snapshot2 of list) {
       if (!running2) return;
-      const cur = byId2(loadTaskStore(), snapshot.id);
+      const cur = byId2(loadTaskStore(), snapshot2.id);
       if (cur === null || !cur.enabled) continue;
       await attempt(cur);
     }
@@ -9322,8 +9368,8 @@ ${text}
   // src/main.ts
   var log29 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-08T11:30:04.971Z" : null;
-  var BUILD_NO = true ? 79 : null;
+  var BUILD_TIME = true ? "2026-10-08T12:19:37.582Z" : null;
+  var BUILD_NO = true ? 84 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();
