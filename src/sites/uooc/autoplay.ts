@@ -239,6 +239,22 @@ function sleep(ms: number, t: { cancelled: boolean }): Promise<void> {
   });
 }
 
+/**
+ * 强制让出主线程（一个真实的宏任务）。
+ *
+ * ⚠️ 这是**防页面卡死**的关键。`await` 一个已经 resolve 的 promise 只让出微任务队列，
+ * 浏览器**不会**有机会渲染或处理输入；`for(;;)` 里若每轮都只走这种路径（例如
+ * `clickNav` 的提前 return），主线程就被彻底占死 —— 表现是页面完全无法交互、
+ * 连 F12 控制台敲的命令都不执行（2026-10-08 实测踩过，见需求细则 §B.2.5）。
+ *
+ * `setTimeout(0)` 是宏任务，一定会让出。
+ */
+function yieldToBrowser(): Promise<void> {
+  return new Promise<void>((resolve) => {
+    window.setTimeout(resolve, 0);
+  });
+}
+
 /** 等到 `pred()` 为真；超时返回 false。可被【停止连播】打断。 */
 async function waitFor(
   pred: () => boolean,
@@ -532,12 +548,22 @@ type Step =
   | {
       readonly kind: 'expand-chapter';
       readonly el: HTMLElement;
+      /**
+       * 可点的那个（`div.basic.chapter`）。
+       *
+       * ⚠️ `li` 必须一起带上：`SKIP_ATTR` 被读的地方读的是 **`li`**
+       * （`nextChapter` / `nextStep`），而 `el` 是 `li` 的孩子。只标 `el`
+       * 会导致「标了但没人看」→ 每轮重新返回同一个步骤 → 死循环卡死页面。
+       */
+      readonly li: HTMLElement;
       readonly name: string;
       readonly chapterId: string;
     }
   | {
       readonly kind: 'expand-section';
       readonly el: HTMLElement;
+      /** 同 `expand-chapter.li` —— 读 `SKIP_ATTR` 的地方读的是这个 `li` */
+      readonly li: HTMLElement;
       readonly name: string;
       readonly chapterId: string;
       readonly sectionId: string;
@@ -559,6 +585,7 @@ function nextChapter(s: Snap, ci: number): Step {
     return {
       kind: 'expand-chapter',
       el: t ?? li,
+      li,
       name: textOf(t) || `第 ${i + 1} 章`,
       chapterId: chapterKey(li, i),
     };
@@ -595,6 +622,7 @@ function nextFrom(s: Snap, from: number): Step {
     return {
       kind: 'expand-section',
       el: t ?? li,
+      li,
       name: textOf(t) || `第 ${j + 1} 节`,
       chapterId,
       sectionId: sectionKey(li, j),
@@ -630,6 +658,7 @@ function nextStep(s: Snap): Step {
     return {
       kind: 'expand-chapter',
       el: chapterTitle(chapLi) ?? chapLi,
+      li: chapLi,
       name: chapName,
       chapterId: s.chapterId,
     };
@@ -647,6 +676,7 @@ function nextStep(s: Snap): Step {
     return {
       kind: 'expand-section',
       el: sectionTitle(secLi) ?? secLi,
+      li: secLi,
       name: secName,
       chapterId: s.chapterId,
       sectionId: s.sectionId,
@@ -704,6 +734,54 @@ interface Viewer {
    * `iframe[src*="/exam/"]`。
    */
   readonly hasQuizFrame: boolean;
+}
+
+/**
+ * 标「这里点不动，别再点它了」。
+ *
+ * ⚠️ `el` 和 `li` **都要标**：读 `SKIP_ATTR` 的地方两边都有 ——
+ * `nextChapter` / `nextFrom` 读章 `li` 和节 `li`，`nextFrom` 读资源行（那就是 `row`）。
+ * 只标一边等于没标（这就是之前点【开始连播】卡死的根因）。
+ */
+function markSkip(step: { el: HTMLElement; li: HTMLElement }): void {
+  step.el.setAttribute(SKIP_ATTR, '1');
+  step.li.setAttribute(SKIP_ATTR, '1');
+}
+
+/** 给一步算一个「指纹」，用来判断循环有没有在同一个地方打转 */
+function stepSignature(step: Step): string {
+  switch (step.kind) {
+    case 'expand-chapter':
+      return `expand-chapter:${step.chapterId}`;
+    case 'expand-section':
+      return `expand-section:${step.chapterId}/${step.sectionId}`;
+    case 'click-row':
+      return `click-row:${step.chapterId}/${step.sectionId}/${step.resourceIdx}`;
+    case 'handle':
+      return `handle:${step.chapterId}/${step.sectionId}/${step.resourceIdx}`;
+    case 'end':
+      return 'end';
+    case 'stop':
+      return `stop:${step.why}`;
+  }
+}
+
+/** 把一步说成人话，用于状态行与日志 */
+function describeStep(step: Step): string {
+  switch (step.kind) {
+    case 'expand-chapter':
+      return `展开章「${step.name}」`;
+    case 'expand-section':
+      return `展开节「${step.name}」`;
+    case 'click-row':
+      return `点开「${step.name}」`;
+    case 'handle':
+      return `等待「${step.name}」结束`;
+    case 'end':
+      return '收尾';
+    case 'stop':
+      return step.why;
+  }
 }
 
 function viewerOf(): Viewer {
@@ -838,8 +916,19 @@ async function handleRow(row: HTMLElement, name: string, t: { cancelled: boolean
 }
 
 async function loop(t: { cancelled: boolean }): Promise<void> {
+  // 看门狗：连续很多轮算出**同一个步骤**、一点进展都没有 ⇒ 认定卡住，停下报告。
+  // 这不是兜底手段，是为了万一将来又出类似问题，表现成「有条理地停下」而不是页面卡死。
+  const STUCK_LIMIT = 20;
+  let lastSig = '';
+  let sameCount = 0;
+  let lastLog = '';
+
   for (;;) {
     if (!running || t.cancelled) return;
+
+    // ⚠️ 必须是宏任务。循环里有些路径（例如 `clickNav` 提前 return）只让出微任务，
+    // 少了这一行就可能把主线程占死 ⇒ 页面完全无法交互、控制台都不响应。
+    await yieldToBrowser();
 
     const root = catalogRoot();
     if (root === null) {
@@ -851,7 +940,23 @@ async function loop(t: { cancelled: boolean }): Promise<void> {
     publishCourseProgress(s);
 
     const step = nextStep(s);
-    log.debug(`下一步：${step.kind}`);
+    const sig = stepSignature(step);
+    if (sig === lastSig) sameCount += 1;
+    else {
+      lastSig = sig;
+      sameCount = 0;
+    }
+    if (sig !== lastLog) {
+      log.debug(`下一步：${step.kind}`);
+      lastLog = sig;
+    }
+    if (step.kind !== 'end' && step.kind !== 'stop' && sameCount >= STUCK_LIMIT) {
+      await halt(
+        t,
+        `连播卡住了：连续 ${sameCount + 1} 轮都停在「${describeStep(step)}」，已停止`,
+      );
+      return;
+    }
     switch (step.kind) {
       case 'stop':
         await halt(t, step.why);
@@ -867,7 +972,7 @@ async function loop(t: { cancelled: boolean }): Promise<void> {
         rowMark = null;
         const ok = await clickNav(step.el, t);
         if (!ok) {
-          step.el.setAttribute(SKIP_ATTR, '1');
+          markSkip(step);
           log.warn(`这一章点不动，跳过去：${step.name}`);
           break;
         }
@@ -877,7 +982,7 @@ async function loop(t: { cancelled: boolean }): Promise<void> {
         }, NAV_WAIT_MS, t);
         if (!shown) {
           // 点了但没展开出来 → 标掉，别在下一轮又回来点它
-          step.el.setAttribute(SKIP_ATTR, '1');
+          markSkip(step);
           log.warn(`这一章展开不出来，跳过去：${step.name}`);
           break;
         }
@@ -891,7 +996,7 @@ async function loop(t: { cancelled: boolean }): Promise<void> {
         rowMark = null;
         const ok = await clickNav(step.el, t);
         if (!ok) {
-          step.el.setAttribute(SKIP_ATTR, '1');
+          markSkip(step);
           log.warn(`这一节点不动，跳过去：${step.name}`);
           break;
         }
@@ -902,7 +1007,7 @@ async function loop(t: { cancelled: boolean }): Promise<void> {
           return li !== null && resourceList(li) !== null;
         }, NAV_WAIT_MS, t);
         if (!shown) {
-          step.el.setAttribute(SKIP_ATTR, '1');
+          markSkip(step);
           log.warn(`这一节展开不出来，跳过去：${step.name}`);
           break;
         }

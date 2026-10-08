@@ -52,7 +52,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-08T12:19:37.582Z（构建号 84） */
+/* 构建信息：2026-10-08T15:00:49.647Z（构建号 86） */
 
 "use strict";
 (() => {
@@ -3504,6 +3504,11 @@ ${options.desc ?? ""}
       });
     });
   }
+  function yieldToBrowser() {
+    return new Promise((resolve2) => {
+      window.setTimeout(resolve2, 0);
+    });
+  }
   async function waitFor(pred, timeoutMs, t, intervalMs2 = 200) {
     const deadline = Date.now() + timeoutMs;
     for (; ; ) {
@@ -3708,6 +3713,7 @@ ${options.desc ?? ""}
       return {
         kind: "expand-chapter",
         el: t ?? li,
+        li,
         name: textOf(t) || `第 ${i + 1} 章`,
         chapterId: chapterKey(li, i)
       };
@@ -3734,6 +3740,7 @@ ${options.desc ?? ""}
       return {
         kind: "expand-section",
         el: t ?? li,
+        li,
         name: textOf(t) || `第 ${j + 1} 节`,
         chapterId,
         sectionId: sectionKey(li, j)
@@ -3756,6 +3763,7 @@ ${options.desc ?? ""}
       return {
         kind: "expand-chapter",
         el: chapterTitle(chapLi) ?? chapLi,
+        li: chapLi,
         name: chapName,
         chapterId: s.chapterId
       };
@@ -3769,6 +3777,7 @@ ${options.desc ?? ""}
       return {
         kind: "expand-section",
         el: sectionTitle(secLi) ?? secLi,
+        li: secLi,
         name: secName,
         chapterId: s.chapterId,
         sectionId: s.sectionId
@@ -3800,6 +3809,42 @@ ${options.desc ?? ""}
       return nextFrom(s, here);
     }
     return nextFrom(s, -1);
+  }
+  function markSkip(step) {
+    step.el.setAttribute(SKIP_ATTR, "1");
+    step.li.setAttribute(SKIP_ATTR, "1");
+  }
+  function stepSignature(step) {
+    switch (step.kind) {
+      case "expand-chapter":
+        return `expand-chapter:${step.chapterId}`;
+      case "expand-section":
+        return `expand-section:${step.chapterId}/${step.sectionId}`;
+      case "click-row":
+        return `click-row:${step.chapterId}/${step.sectionId}/${step.resourceIdx}`;
+      case "handle":
+        return `handle:${step.chapterId}/${step.sectionId}/${step.resourceIdx}`;
+      case "end":
+        return "end";
+      case "stop":
+        return `stop:${step.why}`;
+    }
+  }
+  function describeStep(step) {
+    switch (step.kind) {
+      case "expand-chapter":
+        return `展开章「${step.name}」`;
+      case "expand-section":
+        return `展开节「${step.name}」`;
+      case "click-row":
+        return `点开「${step.name}」`;
+      case "handle":
+        return `等待「${step.name}」结束`;
+      case "end":
+        return "收尾";
+      case "stop":
+        return step.why;
+    }
   }
   function viewerOf() {
     const box = document.querySelector(VIEWER_SEL) ?? document.body;
@@ -3909,8 +3954,13 @@ ${options.desc ?? ""}
     await sleep(holdAfterMs(), t);
   }
   async function loop(t) {
+    const STUCK_LIMIT = 20;
+    let lastSig = "";
+    let sameCount = 0;
+    let lastLog = "";
     for (; ; ) {
       if (!running || t.cancelled) return;
+      await yieldToBrowser();
       const root = catalogRoot();
       if (root === null) {
         await halt(t, "找不到课程目录 DOM（div.panel-catalog ul.rank-1），连播停止");
@@ -3919,7 +3969,23 @@ ${options.desc ?? ""}
       const s = snapshot(root);
       publishCourseProgress(s);
       const step = nextStep(s);
-      log9.debug(`下一步：${step.kind}`);
+      const sig = stepSignature(step);
+      if (sig === lastSig) sameCount += 1;
+      else {
+        lastSig = sig;
+        sameCount = 0;
+      }
+      if (sig !== lastLog) {
+        log9.debug(`下一步：${step.kind}`);
+        lastLog = sig;
+      }
+      if (step.kind !== "end" && step.kind !== "stop" && sameCount >= STUCK_LIMIT) {
+        await halt(
+          t,
+          `连播卡住了：连续 ${sameCount + 1} 轮都停在「${describeStep(step)}」，已停止`
+        );
+        return;
+      }
       switch (step.kind) {
         case "stop":
           await halt(t, step.why);
@@ -3933,7 +3999,7 @@ ${options.desc ?? ""}
           rowMark = null;
           const ok = await clickNav(step.el, t);
           if (!ok) {
-            step.el.setAttribute(SKIP_ATTR, "1");
+            markSkip(step);
             log9.warn(`这一章点不动，跳过去：${step.name}`);
             break;
           }
@@ -3942,7 +4008,7 @@ ${options.desc ?? ""}
             return li !== null && chapterBody(li) !== null;
           }, NAV_WAIT_MS, t);
           if (!shown) {
-            step.el.setAttribute(SKIP_ATTR, "1");
+            markSkip(step);
             log9.warn(`这一章展开不出来，跳过去：${step.name}`);
             break;
           }
@@ -3955,7 +4021,7 @@ ${options.desc ?? ""}
           rowMark = null;
           const ok = await clickNav(step.el, t);
           if (!ok) {
-            step.el.setAttribute(SKIP_ATTR, "1");
+            markSkip(step);
             log9.warn(`这一节点不动，跳过去：${step.name}`);
             break;
           }
@@ -3966,7 +4032,7 @@ ${options.desc ?? ""}
             return li !== null && resourceList(li) !== null;
           }, NAV_WAIT_MS, t);
           if (!shown) {
-            step.el.setAttribute(SKIP_ATTR, "1");
+            markSkip(step);
             log9.warn(`这一节展开不出来，跳过去：${step.name}`);
             break;
           }
@@ -9368,8 +9434,8 @@ ${text}
   // src/main.ts
   var log29 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-08T12:19:37.582Z" : null;
-  var BUILD_NO = true ? 84 : null;
+  var BUILD_TIME = true ? "2026-10-08T15:00:49.647Z" : null;
+  var BUILD_NO = true ? 86 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();
