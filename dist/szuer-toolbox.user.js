@@ -52,7 +52,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-09T14:51:55.358Z（构建号 101） */
+/* 构建信息：2026-10-09T15:19:09.920Z（构建号 102） */
 
 "use strict";
 (() => {
@@ -2391,6 +2391,19 @@ ${options.desc ?? ""}
     }
     return false;
   }
+  function containersComplete(controlCounts) {
+    return controlCounts.length > 0 && controlCounts.every((n) => n > 0);
+  }
+  function quizDomReady(top = document) {
+    for (const doc of collectRoots(top)) {
+      const boxes = doc.querySelectorAll("div.queContainer");
+      if (boxes.length === 0) continue;
+      const counts = [];
+      for (const box of boxes) counts.push(box.querySelectorAll("input[name], textarea").length);
+      if (containersComplete(counts)) return true;
+    }
+    return false;
+  }
   function ngModelOf(el2) {
     const win = el2.ownerDocument?.defaultView;
     const angular = win?.angular ?? null;
@@ -4492,7 +4505,9 @@ ${detail}
     const box = document.querySelector(VIEWER_SEL);
     if (box === null) return false;
     if (kind === "video") return box.querySelector("video") !== null;
-    return box.querySelector("iframe") !== null && quizTidOnPage() !== null;
+    if (box.querySelector("iframe") === null) return false;
+    if (quizTidOnPage() === null) return false;
+    return quizDomReady();
   }
   async function gotoPoint(hash, kind, label, t) {
     const needsChange = location.hash !== hash;
@@ -10183,8 +10198,8 @@ ${text2}
   // src/main.ts
   var log33 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-09T14:51:55.358Z" : null;
-  var BUILD_NO = true ? 101 : null;
+  var BUILD_TIME = true ? "2026-10-09T15:19:09.920Z" : null;
+  var BUILD_NO = true ? 102 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();

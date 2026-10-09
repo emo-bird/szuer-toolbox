@@ -26,6 +26,7 @@ import { scoped } from '../../common/core/log.ts';
 import { isEnabled } from '../../common/core/settings.ts';
 import type { PanelApi } from '../types.ts';
 import { quizTidOnPage, runQuizAnswer, type AiQuizResult } from './ai/index.ts';
+import { quizDomReady } from './ai/fill.ts';
 import { setCourseProgress } from './ai/monitor.ts';
 import {
   SOURCE_NAME,
@@ -256,13 +257,19 @@ function viewerSignature(): string {
  * ⚠️ 光有 `video` / `iframe` **不够**：站点换路由时内容区是异步替换的，
  * 上一项的视频可能还挂在那儿几百毫秒。所以调用方还要比 `viewerSignature()`，
  * 见 `gotoPoint()`。
+ *
+ * ⚠️ **2026-10-09 第六份反馈**：测验过去只看「iframe 出现 + 地址里有 tid」，等于没看
+ * 题目渲染了没有 ⇒ 网络差时答案先到、选项后到，**一道都填不上**。现在多一道
+ * `quizDomReady()`（每个 `div.queContainer` 里都已经有选项控件或文本框）。
  */
 function viewerReady(kind: 'video' | 'quiz'): boolean {
   const box = document.querySelector<HTMLElement>(VIEWER_SEL);
   if (box === null) return false;
   if (kind === 'video') return box.querySelector('video') !== null;
-  // 测验：iframe 出现**并且**地址里能读出 tid（§C.2「题目真的渲染出来」）
-  return box.querySelector('iframe') !== null && quizTidOnPage() !== null;
+  // 测验：iframe 出现 **+** 地址里能读出 tid（§C.2）**+ 题目 DOM 真的渲染出来了**
+  if (box.querySelector('iframe') === null) return false;
+  if (quizTidOnPage() === null) return false;
+  return quizDomReady();
 }
 
 /**
