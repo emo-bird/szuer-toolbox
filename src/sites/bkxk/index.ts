@@ -21,7 +21,7 @@
 
 import { scoped } from '../../common/core/log.ts';
 import type { SiteAdapter } from '../types.ts';
-import { BKXK_TOGGLES, applyBkxkSettings, registerBkxkSettings, SITE_ID } from './settings.ts';
+import { BKXK_TOGGLES, PAGE_MARK, applyBkxkSettings, registerBkxkSettings, SITE_ID } from './settings.ts';
 import { readSession, sessionSummary } from './session.ts';
 import { runCustomCarry, runMigration } from './legacy.ts';
 import { installHijack } from './hijack.ts';
@@ -46,10 +46,11 @@ const HOSTS: readonly string[] = ['bkxk.szu.edu.cn'];
  *   - 选课页 `/xsxkapp/sys/xsxkapp/*default/grablessons.do`
  *   - 课表页 `/xsxkapp/sys/xsxkapp/*default/curriculum.do`
  * 这里沿用同一判据（`*` 前缀吃掉中间那段路径）。
+ * 路径片段取 `settings.PAGE_MARK` —— 与 list / timetable 内部判页同源（见 settings.ts 注释）。
  *
  * 其余页面（如登录页、首页）只显示悬浮球，不自动展开 —— 它们没有可用功能。
  */
-const PAGES: readonly string[] = ['*default/grablessons.do*', '*default/curriculum.do*'];
+const PAGES: readonly string[] = [`*default/${PAGE_MARK.GRAB}*`, `*default/${PAGE_MARK.CURRICULUM}*`];
 
 export const bkxkAdapter: SiteAdapter = {
   id: SITE_ID,

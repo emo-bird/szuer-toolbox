@@ -27,11 +27,12 @@ import {
   shouldRefetchSite,
 } from './timetable-model.ts';
 import { TT_TAG_SELECTOR } from './tt-mark.ts';
+import { PAGE_MARK } from './settings.ts';
 
 const log = scoped('site/bkxk/timetable');
 
-/** 课表页路径片段（与适配器 `pages` 的判据同源） */
-const TT_PAGE_MARK = 'curriculum.do';
+/** 课表页路径片段（取自 settings.PAGE_MARK —— 与适配器 `pages` 同源） */
+const TT_PAGE_MARK = PAGE_MARK.CURRICULUM;
 /** 站点是异步渲染课表，等容器的次数与间隔（旧仓库 20 × 500ms） */
 const MAX_TRIES = 20;
 const RETRY_MS = 500;

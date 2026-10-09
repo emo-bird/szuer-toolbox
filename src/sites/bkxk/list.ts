@@ -33,7 +33,7 @@ import { getValue, isEnabled } from '../../common/core/settings.ts';
 import { el, whenDomReady } from '../../common/utils/dom.ts';
 import { copyText } from '../../common/utils/clipboard.ts';
 import { LIST_CSS, LIST_STYLE_ID } from './list-style.ts';
-import { SITE_ID, TOGGLE, VALUE } from './settings.ts';
+import { PAGE_MARK, SITE_ID, TOGGLE, VALUE } from './settings.ts';
 import { loadMonitorStore, subscribeMonitor, updateMonitor } from './monitor.ts';
 import { loadTaskStore, subscribeTasks, updateTasks } from './tasks.ts';
 import {
@@ -63,8 +63,8 @@ import type { PanelApi } from '../types.ts';
 
 const log = scoped('site/bkxk/list');
 
-/** 选课页路径片段（与适配器 `pages` 的判据同源） */
-const LIST_PAGE_MARK = 'grablessons.do';
+/** 选课页路径片段（取自 settings.PAGE_MARK —— 与适配器 `pages` 同源） */
+const LIST_PAGE_MARK = PAGE_MARK.GRAB;
 
 /** 站点重绘后等一拍再扫：站点是先插空容器再填内容，抢跑会扫到空壳 */
 const RESCAN_DELAY_MS = 120;
