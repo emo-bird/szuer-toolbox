@@ -229,13 +229,48 @@ location.hash = `#/${cid}/${chapterId}/${sectionId}/${sourceId}/section`;
 3. 正常 → 取 tid：**优先 `quizTidOnPage()`**（页面里真正打开的那份才是要动的那份），
    读不出来才退回 `getUnitLearn` 白给的 `task_id`（§B.5）；两者都拿不到 → 停（只日志、不弹窗）。
    拿到后交给现有的 `runQuizAnswer(tid, host)`。
-4. 答完重拉 `getCatalogList`。
+4. ~~答完重拉 `getCatalogList`~~ → **不重拉**（用户 m01884 Q5 = D1）：
+   见下面 §C.2.1 第 5 条，「交卷响应本身就是结论」。
 
 > **`AI_ANSWER` 关着的时候**（§F.1-6 拍板）：与第 2 步**完全同一套** —— 不尝试作答、
 > 不跳过、不自动往下走，直接 `showModalAlert` + 停止接管，只有文案不同。
 > 理由：静默跳过 = 在用户不知情的情况下漏掉整个测验；停下来让他选，是唯一不替他做决定的选项。
 
 > 交卷仍然要走二次确认门禁（N1），这条不变。
+
+#### C.2.1 手测事故（2026-10-09）与随之拍板的 6 条
+
+用户 m01815 手测：在 iframe 里点完【提交】、站点回了 `code:110`（未通过），
+脚本**完全没察觉**，空转 5 分钟后报「测验「…」答了 3 轮仍未记完成」——
+**实际只提交了 1 轮**。取证见 §F.2-E，根因两条：
+
+- **嗅探装错了 realm**：`/exam/commit` 是**试卷 iframe 自己**发的（`iframe.contentWindow.fetch !== window.fetch`），
+  而钩子只装在顶层 `window` 上 ⇒ 仓库永远收不到这一发。
+- **文案骗人**：`handleQuiz` 遇到 `verdict === 'unknown'` 就 `break`（只跑 1 轮），
+  而收尾文案写死「3 轮」。
+
+用户逐条拍板（m01884）后的口径，**已全部落地**：
+
+| # | 拍板 | 落地 |
+| --- | --- | --- |
+| Q1 | **A1**：进测验前扫一次 iframe、把嗅探补装进去 | `intercept.ts` 新增 `installUoocInterceptInFrames(doc)`（遍历 `iframe.contentWindow`，XHR 与 fetch **都装**），`ai/index.ts` 在进 `runQuizAnswer` 时与 `submitAndRead` 点提交前各调一次（幂等） |
+| Q2 | **B1**：保留 4 次多数投票；**单次请求**失败隔 2 秒重试，最多 **3 次（含首次）** | `runner.ts` 新增 `ASK_ATTEMPTS = 3` / `ASK_RETRY_DELAY_MS = 2000` 与 `askOnce()`；「请求失败」与「解析不出答案」都算失败；**每轮独立计数** |
+| Q3 | 重做最多 **3 轮** | `takeover.ts` 的 `QUIZ_MAX_ROUNDS = 3` 不动 |
+| Q4 | **不刷新 iframe**：验证码一过、页面本来就还能接着答 | 重做轮次之间**不做任何 reload**，直接再调 `runQuizAnswer` |
+| Q5 | **D1**：只有测验分支改成「commit 即结论」，视频分支不变 | 见下 |
+| Q6 | 重答把**上一轮其他投票一起累计**，先发 1 次看哪个多，没多数再补 1 次 | `runner.ts` 的 `AnswerOneOptions.prior`；重答默认 `maxRequests = 2`，`decided` 用 `prior` 垫底并**滤掉 `exclude` 那一票** |
+
+**D1 的具体含义**（第 5 条）：`/exam/commit` 的响应本身就是结论 ——
+`code:1` ⇒ 这一项就算完成，**不再重拉 `getCatalogList`**，直接进下一个任务点；
+`code:110` ⇒ 重做（最多 `QUIZ_MAX_ROUNDS` 轮）；其它 ⇒ 弹窗停下。
+理由：站点都判过了，再去拉树只是多一次请求、多一次「树还没更新时间对不上」的假阴性。
+
+**新增的 HTTP 门**：`CommitResult` 多一个 `httpStatus`，配套 `isCommitHttpOk(result)`
+（`200` 或 `0`=没拿到 才算走通）。**非 200 一律 `showModalAlert` + 停止接管** ——
+因为 HTTP 500/502 的响应体里同样没有 `code`，会被判成 `unknown`，
+而「没通过」和「这一发没走通」必须给用户看不一样的话。
+
+**拉试卷**：`paper.ts` 的 `getTaskPaper` 超时 **20000 → 60000**（用户 m01884 报备 2 拍板）。
 
 ### C.3 `50` 附件 / `70` 讨论
 
@@ -390,7 +425,8 @@ showModalAlert(shadowRoot: ShadowRoot, options: ModalOptions): Promise<string | 
 | B | 站点上报 `finished` 的真实延迟分布 | `HOLD_AFTER_MS` 定成 5000 只有 §C.1 那一轮的手测数据支撑；跑几门课后可能值得回头调 |
 | C | 多资源节点里「站点认为的当前项」是不是「第一个未完成任务资源」 | §B.5 的两段式按「资源层先序第一个未完成」挑（实测 `473005785` 上视频已完成 ⇒ 会挑测验）。若站点自己有更权威的「当前项」标记，主循环的顺序口径要跟着改 |
 | D | 只挂附件 / 讨论的节在课程里到底有多少 | 实测两门课各 20 个 `learn_task_cnt=0` 的节点（§B.1）；若某门课整节都是附件，主循环会连着跳过，**行为正确但状态行会连着变**，手测时留意有没有看起来像「卡住」 |
-
+| E | ~~测验交卷为什么没被察觉~~ | ✅ **2026-10-09 已查清并修复**，见 §C.2.1。取证要点：试卷 iframe 是**独立 realm**（`iframe.contentWindow.fetch !== window.fetch`、`contentWindow.XMLHttpRequest !== window.XMLHttpRequest`），而嗅探只装在顶层 ⇒ `/exam/commit` 的响应根本进不了仓库；`waitCommit(SUBMIT_WAIT_MS = 5 分钟)` 必然空转到超时。**同一个「跨 realm」坑的第三次**（前两次：`fill.ts` 的 `instanceof`、`video.ts:81` 的注释） |
+| F | 第二轮 `runQuizAnswer` 会不会变成「原样重交」 | ⚠️ **未定**：`runQuizAnswer` 里 `already = studentAnswer.length > 0 \|\| isAnsweredInDom(id)`，第二轮进来看页面已有答案 ⇒ `todo` 为空 ⇒ **不请求模型，直接把上一轮答案再交一次**。低分题仍有 `retryLowScore` 兜着，所以重做不会彻底失效，但那一轮提交是**浪费**。用户 m01884 Q6 拍的是「轮内」累计投票，**跨 takeover 轮次的累计还没定**，等实测 |
 ---
 
 ## §G 落地后要清理的东西

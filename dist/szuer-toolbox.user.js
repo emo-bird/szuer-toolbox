@@ -52,7 +52,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-08T17:00:57.260Z（构建号 93） */
+/* 构建信息：2026-10-09T05:26:32.342Z（构建号 94） */
 
 "use strict";
 (() => {
@@ -2040,6 +2040,9 @@ ${options.desc ?? ""}
     }
     return null;
   }
+  function isCommitHttpOk(result) {
+    return result.httpStatus === 0 || result.httpStatus === 200;
+  }
   function matchCommitApi(rawUrl) {
     return (rawUrl.split("#")[0] ?? "").includes("/exam/commit");
   }
@@ -2052,7 +2055,7 @@ ${options.desc ?? ""}
     if (typeof v === "number") return String(v);
     return "";
   }
-  function readCommit(body) {
+  function readCommit(body, httpStatus = 0) {
     const top = asRecord(body);
     const data = asRecord(top["data"]);
     const rawList = asRecord(data["score_list"]);
@@ -2065,6 +2068,7 @@ ${options.desc ?? ""}
       passScore: pickString(data, "pass_score"),
       scoreList,
       message: pickString(top, "msg"),
+      httpStatus,
       raw: body
     };
   }
@@ -2090,8 +2094,8 @@ ${options.desc ?? ""}
     unitWaiters.delete(catalogId);
     for (const fn of pending) fn(body);
   }
-  function primeCommit(body) {
-    const result = readCommit(body);
+  function primeCommit(body, httpStatus = 0) {
+    const result = readCommit(body, httpStatus);
     lastCommit = result;
     const pending = commitWaiters;
     commitWaiters = [];
@@ -2114,7 +2118,7 @@ ${options.desc ?? ""}
       setTimeout(() => finish2(null), timeoutMs);
     });
   }
-  function dispatch(rawUrl, text2) {
+  function dispatch(rawUrl, text2, httpStatus = 0) {
     const isCommit = matchCommitApi(rawUrl);
     const api = isCommit ? null : matchLearnApi(rawUrl);
     if (!isCommit && api === null) return;
@@ -2126,8 +2130,8 @@ ${options.desc ?? ""}
       return;
     }
     if (isCommit) {
-      const result = primeCommit(body);
-      log5.debug("截获交卷响应", `${result.verdict} / 得分 ${result.score}`);
+      const result = primeCommit(body, httpStatus);
+      log5.debug("截获交卷响应", `${result.verdict} / HTTP ${httpStatus} / 得分 ${result.score}`);
     } else if (api !== null && api.kind === "catalog") {
       log5.debug("截获 getCatalogList", api.cid);
       primeCatalog(api.cid, body);
@@ -2160,7 +2164,10 @@ ${options.desc ?? ""}
         self["addEventListener"].call(self, "load", () => {
           try {
             const text2 = self["responseText"];
-            if (typeof text2 === "string") dispatch(url, text2);
+            if (typeof text2 === "string") {
+              const st = Number(self["status"]);
+              dispatch(url, text2, Number.isFinite(st) ? st : 0);
+            }
           } catch {
           }
         });
@@ -2188,7 +2195,8 @@ ${options.desc ?? ""}
       if (url === "" || !shouldSniff(url)) return p;
       p.then((res) => {
         try {
-          res.clone().text().then((text2) => dispatch(url, text2)).catch(() => void 0);
+          const st = Number(res.status);
+          res.clone().text().then((text2) => dispatch(url, text2, Number.isFinite(st) ? st : 0)).catch(() => void 0);
         } catch {
         }
       }).catch(() => void 0);
@@ -2203,6 +2211,27 @@ ${options.desc ?? ""}
     const a = installXhr(realm);
     const b = installFetch(realm);
     return a || b;
+  }
+  function installUoocInterceptInFrames(doc = document) {
+    let n = 0;
+    let frames;
+    try {
+      frames = Array.from(doc.querySelectorAll("iframe"));
+    } catch {
+      return 0;
+    }
+    for (const f of frames) {
+      try {
+        const w = f.contentWindow;
+        if (w === null) continue;
+        const a = installXhr(w);
+        const b = installFetch(w);
+        if (a || b) n += 1;
+      } catch {
+      }
+    }
+    if (n > 0) log5.debug(`已给 ${n} 个 iframe 补装嗅探`);
+    return n;
   }
 
   // src/sites/uooc/ai/fill.ts
@@ -2605,7 +2634,8 @@ ${options.desc ?? ""}
       url: `${location.origin}/exam/getTaskPaper?${qs({ tid })}`,
       responseType: "json",
       priority: PRIORITY.HIGH,
-      timeoutMs: 2e4
+      // 用户 m01884 报备 2 拍板：拉试卷也跟 AI 接口一样给足 60 秒（原来是 20 秒）
+      timeoutMs: 6e4
     });
     const body = res.json;
     const data = body?.["data"] ?? null;
@@ -2773,6 +2803,13 @@ ${options.desc ?? ""}
   }
 
   // src/sites/uooc/ai/runner.ts
+  var ASK_ATTEMPTS = 3;
+  var ASK_RETRY_DELAY_MS = 2e3;
+  function sleep(ms) {
+    return new Promise((resolve2) => {
+      setTimeout(resolve2, ms);
+    });
+  }
   function shuffledTemplates() {
     const out = [...TEMPLATES];
     for (let i = out.length - 1; i > 0; i -= 1) {
@@ -2787,15 +2824,15 @@ ${options.desc ?? ""}
   }
   async function answerOne(question, cfg, opts = {}) {
     const exclude = opts.exclude ?? "";
-    const retryMode = exclude !== "";
+    const prior = opts.prior ?? [];
+    const retryMode = exclude !== "" || prior.length > 0;
     const pool = shuffledTemplates();
     const samples = [];
-    const decided = [];
+    const decided = retryMode ? prior.filter((v) => v !== "" && v !== exclude) : [];
     let requests = 0;
     let lastError = "";
     let note;
-    const hardMax = retryMode ? Math.max(1, Math.min(2, opts.maxRequests ?? 1)) : Math.min(MAX_SAMPLES, pool.length);
-    const extraOnUnchanged = retryMode ? opts.extraOnUnchanged ?? true : false;
+    const hardMax = retryMode ? Math.max(1, Math.min(2, opts.maxRequests ?? 2)) : Math.min(MAX_SAMPLES, pool.length);
     const deliver = (answer) => ({
       qid: question.id,
       answer,
@@ -2807,42 +2844,62 @@ ${options.desc ?? ""}
     for (let round2 = 0; round2 < hardMax; round2 += 1) {
       const template = pool.pop();
       if (template === void 0) break;
+      const ask = await askOnce(question, cfg, template, exclude, opts);
+      requests += ask.requests;
+      if (ask.error !== "") lastError = ask.error;
+      if (!ask.ok) {
+        samples.push(null);
+        continue;
+      }
+      samples.push(ask.parsed);
+      decided.push(ask.parsed);
+      const verdict = majority(decided);
+      if (verdict.decided) {
+        note = retryMode ? `重答：累计 ${decided.length} 票里「${verdict.answer}」占多数（共发 ${requests} 次请求）` : note;
+        return deliver(verdict.answer);
+      }
+      if (retryMode && prior.length === 0 && (opts.extraOnUnchanged ?? true) && round2 === 0 && ask.parsed === exclude) {
+        continue;
+      }
+    }
+    if (retryMode) {
+      const tailSample = decided[decided.length - 1];
+      if (tailSample !== void 0) {
+        note = `重答：没凑出多数，取累计 ${decided.length} 票里的最后一票「${tailSample}」`;
+        return deliver(tailSample);
+      }
+      const last = samples.filter((s) => s !== null).pop();
+      if (last !== void 0) return deliver(last);
+    }
+    return deliver("");
+  }
+  async function askOnce(question, cfg, template, exclude, opts) {
+    let requests = 0;
+    let error = "";
+    for (let attempt2 = 1; attempt2 <= ASK_ATTEMPTS; attempt2 += 1) {
       requests += 1;
       let text2 = "";
       try {
         text2 = await chat(cfg, buildPrompt([question], template, exclude === "" ? void 0 : exclude));
       } catch (err) {
-        lastError = err instanceof Error ? err.message : String(err);
-        opts.onWarn?.(`第 ${requests} 次请求失败（模板 ${template.label}）：${lastError}`);
-        samples.push(null);
+        error = err instanceof Error ? err.message : String(err);
+        opts.onWarn?.(`第 ${attempt2}/${ASK_ATTEMPTS} 次请求失败（模板 ${template.label}）：${error}`);
+        if (attempt2 < ASK_ATTEMPTS) await sleep(ASK_RETRY_DELAY_MS);
         continue;
       }
       const parsed = parseAnswers(text2, [question.kind])[0] ?? null;
-      samples.push(parsed);
       opts.onDebug?.(
         `模板「${template.label}」→ ${parsed === null ? "解析不出答案" : parsed}（原始回答：${text2.trim().slice(0, 60)}）`
       );
-      if (parsed === null) continue;
-      if (retryMode) {
-        if (parsed !== exclude) {
-          note = "重答：已给出与上一轮不同的答案";
-          return deliver(parsed);
-        }
-        note = "重答：模型仍给出上一轮的答案";
-        if (extraOnUnchanged && requests < 2) {
-          continue;
-        }
-        return deliver(parsed);
+      if (parsed === null) {
+        error = "解析不出答案";
+        opts.onWarn?.(`第 ${attempt2}/${ASK_ATTEMPTS} 次回答解析不出答案（模板 ${template.label}）`);
+        if (attempt2 < ASK_ATTEMPTS) await sleep(ASK_RETRY_DELAY_MS);
+        continue;
       }
-      decided.push(parsed);
-      const verdict = majority(decided);
-      if (verdict.decided) return deliver(verdict.answer);
+      return { ok: true, parsed, requests, error: "" };
     }
-    if (retryMode) {
-      const last = samples.filter((s) => s !== null).pop();
-      if (last !== void 0) return deliver(last);
-    }
-    return deliver("");
+    return { ok: false, parsed: "", requests, error };
   }
   async function runPool(items2, limit, worker) {
     const out = new Array(items2.length);
@@ -3185,6 +3242,7 @@ ${options.desc ?? ""}
     return `${head}：${[...reasons].join("；").slice(0, 200)}`;
   }
   async function submitAndRead(host2) {
+    installUoocInterceptInFrames();
     const btn = findSubmitButton();
     if (btn === null) {
       const msg = "页面上找不到【提交】按钮，请自己点一下（答案已经填好了）";
@@ -3202,7 +3260,7 @@ ${options.desc ?? ""}
     else log8.info(`交卷判读：${commit.verdict}，得分 ${commit.score}/${commit.passScore}，msg=${commit.message}`);
     return { submitted: true, commit };
   }
-  async function retryLowScore(commit, questions, previous, cfg) {
+  async function retryLowScore(commit, questions, previous, priorVotes, cfg) {
     const lows = [];
     for (const q of questions) {
       const got = commit.scoreList[q.id];
@@ -3220,12 +3278,14 @@ ${options.desc ?? ""}
     let filled = 0;
     for (const q of lows) {
       const exclude = previous.get(q.id) ?? "";
+      const prior = priorVotes.get(q.id) ?? [];
       quizPatch(q.id, { status: "pending", note: "重答中…" });
       const o = await answerOne(q, cfg, {
         onDebug: (m) => log8.debug(m),
         onWarn: (m) => log8.warn(m),
         ...exclude === "" ? {} : { exclude },
-        maxRequests: 1
+        prior,
+        maxRequests: 2
       });
       quizPatch(q.id, {
         status: o.answer === "" ? "failed" : "answered",
@@ -3240,6 +3300,7 @@ ${options.desc ?? ""}
       if (r.filled.length > 0) {
         filled += 1;
         previous.set(q.id, o.answer);
+        priorVotes.set(q.id, o.samples.filter((s) => s !== null));
       }
     }
     return { retried: lows.length, filled };
@@ -3254,6 +3315,7 @@ ${options.desc ?? ""}
       return null;
     }
     log8.info(`开始 AI 作答：tid=${tid}，接口=${chatUrl(cfg.baseUrl)}，模型=${cfg.model}`);
+    installUoocInterceptInFrames();
     quizClear();
     let paper;
     try {
@@ -3278,6 +3340,7 @@ ${options.desc ?? ""}
       `拿到 ${all.length} 道题：页面上已有答案 ${already.length} 道（跳过），可自动作答 ${todo.length} 道，跳过 ${skippedKind} 道填空/主观题`
     );
     const answers = /* @__PURE__ */ new Map();
+    const priorVotes = /* @__PURE__ */ new Map();
     const failures = [];
     let filled = 0;
     let buttons = injectClearButtons({
@@ -3318,6 +3381,10 @@ ${options.desc ?? ""}
           if (ok) {
             filled += 1;
             answers.set(question.id, outcome.answer);
+            priorVotes.set(
+              question.id,
+              outcome.samples.filter((s) => s !== null)
+            );
           }
           quizPatch(question.id, {
             status: ok ? "answered" : "failed",
@@ -3385,7 +3452,7 @@ ${options.desc ?? ""}
     let commit = first.commit;
     let retried = 0;
     if (commit !== null && commit.verdict === "fail" && first.submitted) {
-      const r = await retryLowScore(commit, all, answers, cfg);
+      const r = await retryLowScore(commit, all, answers, priorVotes, cfg);
       retried = r.retried;
       filled += r.filled;
       if (r.retried > 0) {
@@ -4031,7 +4098,7 @@ ${detail}
 多半是断网或登录态失效。处理完之后点【开始接管】重来。`
     );
   }
-  function sleep(ms, t) {
+  function sleep2(ms, t) {
     return new Promise((resolve2) => {
       if (t.cancelled || ms <= 0) {
         resolve2();
@@ -4057,7 +4124,7 @@ ${detail}
       if (t.cancelled) return false;
       if (pred()) return true;
       if (Date.now() >= deadline) return false;
-      await sleep(POLL_MS, t);
+      await sleep2(POLL_MS, t);
     }
   }
   function viewerSignature() {
@@ -4083,7 +4150,7 @@ ${detail}
     } else {
       log12.debug(`已经在这一项上了（${hash}），不再改 hash`);
     }
-    await sleep(waitBeforeMs(), t);
+    await sleep2(waitBeforeMs(), t);
     if (t.cancelled) return false;
     const ok = await waitFor(() => {
       if (!viewerReady(kind)) return false;
@@ -4250,40 +4317,44 @@ ${detail}
       setStatus2(
         `接管中：${kind === "video" ? "正在播放" : "正在作答"} ${label}（${sum.done}/${sum.total} 已完成）`
       );
-      const handled = kind === "video" ? await handleVideo(ctx, task, t) : await handleQuiz(ctx, task, t);
+      if (kind === "quiz") {
+        const q = await handleQuiz(ctx, task, t);
+        if (t.cancelled) return;
+        if (!q.ok) return;
+        if (q.verdict === "pass") continue;
+        await fatal(
+          host2,
+          `已停止 —— 测验「${label}」答了 ${q.rounds} 轮仍未通过`,
+          `这个测验连着作答并提交了 ${q.rounds} 轮，站点每次都判没到及格线。
+
+位置：${label}
+
+去页面看一眼得分与及格线，再决定要不要点【开始接管】接着走。`
+        );
+        return;
+      }
+      const handled = await handleVideo(ctx, task, t);
       if (t.cancelled) return;
       if (!handled) return;
       if (!await reload(ctx, t)) return;
       if (t.cancelled) return;
       if (!stillUnfinished(ctx, section.nodeId)) continue;
-      if (kind === "video") {
-        setStatus2(`接管中：视频「${label}」播完了，等站点记账（最多 ${Math.round(waitTimeoutMs() / 1e3)} 秒）…`);
-        log12.info(`视频「${label}」播完了但还没记完成，等 ${waitTimeoutMs()}ms 再拉一次`);
-        await sleep(waitTimeoutMs(), t);
-        if (t.cancelled) return;
-        if (!await reload(ctx, t)) return;
-        if (t.cancelled) return;
-        if (!stillUnfinished(ctx, section.nodeId)) continue;
-        await fatal(
-          host2,
-          `已停止 —— 视频「${label}」播完两轮仍未记完成`,
-          `这一项已经完整播完，又等了两轮（${holdAfterMs()} 毫秒 + ${waitTimeoutMs()} 毫秒）重新拉取课程目录，站点那边仍然显示未完成。
+      setStatus2(`接管中：视频「${label}」播完了，等站点记账（最多 ${Math.round(waitTimeoutMs() / 1e3)} 秒）…`);
+      log12.info(`视频「${label}」播完了但还没记完成，等 ${waitTimeoutMs()}ms 再拉一次`);
+      await sleep2(waitTimeoutMs(), t);
+      if (t.cancelled) return;
+      if (!await reload(ctx, t)) return;
+      if (t.cancelled) return;
+      if (!stillUnfinished(ctx, section.nodeId)) continue;
+      await fatal(
+        host2,
+        `已停止 —— 视频「${label}」播完两轮仍未记完成`,
+        `这一项已经完整播完，又等了两轮（${holdAfterMs()} 毫秒 + ${waitTimeoutMs()} 毫秒）重新拉取课程目录，站点那边仍然显示未完成。
 
 位置：${label}
 
 可能原因：播放没真正到底（比如一直卡着 / 被暂停）、或者站点记账更慢。
 去页面看一眼这一项现在的状态，再决定要不要点【开始接管】接着走。`
-        );
-        return;
-      }
-      await fatal(
-        host2,
-        `已停止 —— 测验「${label}」答了 ${QUIZ_MAX_ROUNDS} 轮仍未记完成`,
-        `这个测验连着作答并提交了 ${QUIZ_MAX_ROUNDS} 轮，站点那边仍然显示未完成，多半是分数没到及格线。
-
-位置：${label}
-
-去页面看一眼得分与及格线，再决定要不要点【开始接管】接着走。`
       );
       return;
     }
@@ -4321,10 +4392,15 @@ ${detail}
     if (!ended) {
       log12.warn(`视频「${label}」没等到播完（被暂停 / 出错 / 超保底时长），转去核实完成状态`);
     }
-    await sleep(holdAfterMs(), t);
+    await sleep2(holdAfterMs(), t);
     return !t.cancelled;
   }
   async function handleQuiz(ctx, task, t) {
+    const give = (ok, verdict, rounds2) => ({
+      ok,
+      verdict,
+      rounds: rounds2
+    });
     const label = taskLabel(task);
     if (!isEnabled(SITE_ID, TOGGLE.AI_ANSWER)) {
       await fatal(
@@ -4337,10 +4413,10 @@ ${detail}
 没有替你跳过：跳过等于在不知情的情况下漏掉一整个测验。
 去【AI 作答】页把开关打开（顺便确认接口地址与模型名填好了），再点【开始接管】。`
       );
-      return false;
+      return give(false, null, 0);
     }
     if (!await gotoPoint(task.hash, "quiz", label, t)) {
-      if (t.cancelled) return false;
+      if (t.cancelled) return give(false, null, 0);
       await fatal(
         ctx.host,
         `已停止 —— 测验「${label}」等满等待超时还没出题`,
@@ -4351,48 +4427,85 @@ ${detail}
 
 去页面看一眼这项到底是什么情况，再决定要不要点【开始接管】接着走。`
       );
-      return false;
+      return give(false, null, 0);
     }
     const fromPage = quizTidOnPage();
     const tid = fromPage ?? (task.source.taskId === "" ? null : task.source.taskId);
     if (tid === null) {
       stop(`已停止 —— 测验「${label}」读不出 tid`);
       log12.warn(`测验「${label}」页面与接口都给不出 tid，无法作答`);
-      return false;
+      return give(false, null, 0);
     }
     if (fromPage !== null && task.source.taskId !== "" && fromPage !== task.source.taskId) {
       log12.warn(`测验「${label}」页面 tid=${fromPage} 与接口 tid=${task.source.taskId} 不一致，按页面的走`);
     }
+    let last = null;
+    let rounds = 0;
     for (let round2 = 1; round2 <= QUIZ_MAX_ROUNDS; round2 += 1) {
-      if (t.cancelled) return false;
+      if (t.cancelled) return give(false, null, rounds);
+      rounds = round2;
       setStatus2(`接管中：正在作答 ${label}（第 ${round2}/${QUIZ_MAX_ROUNDS} 轮）`);
       const result = await runQuizAnswer(tid, ctx.host);
-      if (t.cancelled) return false;
+      if (t.cancelled) return give(false, null, rounds);
       if (result === null) {
         stop(`已停止 —— 测验「${label}」没能开始作答（看日志与提示）`);
         log12.warn(`runQuizAnswer 返回 null，测验「${label}」没跑起来`);
-        return false;
+        return give(false, null, rounds);
       }
-      const verdict = result.commit?.verdict ?? null;
-      if (verdict === "pass") {
-        log12.info(`测验「${label}」第 ${round2} 轮通过（得分 ${result.commit?.score ?? "?"}）`);
-        break;
+      const commit = result.commit;
+      last = commit;
+      if (commit === null) {
+        await fatal(
+          ctx.host,
+          `已停止 —— 测验「${label}」没截获到交卷响应`,
+          `点完提交之后没有读到站点的回话，所以无从判断过没过。
+
+位置：${label}
+
+可能原因：验证码还没点完、站点换了交卷接口、或者交卷请求不是从试卷 iframe 里发出来的。
+去页面看一眼这次到底交上没有（有没有出现分数），再决定要不要点【开始接管】接着走。`
+        );
+        return give(false, null, rounds);
       }
-      if (verdict === null || verdict === "unknown") {
-        log12.info(`测验「${label}」第 ${round2} 轮没拿到可判读的交卷结果，交给重拉核实`);
-        break;
+      if (!isCommitHttpOk(commit)) {
+        await fatal(
+          ctx.host,
+          `已停止 —— 测验「${label}」交卷请求返回 HTTP ${commit.httpStatus}`,
+          `这一发 POST /exam/commit 的状态码是 ${commit.httpStatus}，不是 200，响应体里的业务码不能当结论用。
+
+位置：${label}
+站点回话：${commit.message || "（空）"}
+
+去页面看一眼状态，过一会儿再点【开始接管】重试。`
+        );
+        return give(false, null, rounds);
+      }
+      if (commit.verdict === "pass") {
+        log12.info(`测验「${label}」第 ${round2} 轮通过（得分 ${commit.score}）`);
+        return give(true, "pass", rounds);
+      }
+      if (commit.verdict === "unknown") {
+        await fatal(
+          ctx.host,
+          `已停止 —— 测验「${label}」的交卷回话读不懂`,
+          `站点回了一个我们不认识的业务码，不敢替你下结论（既不重做也不跳过）。
+
+位置：${label}
+站点回话：${commit.message || "（空）"}
+原始响应：${JSON.stringify(commit.raw).slice(0, 300)}
+
+把上面这段贴回来，我们对一下新的判据。`
+        );
+        return give(false, null, rounds);
       }
       log12.warn(
-        `测验「${label}」第 ${round2} 轮未通过：${result.commit?.message ?? ""}（得分 ${result.commit?.score ?? "?"} / 门槛 ${result.commit?.passScore ?? "?"}）`
+        `测验「${label}」第 ${round2} 轮未通过：${commit.message}（得分 ${commit.score} / 门槛 ${commit.passScore}）`
       );
-      if (round2 === QUIZ_MAX_ROUNDS) {
-        setStatus2(`接管中：测验「${label}」${QUIZ_MAX_ROUNDS} 轮都没过，交给重拉核实`);
-        break;
-      }
-      setStatus2(`接管中：测验「${label}」第 ${round2} 轮没过（得分 ${result.commit?.score ?? "?"}），重做…`);
-      await sleep(holdAfterMs(), t);
+      if (round2 === QUIZ_MAX_ROUNDS) return give(true, "fail", rounds);
+      setStatus2(`接管中：测验「${label}」第 ${round2} 轮没过（得分 ${commit.score}），重做…`);
+      await sleep2(holdAfterMs(), t);
     }
-    return !t.cancelled;
+    return give(true, last === null ? null : last.verdict, rounds);
   }
 
   // src/sites/uooc/tabs/autoplay.ts
@@ -7518,7 +7631,7 @@ ${text2}
     panel2?.toast("已停止抢课", "info");
     return true;
   }
-  function sleep2(ms) {
+  function sleep3(ms) {
     return new Promise((resolve2) => {
       setTimeout(resolve2, ms);
     });
@@ -7535,7 +7648,7 @@ ${text2}
         await round();
         if (!running3) return;
         const iv = clampLimit("retryIntervalMs", getValue(SITE_ID2, VALUE2.RETRY_INTERVAL_MS));
-        await sleep2(iv);
+        await sleep3(iv);
       }
     } catch (err) {
       running3 = false;
@@ -9692,8 +9805,8 @@ ${text2}
   // src/main.ts
   var log31 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-08T17:00:57.260Z" : null;
-  var BUILD_NO = true ? 93 : null;
+  var BUILD_TIME = true ? "2026-10-09T05:26:32.342Z" : null;
+  var BUILD_NO = true ? 94 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();

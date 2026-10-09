@@ -37,5 +37,6 @@ import './suites/bkxk-monitor.test.ts';
 import './suites/uooc-ai.test.ts';
 import './suites/uooc-catalog.test.ts';
 import './suites/uooc-fetch-catalog.test.ts';
+import './suites/uooc-intercept.test.ts';
 
 await run();

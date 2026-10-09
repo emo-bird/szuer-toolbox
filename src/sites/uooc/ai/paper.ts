@@ -142,7 +142,8 @@ export async function fetchPaper(tid: string): Promise<ExamPaper> {
     url: `${location.origin}/exam/getTaskPaper?${qs({ tid })}`,
     responseType: 'json',
     priority: PRIORITY.HIGH,
-    timeoutMs: 20000,
+    // 用户 m01884 报备 2 拍板：拉试卷也跟 AI 接口一样给足 60 秒（原来是 20 秒）
+    timeoutMs: 60000,
   });
   const body = res.json as Record<string, unknown> | null;
   const data = (body?.['data'] ?? null) as Record<string, unknown> | null;

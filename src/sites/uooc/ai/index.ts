@@ -32,7 +32,7 @@
 
 import { scoped } from '../../../common/core/log.ts';
 import type { PanelApi } from '../../types.ts';
-import { clearCommit, waitCommit, type CommitResult } from '../intercept.ts';
+import { clearCommit, installUoocInterceptInFrames, waitCommit, type CommitResult } from '../intercept.ts';
 import {
   clearQuestion,
   fillAnswers,
@@ -133,6 +133,9 @@ function summarizeFailures(outcomes: readonly AnswerOutcome[]): string {
 
 /** 点站点【提交】并等它回话 */
 async function submitAndRead(host: PanelApi): Promise<{ submitted: boolean; commit: CommitResult | null }> {
+  // ⚠️ 交卷是在**试卷 iframe** 里发出去的，而 iframe 有自己的 realm ——
+  // 顶层那套装不上它。这里再补一次（幂等），确保点提交之前钩子一定在。
+  installUoocInterceptInFrames();
   // ⚠️ 到这里遮罩已经被 showConfirm 移除了，现在点提交，验证码才不会被我们自己的遮罩盖住。
   const btn = findSubmitButton();
   if (btn === null) {
@@ -165,6 +168,7 @@ async function retryLowScore(
   commit: CommitResult,
   questions: readonly ExamQuestion[],
   previous: Map<string, string>,
+  priorVotes: Map<string, readonly string[]>,
   cfg: LlmConfig,
 ): Promise<{ retried: number; filled: number }> {
   const lows: ExamQuestion[] = [];
@@ -186,12 +190,15 @@ async function retryLowScore(
   let filled = 0;
   for (const q of lows) {
     const exclude = previous.get(q.id) ?? '';
+    // 用户 m01884 Q6：把上一轮这道题的**投票记录**一起带进去累计（不是只带最终答案）
+    const prior = priorVotes.get(q.id) ?? [];
     quizPatch(q.id, { status: 'pending', note: '重答中…' });
     const o = await answerOne(q, cfg, {
       onDebug: (m) => log.debug(m),
       onWarn: (m) => log.warn(m),
       ...(exclude === '' ? {} : { exclude }),
-      maxRequests: 1,
+      prior,
+      maxRequests: 2,
     });
     quizPatch(q.id, {
       status: o.answer === '' ? 'failed' : 'answered',
@@ -206,6 +213,8 @@ async function retryLowScore(
     if (r.filled.length > 0) {
       filled += 1;
       previous.set(q.id, o.answer);
+      // 这轮的票也要并进累计票，否则同一轮里再重答一次时又只剩一个孤零零的最终答案
+      priorVotes.set(q.id, o.samples.filter((s): s is string => s !== null));
     }
   }
   return { retried: lows.length, filled };
@@ -227,6 +236,8 @@ export async function runQuizAnswer(tid: string, host: PanelApi): Promise<AiQuiz
     return null;
   }
   log.info(`开始 AI 作答：tid=${tid}，接口=${chatUrl(cfg.baseUrl)}，模型=${cfg.model}`);
+  // 试卷 iframe 的 realm 要单独补装嗅探，否则交卷响应永远截获不到（见 intercept.ts）
+  installUoocInterceptInFrames();
   quizClear();
 
   let paper;
@@ -258,6 +269,8 @@ export async function runQuizAnswer(tid: string, host: PanelApi): Promise<AiQuiz
 
   /** 我们实际填进去/提交的答案（重答时要拿它做排除） */
   const answers = new Map<string, string>();
+  /** 每题上一轮的投票记录（`samples` 里非 null 的），重答时累进投票用（用户 m01884 Q6） */
+  const priorVotes = new Map<string, readonly string[]>();
   /** 没答出来的那几道（确认框里点名） */
   const failures: AnswerOutcome[] = [];
   let filled = 0;
@@ -304,6 +317,10 @@ export async function runQuizAnswer(tid: string, host: PanelApi): Promise<AiQuiz
         if (ok) {
           filled += 1;
           answers.set(question.id, outcome.answer);
+          priorVotes.set(
+            question.id,
+            outcome.samples.filter((s): s is string => s !== null),
+          );
         }
         quizPatch(question.id, {
           status: ok ? 'answered' : 'failed',
@@ -379,7 +396,7 @@ export async function runQuizAnswer(tid: string, host: PanelApi): Promise<AiQuiz
 
   // 没通过 → 挑低分题重答一轮（只此一轮，避免无底洞）
   if (commit !== null && commit.verdict === 'fail' && first.submitted) {
-    const r = await retryLowScore(commit, all, answers, cfg);
+    const r = await retryLowScore(commit, all, answers, priorVotes, cfg);
     retried = r.retried;
     filled += r.filled;
     if (r.retried > 0) {

@@ -45,6 +45,7 @@ import {
   fetchUnitSources,
   type CatalogFailure,
 } from './fetch-catalog.ts';
+import { isCommitHttpOk, type CommitResult, type CommitVerdict } from './intercept.ts';
 import { SITE_ID, TOGGLE, holdAfterMs, waitBeforeMs, waitTimeoutMs } from './settings.ts';
 
 const log = scoped('uooc/takeover');
@@ -523,7 +524,24 @@ async function loop(host: PanelApi, t: { cancelled: boolean }): Promise<void> {
       `接管中：${kind === 'video' ? '正在播放' : '正在作答'} ${label}（${sum.done}/${sum.total} 已完成）`,
     );
 
-    const handled = kind === 'video' ? await handleVideo(ctx, task, t) : await handleQuiz(ctx, task, t);
+    if (kind === 'quiz') {
+      // §C.2 / D1：交卷响应本身就是结论 —— **不再拉树核实**
+      const q = await handleQuiz(ctx, task, t);
+      if (t.cancelled) return;
+      if (!q.ok) return; // 内部已经 fatal() 或 stop() 过了
+      if (q.verdict === 'pass') continue;
+
+      await fatal(
+        host,
+        `已停止 —— 测验「${label}」答了 ${q.rounds} 轮仍未通过`,
+        `这个测验连着作答并提交了 ${q.rounds} 轮，站点每次都判没到及格线。\n\n` +
+          `位置：${label}\n\n` +
+          '去页面看一眼得分与及格线，再决定要不要点【开始接管】接着走。',
+      );
+      return;
+    }
+
+    const handled = await handleVideo(ctx, task, t);
     if (t.cancelled) return;
     if (!handled) return; // 内部已经 fatal() 或 stop() 过了
 
@@ -532,36 +550,23 @@ async function loop(host: PanelApi, t: { cancelled: boolean }): Promise<void> {
     if (t.cancelled) return;
     if (!stillUnfinished(ctx, section.nodeId)) continue;
 
-    if (kind === 'video') {
-      // §C.1 第 4 步：再等一个「全局等待超时」，再重拉一次；仍不行就弹窗停下
-      setStatus(`接管中：视频「${label}」播完了，等站点记账（最多 ${Math.round(waitTimeoutMs() / 1000)} 秒）…`);
-      log.info(`视频「${label}」播完了但还没记完成，等 ${waitTimeoutMs()}ms 再拉一次`);
-      await sleep(waitTimeoutMs(), t);
-      if (t.cancelled) return;
-      if (!(await reload(ctx, t))) return;
-      if (t.cancelled) return;
-      if (!stillUnfinished(ctx, section.nodeId)) continue;
+    // §C.1 第 4 步：再等一个「全局等待超时」，再重拉一次；仍不行就弹窗停下
+    setStatus(`接管中：视频「${label}」播完了，等站点记账（最多 ${Math.round(waitTimeoutMs() / 1000)} 秒）…`);
+    log.info(`视频「${label}」播完了但还没记完成，等 ${waitTimeoutMs()}ms 再拉一次`);
+    await sleep(waitTimeoutMs(), t);
+    if (t.cancelled) return;
+    if (!(await reload(ctx, t))) return;
+    if (t.cancelled) return;
+    if (!stillUnfinished(ctx, section.nodeId)) continue;
 
-      await fatal(
-        host,
-        `已停止 —— 视频「${label}」播完两轮仍未记完成`,
-        `这一项已经完整播完，又等了两轮（${holdAfterMs()} 毫秒 + ${waitTimeoutMs()} 毫秒）` +
-          '重新拉取课程目录，站点那边仍然显示未完成。\n\n' +
-          `位置：${label}\n\n` +
-          '可能原因：播放没真正到底（比如一直卡着 / 被暂停）、或者站点记账更慢。\n' +
-          '去页面看一眼这一项现在的状态，再决定要不要点【开始接管】接着走。',
-      );
-      return;
-    }
-
-    // 测验：重做已经在 handleQuiz 里做到上限了，走到这里说明站点就是不给过
     await fatal(
       host,
-      `已停止 —— 测验「${label}」答了 ${QUIZ_MAX_ROUNDS} 轮仍未记完成`,
-      `这个测验连着作答并提交了 ${QUIZ_MAX_ROUNDS} 轮，站点那边仍然显示未完成，` +
-        '多半是分数没到及格线。\n\n' +
+      `已停止 —— 视频「${label}」播完两轮仍未记完成`,
+      `这一项已经完整播完，又等了两轮（${holdAfterMs()} 毫秒 + ${waitTimeoutMs()} 毫秒）` +
+        '重新拉取课程目录，站点那边仍然显示未完成。\n\n' +
         `位置：${label}\n\n` +
-        '去页面看一眼得分与及格线，再决定要不要点【开始接管】接着走。',
+        '可能原因：播放没真正到底（比如一直卡着 / 被暂停）、或者站点记账更慢。\n' +
+        '去页面看一眼这一项现在的状态，再决定要不要点【开始接管】接着走。',
     );
     return;
   }
@@ -618,9 +623,31 @@ async function handleVideo(ctx: Ctx, task: Task, t: { cancelled: boolean }): Pro
  * 交卷响应 `code == 110`（`verdict === 'fail'`，站点会带「您的得分是 N,
  * 测验分数至少要达到 M 分」）就重跑一轮，最多 `QUIZ_MAX_ROUNDS` 轮。
  *
- * @returns `false` = 已经收尾（停止 / 弹窗），调用方直接返回
+ * @returns `ok === false` = 已经收尾（停止 / 弹窗），调用方直接返回；
+ *          `ok === true` 时看 `verdict`：`'pass'` 进下一个任务点、`'fail'` 是
+ *          答满 `QUIZ_MAX_ROUNDS` 轮仍未通过（由调用方收尾）
  */
-async function handleQuiz(ctx: Ctx, task: Task, t: { cancelled: boolean }): Promise<boolean> {
+/**
+ * 测验这一支跑完之后的交代（§C.2 / §D，2026-10-09 用户拍板 D1）。
+ *
+ * **不再拿 `getCatalogList` 去核实**：交卷响应本身就是结论 ——
+ * `code == 1` 就是完成了，`code == 110` 就是没完成，站点自己的 `finished`
+ * 也是靠这次提交写的，再拉一次树纯属多此一举。
+ */
+interface QuizOutcome {
+  /** `false` = 已经收尾（弹窗 + 停止），调用方直接返回 */
+  readonly ok: boolean;
+  readonly verdict: CommitVerdict | null;
+  /** **实际**跑了几轮 —— 日志与弹窗一律用它，不许再写常量 */
+  readonly rounds: number;
+}
+
+async function handleQuiz(ctx: Ctx, task: Task, t: { cancelled: boolean }): Promise<QuizOutcome> {
+  const give = (ok: boolean, verdict: CommitVerdict | null, rounds: number): QuizOutcome => ({
+    ok,
+    verdict,
+    rounds,
+  });
   const label = taskLabel(task);
   // §C.2 / §F.1-6：AI 作答关着 → 与「等满超时」完全同一套处理，只有文案不同
   if (!isEnabled(SITE_ID, TOGGLE.AI_ANSWER)) {
@@ -632,11 +659,11 @@ async function handleQuiz(ctx: Ctx, task: Task, t: { cancelled: boolean }): Prom
         '没有替你跳过：跳过等于在不知情的情况下漏掉一整个测验。\n' +
         '去【AI 作答】页把开关打开（顺便确认接口地址与模型名填好了），再点【开始接管】。',
     );
-    return false;
+    return give(false, null, 0);
   }
 
   if (!(await gotoPoint(task.hash, 'quiz', label, t))) {
-    if (t.cancelled) return false;
+    if (t.cancelled) return give(false, null, 0);
     await fatal(
       ctx.host,
       `已停止 —— 测验「${label}」等满等待超时还没出题`,
@@ -644,7 +671,7 @@ async function handleQuiz(ctx: Ctx, task: Task, t: { cancelled: boolean }): Prom
         `位置：${label}\n跳转地址：${task.hash}\n\n` +
         '去页面看一眼这项到底是什么情况，再决定要不要点【开始接管】接着走。',
     );
-    return false;
+    return give(false, null, 0);
   }
 
   // tid 优先读页面（页面里真正打开的那份才是要动的那份），
@@ -655,49 +682,86 @@ async function handleQuiz(ctx: Ctx, task: Task, t: { cancelled: boolean }): Prom
     // §D：这一条**只停 + 日志，不弹窗**
     stop(`已停止 —— 测验「${label}」读不出 tid`);
     log.warn(`测验「${label}」页面与接口都给不出 tid，无法作答`);
-    return false;
+    return give(false, null, 0);
   }
   if (fromPage !== null && task.source.taskId !== '' && fromPage !== task.source.taskId) {
     log.warn(`测验「${label}」页面 tid=${fromPage} 与接口 tid=${task.source.taskId} 不一致，按页面的走`);
   }
 
+  let last: CommitResult | null = null;
+  let rounds = 0;
+
   for (let round = 1; round <= QUIZ_MAX_ROUNDS; round += 1) {
-    if (t.cancelled) return false;
+    if (t.cancelled) return give(false, null, rounds);
+    rounds = round;
     setStatus(`接管中：正在作答 ${label}（第 ${round}/${QUIZ_MAX_ROUNDS} 轮）`);
     const result: AiQuizResult | null = await runQuizAnswer(tid, ctx.host);
-    if (t.cancelled) return false;
+    if (t.cancelled) return give(false, null, rounds);
 
     if (result === null) {
       // 没跑起来（模型没配 / 拉题失败）—— `runQuizAnswer` 自己已经 toast 过原因了
       stop(`已停止 —— 测验「${label}」没能开始作答（看日志与提示）`);
       log.warn(`runQuizAnswer 返回 null，测验「${label}」没跑起来`);
-      return false;
+      return give(false, null, rounds);
     }
 
-    const verdict = result.commit?.verdict ?? null;
-    if (verdict === 'pass') {
-      log.info(`测验「${label}」第 ${round} 轮通过（得分 ${result.commit?.score ?? '?'}）`);
-      break;
+    const commit = result.commit;
+    last = commit;
+
+    // ① 压根没截获到交卷响应（§D：与「等满超时」同一套处理）
+    if (commit === null) {
+      await fatal(
+        ctx.host,
+        `已停止 —— 测验「${label}」没截获到交卷响应`,
+        '点完提交之后没有读到站点的回话，所以无从判断过没过。\n\n' +
+          `位置：${label}\n\n` +
+          '可能原因：验证码还没点完、站点换了交卷接口、或者交卷请求不是从试卷 iframe 里发出来的。\n' +
+          '去页面看一眼这次到底交上没有（有没有出现分数），再决定要不要点【开始接管】接着走。',
+      );
+      return give(false, null, rounds);
     }
-    if (verdict === null || verdict === 'unknown') {
-      // 截获不到交卷响应 / 站点给了不认识的 code —— **不擅自判定**，交给重拉核实
-      log.info(`测验「${label}」第 ${round} 轮没拿到可判读的交卷结果，交给重拉核实`);
-      break;
+
+    // ② 交卷这一发 HTTP 就没成功（用户 2026-10-09 拍板：非 200 一律弹窗）
+    if (!isCommitHttpOk(commit)) {
+      await fatal(
+        ctx.host,
+        `已停止 —— 测验「${label}」交卷请求返回 HTTP ${commit.httpStatus}`,
+        `这一发 POST /exam/commit 的状态码是 ${commit.httpStatus}，不是 200，` +
+          '响应体里的业务码不能当结论用。\n\n' +
+          `位置：${label}\n站点回话：${commit.message || '（空）'}\n\n` +
+          '去页面看一眼状态，过一会儿再点【开始接管】重试。',
+      );
+      return give(false, null, rounds);
+    }
+
+    if (commit.verdict === 'pass') {
+      log.info(`测验「${label}」第 ${round} 轮通过（得分 ${commit.score}）`);
+      return give(true, 'pass', rounds);
+    }
+
+    // ③ 站点给了不认识的 code —— **不擅自判定**，弹窗停下
+    if (commit.verdict === 'unknown') {
+      await fatal(
+        ctx.host,
+        `已停止 —— 测验「${label}」的交卷回话读不懂`,
+        '站点回了一个我们不认识的业务码，不敢替你下结论（既不重做也不跳过）。\n\n' +
+          `位置：${label}\n站点回话：${commit.message || '（空）'}\n` +
+          `原始响应：${JSON.stringify(commit.raw).slice(0, 300)}\n\n` +
+          '把上面这段贴回来，我们对一下新的判据。',
+      );
+      return give(false, null, rounds);
     }
 
     // verdict === 'fail'
     log.warn(
-      `测验「${label}」第 ${round} 轮未通过：${result.commit?.message ?? ''}` +
-        `（得分 ${result.commit?.score ?? '?'} / 门槛 ${result.commit?.passScore ?? '?'}）`,
+      `测验「${label}」第 ${round} 轮未通过：${commit.message}` +
+        `（得分 ${commit.score} / 门槛 ${commit.passScore}）`,
     );
-    if (round === QUIZ_MAX_ROUNDS) {
-      setStatus(`接管中：测验「${label}」${QUIZ_MAX_ROUNDS} 轮都没过，交给重拉核实`);
-      break;
-    }
-    setStatus(`接管中：测验「${label}」第 ${round} 轮没过（得分 ${result.commit?.score ?? '?'}），重做…`);
+    if (round === QUIZ_MAX_ROUNDS) return give(true, 'fail', rounds);
+    setStatus(`接管中：测验「${label}」第 ${round} 轮没过（得分 ${commit.score}），重做…`);
     // 重做前给站点一点时间落库，也让日志好读
     await sleep(holdAfterMs(), t);
   }
 
-  return !t.cancelled;
+  return give(true, last === null ? null : last.verdict, rounds);
 }

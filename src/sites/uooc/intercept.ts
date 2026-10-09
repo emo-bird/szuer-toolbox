@@ -84,8 +84,20 @@ export interface CommitResult {
   readonly scoreList: Readonly<Record<string, string>>;
   /** 站点给的话（`msg`），失败时用来给用户看 */
   readonly message: string;
+  /**
+   * 这一发请求的 HTTP 状态码。`0` = 没拿到（嗅探不到，或旧调用没传）。
+   *
+   * ⚠️ 判「交卷到底成没成」时**先看它**：站点业务码只在 HTTP 200 下才有意义，
+   * 500 / 502 那种响应体里同样没有 `code`，会被 `readCommit` 判成 `unknown`。
+   */
+  readonly httpStatus: number;
   /** 原始响应体，排查用 */
   readonly raw: unknown;
+}
+
+/** HTTP 200（交卷成功与否都必须是它，否则这一发根本没走通） */
+export function isCommitHttpOk(result: CommitResult): boolean {
+  return result.httpStatus === 0 || result.httpStatus === 200;
 }
 
 /** 一个 URL 是不是交卷接口 */
@@ -105,7 +117,7 @@ function pickString(o: Record<string, unknown>, key: string): string {
 }
 
 /** 把站点给的响应体翻成 `CommitResult`（纯函数，便于单测与排查） */
-export function readCommit(body: unknown): CommitResult {
+export function readCommit(body: unknown, httpStatus = 0): CommitResult {
   const top = asRecord(body);
   const data = asRecord(top['data']);
   const rawList = asRecord(data['score_list']);
@@ -118,6 +130,7 @@ export function readCommit(body: unknown): CommitResult {
     passScore: pickString(data, 'pass_score'),
     scoreList,
     message: pickString(top, 'msg'),
+    httpStatus,
     raw: body,
   };
 }
@@ -212,8 +225,8 @@ export function resetInterceptStore(): void {
 // ------------------------------------------------------------- 交卷仓库
 
 /** 把一份交卷响应喂进仓库（截获到） */
-export function primeCommit(body: unknown): CommitResult {
-  const result = readCommit(body);
+export function primeCommit(body: unknown, httpStatus = 0): CommitResult {
+  const result = readCommit(body, httpStatus);
   lastCommit = result;
   const pending = commitWaiters;
   commitWaiters = [];
@@ -255,7 +268,7 @@ export function waitCommit(timeoutMs: number): Promise<CommitResult | null> {
 
 // ------------------------------------------------------------- 装钩子
 
-function dispatch(rawUrl: string, text: string): void {
+function dispatch(rawUrl: string, text: string, httpStatus = 0): void {
   const isCommit = matchCommitApi(rawUrl);
   const api = isCommit ? null : matchLearnApi(rawUrl);
   if (!isCommit && api === null) return;
@@ -267,8 +280,8 @@ function dispatch(rawUrl: string, text: string): void {
     return;
   }
   if (isCommit) {
-    const result = primeCommit(body);
-    log.debug('截获交卷响应', `${result.verdict} / 得分 ${result.score}`);
+    const result = primeCommit(body, httpStatus);
+    log.debug('截获交卷响应', `${result.verdict} / HTTP ${httpStatus} / 得分 ${result.score}`);
   } else if (api !== null && api.kind === 'catalog') {
     log.debug('截获 getCatalogList', api.cid);
     primeCatalog(api.cid, body);
@@ -308,7 +321,10 @@ function installXhr(realm: Record<string, unknown>): boolean {
       (self['addEventListener'] as (t: string, fn: () => void) => void).call(self, 'load', () => {
         try {
           const text = self['responseText'];
-          if (typeof text === 'string') dispatch(url, text);
+          if (typeof text === 'string') {
+            const st = Number(self['status']);
+            dispatch(url, text, Number.isFinite(st) ? st : 0);
+          }
         } catch {
           /* responseType 不是 text 时读 responseText 会抛，忽略即可 */
         }
@@ -346,10 +362,11 @@ function installFetch(realm: Record<string, unknown>): boolean {
 
     p.then((res) => {
       try {
+        const st = Number(res.status);
         res
           .clone()
           .text()
-          .then((text) => dispatch(url, text))
+          .then((text) => dispatch(url, text, Number.isFinite(st) ? st : 0))
           .catch(() => undefined);
       } catch {
         /* 忽略 */
@@ -376,4 +393,48 @@ export function installUoocIntercept(realm: Record<string, unknown> = pageOrSelf
   const a = installXhr(realm);
   const b = installFetch(realm);
   return a || b;
+}
+
+/**
+ * 把嗅探补装进页面里**已经存在**的同源 iframe。
+ *
+ * ⚠️ 为什么要单独有这一发（2026-10-09 实测，手测问题 3 的根因）：
+ * 试卷是 `div.showViewer > iframe[src="/exam/{tid}"]`，而 **iframe 有自己的 realm**：
+ *
+ * ```
+ * iframe.contentWindow.XMLHttpRequest === window.XMLHttpRequest   →  false
+ * iframe.contentWindow.fetch            === window.fetch          →  false
+ * ```
+ *
+ * 顶层装的那一套对 iframe 里发出的请求**完全不可见** —— 站点自己发的那发
+ * `POST /exam/commit` 于是永远进不了仓库，`waitCommit` 必然等到超时（实测整整 5 分钟）。
+ * 交卷是用户在 iframe 里点完验证码才触发的，所以在点之前补装就来得及。
+ *
+ * 跨域 iframe 访问 `contentWindow` 会抛，逐个 try/catch 跳过。幂等：装过的不重复装。
+ *
+ * @param doc 要扫描的文档（默认顶层文档）
+ * @returns 这次真正补装成功的 iframe 个数
+ */
+export function installUoocInterceptInFrames(doc: Document = document): number {
+  let n = 0;
+  let frames: Element[];
+  try {
+    frames = Array.from(doc.querySelectorAll('iframe'));
+  } catch {
+    return 0;
+  }
+  for (const f of frames) {
+    try {
+      const w = (f as HTMLIFrameElement).contentWindow as unknown as Record<string, unknown> | null;
+      if (w === null) continue;
+      // 两个都要试着装：`installXhr` 返回 true 不该短路掉 `installFetch`
+      const a = installXhr(w);
+      const b = installFetch(w);
+      if (a || b) n += 1;
+    } catch {
+      /* 跨域 / 还没挂上 document，跳过 */
+    }
+  }
+  if (n > 0) log.debug(`已给 ${n} 个 iframe 补装嗅探`);
+  return n;
 }
