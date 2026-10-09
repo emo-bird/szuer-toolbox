@@ -141,24 +141,6 @@ export function listKeys(): string[] {
     .sort();
 }
 
-/**
- * 跨标签页值变更监听（GM 专属能力：多标签页挂机靠它同步状态）。
- * 无 GM 环境时返回一个 no-op 取消函数。
- */
-export function onRemoteChange(
-  key: string,
-  listener: (oldValue: unknown, newValue: unknown, remote: boolean) => void,
-): () => void {
-  if (typeof GM_addValueChangeListener !== 'function') return () => {};
-  const full = nsKey(key);
-  const id = GM_addValueChangeListener(full, (_name, oldV, newV, remote) => {
-    listener(oldV, newV, remote);
-  });
-  return () => {
-    GM_removeValueChangeListener(id);
-  };
-}
-
 /** 测试用：把存储重置干净（只清本命名空间） */
 export function clearAll(): void {
   for (const key of listKeys()) remove(key);

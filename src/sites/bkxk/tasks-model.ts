@@ -165,10 +165,6 @@ function normalizeItem(t: TaskItem): TaskItem {
 
 // ---------------------------------------------------------------- 变更（纯变换）
 
-export function findByTc(store: TaskStore, tcId: string): TaskItem | null {
-  return store.items.find((t) => t.teachingClassID === tcId) ?? null;
-}
-
 export function byId(store: TaskStore, id: string): TaskItem | null {
   return store.items.find((t) => t.id === id) ?? null;
 }

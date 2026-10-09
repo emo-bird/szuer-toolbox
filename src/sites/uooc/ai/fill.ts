@@ -228,16 +228,6 @@ export function findSubmitButton(top: Document = document): HTMLElement | null {
   return null;
 }
 
-/** 答题页的【保存】按钮（`button.btn.btn-success`，ng-click = vm.saveTask）。当前流程不用它。 */
-export function findSaveButton(top: Document = document): HTMLElement | null {
-  for (const doc of collectRoots(top)) {
-    const el = doc.querySelector('button.btn.btn-success');
-    const he = asElement(el);
-    if (he !== null) return he;
-  }
-  return null;
-}
-
 /** 页面上有几个选项控件（radio / checkbox）—— 卷子渲染出来没有的判据 */
 export function countOptionInputs(top: Document = document): number {
   let n = 0;
@@ -251,53 +241,6 @@ export function countOptionInputs(top: Document = document): number {
   return n;
 }
 
-/**
- * 等卷子渲染出来 —— **自动作答的第一道闸**。
- *
- * 答题页是 AngularJS 异步渲染的，旧版还在 `top > frame[0]` 的 iframe 里，
- * iframe 自己也后加载 ⇒ 脚本一进页面就回填必然整卷 `missing`。
- * 所以先等到「页面上出现选项控件」再动手。
- *
- * 用 radio/checkbox 而不是 `input[name]`：答题页上只有选项是这两种，
- * 更不容易被页面上别的带 name 的输入框骗过去。
- *
- * @returns true = 等到了；false = 超时（调用方应当放弃，不要硬填）
- */
-export function waitForOptionInputs(timeoutMs = 20000, intervalMs = 300): Promise<boolean> {
-  return new Promise((resolve) => {
-    const deadline = Date.now() + timeoutMs;
-    const tick = (): void => {
-      if (countOptionInputs() > 0) {
-        resolve(true);
-        return;
-      }
-      if (Date.now() >= deadline) {
-        resolve(false);
-        return;
-      }
-      window.setTimeout(tick, intervalMs);
-    };
-    tick();
-  });
-}
-
-/**
- * 已完成的卷子上会亮出来的**答案解析区**（`div.answerBox`）。
- *
- * 出处：`local/capture/dom-uooc-exam-旧-已完成-单选-填空.txt` 里它是
- * `style="display:block;"`，而未完成的卷子上这一片不显示。
- *
- * ⚠️ 只用在「要不要自动跳回课程页」这一个决定上（判不出来就不跳，没有损失）。
- * 若实测与这里不符，**只改这一个函数**，别去动回填逻辑。
- */
-export function isAnswerBoxVisible(top: Document = document): boolean {
-  for (const doc of collectRoots(top)) {
-    const el = doc.querySelector('div.answerBox');
-    if (el !== null && isVisible(el)) return true;
-  }
-  return false;
-}
-
 // ================================================================== 已答 / 清除（m04879）
 
 /** 这道题在 DOM 上已经勾了答案吗（`student_answer` 之外的第二道判据） */
@@ -306,11 +249,6 @@ export function isAnsweredInDom(qid: string, top: Document = document): boolean 
     if (el.checked) return true;
   }
   return false;
-}
-
-/** 这道题的选项控件还在不在（不在 ⇒ 卷子没渲染完 / 这题不可答） */
-export function hasInputsFor(qid: string, top: Document = document): boolean {
-  return inputsFor(collectRoots(top), qid).length > 0;
 }
 
 /**
