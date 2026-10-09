@@ -7,8 +7,8 @@
  * 标签 id **`uooc:autoplay` 故意不改**：`host.activateTab()` 的调用点和构建校验
  * 都按这个 id 找，改 id 是纯风险没收益。标题与按钮文案改成「接管」。
  *
- * 与旧实现的区别：接管循环在 `../takeover.ts`，`../autoplay.ts`（旧的 DOM 点击连播）
- * 已经不再被这一页引用；旧文件按需求文档 §G 稍后整体清掉。
+ * 接管循环在 `../takeover.ts`；旧的 `../autoplay.ts`（DOM 点击连播）已随清理删除
+ * （docs/清理问题清单.md A2）。
  */
 
 import { el } from '../../../common/utils/dom.ts';

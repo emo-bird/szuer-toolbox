@@ -27,7 +27,6 @@
 
 import { scoped } from '../../common/core/log.ts';
 import type { PanelApi, SiteAdapter } from '../types.ts';
-import { startAutoplay } from './autoplay.ts';
 import { installUoocIntercept } from './intercept.ts';
 import { noticeBind } from './notice.ts';
 import { SITE_ID, UOOC_TOGGLES, applyUoocSettings, registerUoocSettings } from './settings.ts';
@@ -86,7 +85,7 @@ function isOldVersionPage(): boolean {
  * ⚠️ hash 为空（`/home/learn/new/2042342697` 后面什么都没有）→ 跳 `/home/learn/index`，
  *    旧版首页会自己选课。
  */
-export function oldVersionUrl(href: string = location.href): string | null {
+function oldVersionUrl(href: string = location.href): string | null {
   let u: URL;
   try {
     u = new URL(href);
@@ -153,10 +152,8 @@ export const uoocAdapter: SiteAdapter = {
     startVideoAssist();
     // 视频随机小测：无条件自动作答（读 DOM 里的答案，用户 m06055 拍板不留开关）
     startVideoQuiz();
-    // 只装载、不启动：由用户在【接管】页点【开始接管】（用户 m04485 第二轮拍板）
-    // ⚠️ 这是**旧的 DOM 点击连播**（`./autoplay.ts`），新版接管在 `./takeover.ts`，
-    //    入口在 `tabs/autoplay.ts`。旧的这行等 §G 清理时一起删。
-    startAutoplay(ctx.panel);
+    // 接管不自动启动：由用户在【接管】页点【开始接管】（用户 m04485 第二轮拍板）。
+    // 主循环在 ./takeover.ts，控制台入口在 tabs/autoplay.ts。
     log.info(
       `UOOC 旧版课程页已启用：isFeaturePage=${String(ctx.isFeaturePage)}，` +
         `路径=${location.pathname}，视频助手=已挂载，小测助手=已挂载，接管=等用户点开始`,
