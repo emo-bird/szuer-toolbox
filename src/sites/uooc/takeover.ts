@@ -97,6 +97,17 @@ let statusText = IDLE_TEXT;
 let token: { cancelled: boolean } | null = null;
 const listeners = new Set<() => void>();
 
+/**
+ * 「本次接管已经弹过一次致命弹窗」的守卫。
+ *
+ * `fatal` 是 async、且多路 `void fatal(...)`（循环内分支 + 顶层 catch），
+ * 不加守卫会出现两条不同 fatal 依次调用：`dedupeClass` 只防了遮罩叠加，
+ * 状态行 `statusText` 是 last-writer-wins，后到的会把先到的覆盖掉。
+ * 这里保证**一次接管最多弹一条**；在「开始接管 / 停止接管」处复位
+ * （不在 `release()` 里复位——`release()` 正是 `fatal` 自己调用的，放那里会立刻失效）。
+ */
+let fatalShown = false;
+
 function notify(): void {
   for (const fn of [...listeners]) {
     try {
@@ -133,6 +144,8 @@ export function takeoverStart(host: PanelApi): void {
     log.warn('接管已经在跑，这次【开始接管】被忽略');
     return;
   }
+  // 新的一轮允许再弹一次致命弹窗
+  fatalShown = false;
   const t = { cancelled: false };
   token = t;
   running = true;
@@ -152,6 +165,8 @@ export function takeoverStop(): void {
   t.cancelled = true;
   release();
   setStatus(IDLE_TEXT);
+  // 这一轮已经收场，下次开始接管可再弹
+  fatalShown = false;
 }
 
 // ------------------------------------------------------------- 收尾
@@ -176,6 +191,8 @@ function stop(text: string): void {
  * 理由：这些条件都需要人看一眼才知道怎么办。
  */
 async function fatal(host: PanelApi, status: string, body: string): Promise<void> {
+  if (fatalShown) return;
+  fatalShown = true;
   release();
   // `'warn'` 会让这条提示在右上角**常驻**（带「×」），错过了还能回头看
   setStatus(status, 'warn');

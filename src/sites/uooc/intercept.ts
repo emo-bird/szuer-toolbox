@@ -173,13 +173,16 @@ export function waitCommit(timeoutMs: number): Promise<CommitResult | null> {
   if (lastCommit !== null) return Promise.resolve(lastCommit);
   return new Promise((resolve) => {
     let done = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
     const finish = (v: CommitResult | null): void => {
       if (done) return;
       done = true;
+      // 无论先被 primeCommit 满足还是先超时，都把定时器收掉，不留孤儿句柄
+      if (timer !== null) clearTimeout(timer);
       resolve(v);
     };
+    timer = setTimeout(() => finish(null), timeoutMs);
     commitWaiters.push(finish);
-    setTimeout(() => finish(null), timeoutMs);
   });
 }
 
