@@ -22,6 +22,10 @@
  */
 
 import type { QuestionKind } from './paper.ts';
+import { asElement, clickOption, collectRoots, inputsFor, isVisible } from './fill-dom.ts';
+
+export * from './fill-dom.ts';
+export * from './quiz-ready.ts';
 
 export interface FillTarget {
   readonly qid: string;
@@ -53,102 +57,6 @@ export interface FillReport {
  *
  * 改用鸭子类型：`nodeType === 1` 认元素，`tagName` 认标签 —— 跨 realm 都成立。
  */
-function isElement(node: Element | null | undefined): node is HTMLElement {
-  return node !== null && node !== undefined && node.nodeType === 1;
-}
-
-/** `null` 安全的元素收窄（替代 `x instanceof HTMLElement`） */
-function asElement(node: Element | null): HTMLElement | null {
-  return isElement(node) ? node : null;
-}
-
-/** 收窄成 input（替代 `x instanceof HTMLInputElement`） */
-function asInput(node: Element | null): HTMLInputElement | null {
-  return isElement(node) && node.tagName === 'INPUT'
-    ? (node as unknown as HTMLInputElement)
-    : null;
-}
-
-/** 元素是否在布局上可见（不可见的 radio 直接 `.click()` 不生效） */
-function isVisible(el: Element): boolean {
-  const he = el as HTMLElement;
-  if (typeof he.getBoundingClientRect !== 'function') return true;
-  const r = he.getBoundingClientRect();
-  if (r.width > 0 && r.height > 0) return true;
-  // 有 offsetParent 也算（覆盖 display 之外的老式可见判据）
-  return he.offsetParent !== null;
-}
-
-/**
- * 点一个选项。
- *
- * 三级降级，顺序不能换：
- *  1. `input` 本身（旧版：radio/checkbox 是实体可见控件，实测 13×13）；
- *  2. 包着它的 `<label>`（**新版多选题的 radio 实测不可见**，子代理实测要点
- *     `label.ti-a` / `span.ti-a-i` —— 点 label 会转发到 input，这是 HTML 原生行为）；
- *  3. 同级/父级的 `span.ti-a-i`（新版最后一层兜底）。
- *
- * 每一步都 `try{}` 包住：站点自己的 `ng-click` 里抛异常不能把回填整个带崩。
- */
-function clickOption(input: HTMLInputElement): boolean {
-  const attempts: (Element | null)[] = [
-    input,
-    input.closest('label'),
-    input.parentElement?.querySelector('.ti-a-i') ?? null,
-    input.parentElement,
-  ];
-  for (const el of attempts) {
-    if (el === null) continue;
-    if (el !== input && !isVisible(el)) continue;
-    try {
-      (el as HTMLElement).click();
-      return true;
-    } catch {
-      // 换下一级
-    }
-  }
-  try {
-    input.click();
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** 收集顶层文档 + 所有同源 iframe 的 document */
-export function collectRoots(top: Document = document): Document[] {
-  const roots: Document[] = [top];
-  const frames = top.querySelectorAll('iframe, frame');
-  for (const f of frames) {
-    const el = f as HTMLIFrameElement;
-    try {
-      const doc = el.contentDocument;
-      if (doc !== null && doc !== undefined) roots.push(doc);
-    } catch {
-      // 跨域：碰 contentDocument 会抛，跳过
-    }
-  }
-  return roots;
-}
-
-/** 在已收集的 roots 里找某个题目 id 的全部选项 input */
-function inputsFor(roots: readonly Document[], qid: string): HTMLInputElement[] {
-  const out: HTMLInputElement[] = [];
-  for (const doc of roots) {
-    let list: NodeListOf<Element>;
-    try {
-      list = doc.querySelectorAll(`input[name="${CSS.escape(qid)}"]`);
-    } catch {
-      // 极老的浏览器没有 CSS.escape；qid 是纯数字，退化成拼字符串
-      list = doc.querySelectorAll(`input[name="${qid}"]`);
-    }
-    for (const el of list) {
-      const input = asInput(el);
-      if (input !== null) out.push(input);
-    }
-  }
-  return out;
-}
 
 /**
  * 回填一份答案。
@@ -251,43 +159,6 @@ export function isAnsweredInDom(qid: string, top: Document = document): boolean 
   return false;
 }
 
-/**
- * 纯函数：每个题目容器都已经有可操作的控件了吗。
- *
- * 抽出来只为**能上单测**（真实判据要走 DOM，Node 里测不了）。规则一句话：
- * **一个容器都没有 ⇒ 没就绪**；**存在空壳容器 ⇒ 还没渲染完**。
- *
- * @param controlCounts 每个 `div.queContainer` 里的控件个数（`input[name]` + `textarea`）
- */
-export function containersComplete(controlCounts: readonly number[]): boolean {
-  return controlCounts.length > 0 && controlCounts.every((n) => n > 0);
-}
-
-/**
- * 试卷的题目 DOM **渲染完了**吗 —— 跳过去之后、开始答题之前等的就是它。
- *
- * 为什么需要它（用户 2026-10-09 报的事故）：原来「测验就绪」只要求 **iframe 元素出现
- * 且地址里有 tid**，于是流程一路往下走 —— 拉卷、问模型、回填；而回填那一步才第一次碰
- * DOM（按 `input[name="<qid>"]` 找选项）。网络差时选项还没渲染出来，**一道都填不上**。
- *
- * 判据（DOM 侧，无需先拿 paper）：
- * - 找到含 `div.queContainer` 的文档（旧版试卷在 iframe 里、新版在顶层，所以遍历同源 roots）；
- * - 且**每一个**容器里都已经有控件（`input[name]` 或 `textarea`）—— 空壳容器 = 还在渲染。
- *
- * ⚠️ **已知边界**：站点若把题目**逐题懒渲染**（先出一题、滚到才出下一题），本判据只保证
- * 「已经出现的容器都是完整的」，保证不了「全部题目都出现了」。这是用户拍板接受的取舍
- * （另一个做法要等 paper 的题号清单，而那要发生在跳转之后）。
- */
-export function quizDomReady(top: Document = document): boolean {
-  for (const doc of collectRoots(top)) {
-    const boxes = doc.querySelectorAll('div.queContainer');
-    if (boxes.length === 0) continue;
-    const counts: number[] = [];
-    for (const box of boxes) counts.push(box.querySelectorAll('input[name], textarea').length);
-    if (containersComplete(counts)) return true;
-  }
-  return false;
-}
 
 /** Angular `ngModel` 控制器里我们用到的那两个方法 */
 interface NgModelLike {
