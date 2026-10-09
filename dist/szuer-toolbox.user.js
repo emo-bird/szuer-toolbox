@@ -52,7 +52,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-09T14:06:55.250Z（构建号 97） */
+/* 构建信息：2026-10-09T14:10:29.760Z（构建号 98） */
 
 "use strict";
 (() => {
@@ -3299,7 +3299,7 @@ ${options.desc ?? ""}
     MUTE: "mute",
     /** 🟢 防失焦暂停（U4） */
     KEEP_PLAYING: "keep-playing",
-    /** 🟢 空白片源（V5）：把原片换成等长黑画面，只省流量不省时间 */
+    /** 🟢 空白片源（U10）：把原片换成等长黑画面，只省流量不省时间 */
     BLANK_VIDEO: "blank-video",
     /** 🟠 AI 答题（U6–U9）：连播走到测验就交给它；关掉则停下等用户手动处理 */
     AI_ANSWER: "ai-answer"
@@ -10427,8 +10427,8 @@ ${text2}
   // src/main.ts
   var log34 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-09T14:06:55.250Z" : null;
-  var BUILD_NO = true ? 97 : null;
+  var BUILD_TIME = true ? "2026-10-09T14:10:29.760Z" : null;
+  var BUILD_NO = true ? 98 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();

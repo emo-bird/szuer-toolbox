@@ -426,6 +426,73 @@ showModalAlert(shadowRoot: ShadowRoot, options: ModalOptions): Promise<string | 
 `quiet:true` 只记不弹。**`sticky` 由 `notice.ts` 按 kind 决定，不在 `ToastStack` 里自动升级**
 （否则 bkxk 的 warn 提示会全变常驻）。
 
+### E.8 空白片源 U10（**2026-10-09 用户 m02644，已落地**）
+
+用户原话：「功能完全正常 / 最后一个需求：**把课程视频拦截换成相同时长的纯空白视频，减少网络请求** / 开新分支」。
+
+#### 为什么只能从 `src` 下手
+
+课程视频是**跨域直连的渐进式 MP4**（`https://sourcetx3.uooconline.com/courseNNNN/video/*.mp4`），
+请求由浏览器媒体栈自己发出，**JS 拦不到**（不能像 XHR 那样劫持）。唯一的下手点就是
+`<video id="player_html5_api">` 的 `src`：把它换成一份**自己合成的、等长的空白 MP4**。
+
+#### 落地形状（`src/sites/uooc/blank.ts`，被 `video.ts` 的 `apply()` 调用）
+
+1. 等原片报出 `loadedmetadata` —— **时长只有这一个来源**（站点的 `getUnitLearn` 只给
+   `video_pos`，全流程抓包里 `duration` 出现 0 次、`video_length` 只在 `markVideoLearn`
+   的请求体里出现 5 次 ⇒ 服务端的「完成」判据就是客户端上报的
+   `video_length` vs `video_pos` 之比）；
+2. 立刻把 `src` 换成一个 `blob:` —— 内容是**代码合成**的最小 MP4：`ftyp` + `moov`
+   （`mvhd` / `trak`→`tkhd`,`mdia`→`mdhd`,`hdlr`,`minf`→`vmhd`,`dinf`,
+   `stbl`→`stsd`/`avc1`/`avcC`,`stts`,`stsc`,`stsz`,`stco`）+ `mdat`；
+3. 若换源前它已经在播，则在新的 `loadedmetadata` 上把播放接回去（`v.play()`）。
+
+原片此时才刚开始下载，换掉之后不会再接着下。
+
+#### 关键手法：一帧黑画面 = 整段时长
+
+只有一个 sample，但把 `stts` 的 `sample_delta` 设成**整段时长**（媒体时间基取 `1000`，
+所以这个值直接就是毫秒数）。浏览器据此认为这一帧要显示到片尾 ⇒ `currentTime` 平滑前进、
+`ended` 在片尾正常触发，**与真实播放的行为完全对齐**。
+
+黑帧的 H.264 码流（SPS 7 / PPS 8 / SEI 6 / IDR 5）以 base64 常量内嵌在 `blank.ts`；
+生成它的 ffmpeg 命令写在文件顶部注释里（**要重新生成就照抄那条命令**）：
+
+```
+ffmpeg -y -f lavfi -i color=c=black:s=640x360:d=1 -frames:v 1 -c:v libx264 \
+  -preset veryfast -tune stillimage -profile:v baseline -level 3.0 \
+  -pix_fmt yuv420p -bf 0 -x264-params keyint=1:scenecut=0 -f h264 black.264
+```
+
+黑帧尺寸定死 **640x360**（16:9，贴近课程视频比例，避免页面布局跳动）；码流里的 SEI
+只是 x264 的版本字符串（约 600 字节），**不进 `mdat`**。
+
+#### 四条刻意的取舍
+
+| 取舍 | 理由 |
+| --- | --- |
+| 判据是「当前 `src` 是不是我们自己设的那个 blob」，**不是**一次性的「处理过就跳过」 | 视频站的 `<video>` 元素**跨集复用**（video.js 的播放器实例活在 SPA 里，换集只是换 `src`）⇒ 一次性标记会让第 2 集起就不再换源 |
+| 对着改护栏：同一元素 **10 秒内换源 3 次**即停手并记一条 warn | 正常换集间隔以分钟计，短时间内反复触发只可能是站点在把 `src` 改回去 —— 宁可退回播原片，也不要和站点对着改 |
+| 时长 **> 8 小时**不换（脏数据），且同一元素同一时长只告警一次 | 时长读到垃圾值时合成出来的 mp4 只是浪费，判断本身不该刷屏 |
+| 换源决定**在换的那一刻**读，中途改开关不影响已经换过的那一集 | 与 `video.ts` 其余三项一致（每次用时现读），但**不做运行时回退**：不把原片再换回来（那等于把刚省下的流量又下回来） |
+
+#### 设置项
+
+新增 **🟢 `blank-video`「空白片源」**（`GROUP.VIDEO`，**默认开**）。
+风险等级按既有判据（「后果能不能撤销」）是 safe：换的只是**这一次播放的片源**，
+关掉开关并刷新即恢复原片，站点侧不留任何痕迹。
+
+#### 必须说清的取舍（已同步给用户）
+
+**只省流量、不省墙钟时间**：614 秒的课在 2 倍速下依然要 307 秒才 `ended`。
+本需求解决的是「几百 MB 下载量」，不是「挂机时长」。
+
+#### 待手测确认的遗留风险
+
+换源之后，**站点自己还发不发 `markVideoLearn`**？上报大概率挂在同一个 `<video>` 元素上
+（`timeupdate` 或定时器读 `currentTime`），所以「保留元素、只换片源」是风险最低的做法 ——
+但这一点**只能真机验证**，见 `docs/手测清单-UOOC-接管.md` #222 起。
+
 ---
 
 ## §F 待定项 —— **2026-10-08 全部结清**

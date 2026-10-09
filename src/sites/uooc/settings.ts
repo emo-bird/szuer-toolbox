@@ -61,7 +61,7 @@ export const TOGGLE = {
   MUTE: 'mute',
   /** 🟢 防失焦暂停（U4） */
   KEEP_PLAYING: 'keep-playing',
-  /** 🟢 空白片源（V5）：把原片换成等长黑画面，只省流量不省时间 */
+  /** 🟢 空白片源（U10）：把原片换成等长黑画面，只省流量不省时间 */
   BLANK_VIDEO: 'blank-video',
   /** 🟠 AI 答题（U6–U9）：连播走到测验就交给它；关掉则停下等用户手动处理 */
   AI_ANSWER: 'ai-answer',
