@@ -16,15 +16,16 @@
  *    直接改 `XMLHttpRequest.prototype` 的 `open` / `send` 就够，风险面更小。
  *
  * 3. **不能咬到自己**。`src/common/core/http.ts` 发的请求带 `__szuSkip: true`，
- *    这里看到该标记就跳过 —— 那条链路的响应体我们自己拿得到，走 `prime*` 直接喂进来。
+ *    这里看到该标记就跳过 —— 我们自己发的请求不进嗅探，响应由调用方（fetch-catalog）自己处理。
  *
  * ⚠️ 截获**不可靠**（站点可能换接口、可能用缓存、可能在我们装钩子之前就发过）。
- * 所以调用方一律「等一会儿，等不到就自己补发一次同源 GET」——见 `autoplay.ts` 的
- * `waitCatalog` / `catalogWhenSiteGivesUp`（`FALLBACK_AFTER_LOAD_MS` + `CATALOG_HARD_TIMEOUT_MS`）
- * 与 `sourcesOf` 的 `UNIT_INTERCEPT_TIMEOUT_MS`。
+ * 取数主路径是 `fetch-catalog.ts` 的重试闭环（`CATALOG_ATTEMPTS` 次 / 固定间隔 / 单次超时），
+ * **不依赖**这里的嗅探。
  *
- * ⚠️ 别再退回「固定短超时」：站点那发 `getCatalogList` 是在 Angular 起来之后（约 5 秒）才出去的，
- * 任何几秒级的固定超时都必然抢先补发（实测白打一发 35KB）。
+ * 现状（docs/清理核验报告.md §2.1）：只有「交卷响应」（`waitCommit`）有真正的消费者；
+ * `getCatalogList` / `getUnitLearn` 的 learn 分支保留拦截、**只留痕不缓存**（原 wait/peek
+ * 缓存整层已删）。待实测确认接管不再依赖这条旁路后，把 `dispatch` 的 learn 分支、
+ * `matchLearnApi`、`shouldSniff` 里的 learn 匹配一并删掉。
  */
 
 import { scoped } from '../../common/core/log.ts';
@@ -135,94 +136,10 @@ export function readCommit(body: unknown, httpStatus = 0): CommitResult {
   };
 }
 
-// ------------------------------------------------------------- 落地仓库
-
-let lastCatalog: { cid: string; body: unknown } | null = null;
-const unitBodies = new Map<string, unknown>();
+// ------------------------------------------------------------- 交卷仓库
 
 let lastCommit: CommitResult | null = null;
 let commitWaiters: Array<(v: CommitResult | null) => void> = [];
-
-type Waiter<T> = (value: T | null) => void;
-
-let catalogWaiters: Array<{ cid: string; fn: Waiter<unknown> }> = [];
-const unitWaiters = new Map<string, Array<Waiter<unknown>>>();
-
-/** 把一份 `getCatalogList` 响应喂进仓库（截获到，或我们自己拉的） */
-export function primeCatalog(cid: string, body: unknown): void {
-  lastCatalog = { cid, body };
-  const pending = catalogWaiters;
-  catalogWaiters = [];
-  for (const w of pending) {
-    if (w.cid === cid) w.fn(body);
-    else catalogWaiters.push(w);
-  }
-}
-
-/** 把一份 `getUnitLearn` 响应喂进仓库 */
-export function primeUnitLearn(catalogId: string, body: unknown): void {
-  unitBodies.set(catalogId, body);
-  const pending = unitWaiters.get(catalogId);
-  if (pending === undefined) return;
-  unitWaiters.delete(catalogId);
-  for (const fn of pending) fn(body);
-}
-
-/** 已经拿到的 `getCatalogList`（没有则 null） */
-export function peekCatalog(cid: string): unknown | null {
-  return lastCatalog !== null && lastCatalog.cid === cid ? lastCatalog.body : null;
-}
-
-/** 已经拿到的某个节点的 `getUnitLearn` 资源（没有则 null） */
-export function peekUnitLearn(catalogId: string): unknown | null {
-  return unitBodies.get(catalogId) ?? null;
-}
-
-/** 等站点自己发 `getCatalogList`；超时返回 null */
-export function waitCatalog(cid: string, timeoutMs: number): Promise<unknown | null> {
-  const cached = peekCatalog(cid);
-  if (cached !== null) return Promise.resolve(cached);
-  return new Promise((resolve) => {
-    let done = false;
-    const finish = (v: unknown | null): void => {
-      if (done) return;
-      done = true;
-      resolve(v);
-    };
-    catalogWaiters.push({ cid, fn: finish });
-    setTimeout(() => finish(null), timeoutMs);
-  });
-}
-
-/** 等站点自己发某个节点的 `getUnitLearn`；超时返回 null */
-export function waitUnitLearn(catalogId: string, timeoutMs: number): Promise<unknown | null> {
-  const cached = peekUnitLearn(catalogId);
-  if (cached !== null) return Promise.resolve(cached);
-  return new Promise((resolve) => {
-    let done = false;
-    const finish = (v: unknown | null): void => {
-      if (done) return;
-      done = true;
-      resolve(v);
-    };
-    const list = unitWaiters.get(catalogId) ?? [];
-    list.push(finish);
-    unitWaiters.set(catalogId, list);
-    setTimeout(() => finish(null), timeoutMs);
-  });
-}
-
-/** 测试用：清空仓库 */
-export function resetInterceptStore(): void {
-  lastCatalog = null;
-  unitBodies.clear();
-  catalogWaiters = [];
-  unitWaiters.clear();
-  lastCommit = null;
-  commitWaiters = [];
-}
-
-// ------------------------------------------------------------- 交卷仓库
 
 /** 把一份交卷响应喂进仓库（截获到） */
 export function primeCommit(body: unknown, httpStatus = 0): CommitResult {
@@ -283,11 +200,9 @@ function dispatch(rawUrl: string, text: string, httpStatus = 0): void {
     const result = primeCommit(body, httpStatus);
     log.debug('截获交卷响应', `${result.verdict} / HTTP ${httpStatus} / 得分 ${result.score}`);
   } else if (api !== null && api.kind === 'catalog') {
-    log.debug('截获 getCatalogList', api.cid);
-    primeCatalog(api.cid, body);
+    log.debug('截获 getCatalogList（只留痕，缓存层已删）', api.cid);
   } else if (api !== null) {
-    log.debug('截获 getUnitLearn', api.catalogId);
-    primeUnitLearn(api.catalogId, body);
+    log.debug('截获 getUnitLearn（只留痕，缓存层已删）', api.catalogId);
   }
 }
 
