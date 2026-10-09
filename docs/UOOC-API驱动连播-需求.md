@@ -426,6 +426,26 @@ showModalAlert(shadowRoot: ShadowRoot, options: ModalOptions): Promise<string | 
 `quiet:true` 只记不弹。**`sticky` 由 `notice.ts` 按 kind 决定，不在 `ToastStack` 里自动升级**
 （否则 bkxk 的 warn 提示会全变常驻）。
 
+#### E.7.1 遮罩的挂载时机（**2026-10-09 第四份反馈，已落地**）
+
+用户原话：「等 iframe 加载出题目的 dom 再放遮罩，不然被刷掉了」。
+
+真因两条，第二条才是「永久消失」的原因：① 原来在**拉到试卷那一刻**就挂，而 iframe 可能还停在
+`about:blank`／刚导航 ⇒ 挂在**一份马上被换掉的 document** 上；② 原来「被抹掉就挂回去」写的是
+缓存下来的 `doc.body`，iframe 一导航那份 document 就作废 ⇒ **挂了也永远看不见**。
+
+四条口径（用户四问四答，全取推荐项）：
+
+| 问 | 拍板 |
+| --- | --- |
+| 就绪判据 | **`div.queContainer`**（与 `fill.ts` 同一份契约）；只要求容器出现，不要求题目齐全 |
+| 等不到怎么办 | 超时用 `WAIT_TIMEOUT_MS`（默认 30s）→ **照样挂上** + 一条 warn。理由：「看不到进度」比「可能被刷掉一次」更糟 |
+| doc 缓存 | 删掉缓存，**每次现取** `frame.contentDocument`，用 `appendChild` 的隐式 adopt 搬进新 document |
+| 巡检方式 | **250ms 轮询**（不用 `MutationObserver`）：导航换 document 时观察器也要重装，轮询一次解决三件事 |
+
+⚠️ **判据失配是可观测的**：若哪天遮罩要等满 30 秒才出现，日志里会留下那条 warn
+「等题目 DOM 超时…仍没见到 `div.queContainer`」⇒ 说明站点换了容器名，换判据即可（手测 #227）。
+
 ---
 
 ## §F 待定项 —— **2026-10-08 全部结清**

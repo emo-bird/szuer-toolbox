@@ -39,5 +39,6 @@ import './suites/uooc-catalog.test.ts';
 import './suites/uooc-fetch-catalog.test.ts';
 import './suites/uooc-intercept.test.ts';
 import './suites/uooc-notice.test.ts';
+import './suites/uooc-overlay.test.ts';
 
 await run();

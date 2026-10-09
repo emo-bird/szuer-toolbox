@@ -52,7 +52,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-09T11:27:56.787Z（构建号 95） */
+/* 构建信息：2026-10-09T14:32:11.126Z（构建号 99） */
 
 "use strict";
 (() => {
@@ -3127,162 +3127,8 @@ ${options.desc ?? ""}
     publishQuiz();
   }
 
-  // src/sites/uooc/ai/overlay.ts
-  var log8 = scoped("uooc/quiz-overlay");
-  var cur = null;
-  var ROOT_CSS = [
-    "position:fixed",
-    "inset:0",
-    "z-index:2147483000",
-    "box-sizing:border-box",
-    "display:flex",
-    "flex-direction:column",
-    "gap:10px",
-    "padding:18px 20px",
-    "background:rgba(17,21,27,.9)",
-    "color:#f2f4f7",
-    'font:13px/1.55 -apple-system,"Segoe UI",system-ui,sans-serif'
-  ].join(";");
-  var HIDE_BTN_CSS = [
-    "flex:none",
-    "cursor:pointer",
-    "border:1px solid rgba(255,255,255,.35)",
-    "border-radius:6px",
-    "background:transparent",
-    "color:#f2f4f7",
-    "font:12.5px/1 inherit",
-    "padding:7px 12px"
-  ].join(";");
-  var BAR_CSS = "height:6px;border-radius:3px;background:rgba(255,255,255,.18);overflow:hidden";
-  var BAR_FILL_CSS = "height:100%;width:0;background:#3b82f6;transition:width .2s ease";
-  var LIST_CSS = [
-    "flex:1",
-    "min-height:0",
-    "overflow:auto",
-    "border:1px solid rgba(255,255,255,.14)",
-    "border-radius:8px",
-    "padding:6px 10px",
-    "font-size:12.5px",
-    "line-height:1.75"
-  ].join(";");
-  function mk(doc, tag, css, text2) {
-    const node = doc.createElement(tag);
-    node.style.cssText = css;
-    if (text2 !== void 0) node.textContent = text2;
-    return node;
-  }
-  function questionLine(doc, q) {
-    const status = QUESTION_STATUS_TEXT[q.status];
-    const answer = q.answer === "" ? "—" : q.answer;
-    const tail = q.note === "" ? "" : `（${q.note}）`;
-    return mk(
-      doc,
-      "div",
-      "white-space:nowrap;overflow:hidden;text-overflow:ellipsis",
-      `#${q.no} [${q.typeText}] ${status} → ${answer} · 请求 ${q.requests} 次${tail}`
-    );
-  }
-  function buildRoot(doc) {
-    const node = mk(doc, "div", ROOT_CSS);
-    node.setAttribute("data-sztb", "quiz-overlay");
-    const head = mk(doc, "div", "display:flex;align-items:center;gap:10px");
-    head.appendChild(mk(doc, "div", "flex:1;font-weight:600;font-size:14px", "脚本正在作答这张试卷"));
-    const hide = mk(doc, "button", HIDE_BTN_CSS, "隐藏遮罩");
-    hide.setAttribute("type", "button");
-    hide.addEventListener("click", () => {
-      if (cur === null) return;
-      cur.hidden = true;
-      log8.info("用户点了【隐藏遮罩】，本次测验内不再显示");
-      render(cur);
-    });
-    head.appendChild(hide);
-    node.appendChild(head);
-    const live = mk(doc, "div", "display:flex;flex-direction:column;gap:10px;flex:1;min-height:0");
-    node.appendChild(live);
-    node.appendChild(
-      mk(
-        doc,
-        "div",
-        "flex:none;font-size:12px;opacity:.72",
-        "遮罩只挡视线，不影响脚本作答；走到「等你过人机验证码」那一步会自动让开。"
-      )
-    );
-    return { node, live };
-  }
-  function render(o) {
-    const state2 = monitorState();
-    const quiz2 = state2.quiz !== null && state2.quiz.tid === o.tid ? state2.quiz : null;
-    const phase = quiz2 === null ? "idle" : quiz2.phase;
-    const submitting = phase === "submitting";
-    const visible = !o.hidden && !submitting;
-    if (!o.node.isConnected) {
-      const body = o.doc.body;
-      if (body === null) return;
-      body.appendChild(o.node);
-      log8.debug("遮罩被站点重渲染抹掉，已重新挂回");
-    }
-    o.node.style.setProperty("display", visible ? "flex" : "none");
-    if (!visible) return;
-    o.live.textContent = "";
-    if (quiz2 === null) return;
-    o.live.appendChild(mk(o.doc, "div", "font-weight:600;font-size:14px", QUIZ_PHASE_TEXT[quiz2.phase]));
-    if (quiz2.message !== "") {
-      o.live.appendChild(mk(o.doc, "div", "opacity:.85", quiz2.message));
-    }
-    o.live.appendChild(
-      mk(
-        o.doc,
-        "div",
-        "opacity:.85",
-        `第 ${quiz2.done}/${quiz2.total} 题已定稿 · 任务 tid=${quiz2.tid}${o.hidden ? " · 遮罩已隐藏" : ""}`
-      )
-    );
-    const bar2 = mk(o.doc, "div", BAR_CSS);
-    const fill = mk(o.doc, "div", BAR_FILL_CSS);
-    const pct = quiz2.total <= 0 ? 0 : Math.round(quiz2.done / quiz2.total * 100);
-    fill.style.setProperty("width", `${pct}%`);
-    bar2.appendChild(fill);
-    o.live.appendChild(bar2);
-    const list2 = mk(o.doc, "div", LIST_CSS);
-    if (quiz2.questions.length === 0) {
-      list2.appendChild(mk(o.doc, "div", "opacity:.7", "还没读到题目"));
-    } else {
-      for (const q of quiz2.questions) list2.appendChild(questionLine(o.doc, q));
-    }
-    o.live.appendChild(list2);
-  }
-  function quizOverlayOpen(frame, tid) {
-    quizOverlayClose();
-    const doc = frame === null ? null : frame.contentDocument;
-    if (doc === null || doc.body === null) {
-      log8.warn("拿不到试卷 iframe 的 document，本次不盖遮罩（不影响作答）");
-      return;
-    }
-    const { node, live } = buildRoot(doc);
-    doc.body.appendChild(node);
-    const o = { tid, doc, node, live, hidden: false, off: null };
-    cur = o;
-    o.off = subscribeMonitor(() => {
-      try {
-        render(o);
-      } catch (err) {
-        log8.warn("遮罩渲染抛错", String(err));
-      }
-    });
-    render(o);
-    log8.info(`已给试卷 tid=${tid} 盖上进度遮罩`);
-  }
-  function quizOverlayClose() {
-    const o = cur;
-    if (o === null) return;
-    cur = null;
-    o.off?.();
-    o.off = null;
-    o.node.remove();
-  }
-
   // src/sites/uooc/settings.ts
-  var log9 = scoped("uooc/settings");
+  var log8 = scoped("uooc/settings");
   var SITE_ID = "uooc";
   var GROUP = {
     /** 播放器行为（U1/U2/U4） */
@@ -3432,7 +3278,7 @@ ${options.desc ?? ""}
     const raw = getValue(SITE_ID, id);
     const num3 = Number(raw);
     if (!Number.isFinite(num3) || num3 < 0) {
-      log9.warn(`${id} 取值异常（${String(raw)}），按 ${fallbackMs}ms 处理`);
+      log8.warn(`${id} 取值异常（${String(raw)}），按 ${fallbackMs}ms 处理`);
       return fallbackMs;
     }
     return num3;
@@ -3468,7 +3314,230 @@ ${options.desc ?? ""}
     waitBeforeMs();
     holdAfterMs();
     aiConcurrency();
-    log9.info(`AI 作答配置：${aiConfig() === null ? "未配置（AI 答题用不了）" : "已配置"}`);
+    log8.info(`AI 作答配置：${aiConfig() === null ? "未配置（AI 答题用不了）" : "已配置"}`);
+  }
+
+  // src/sites/uooc/ai/overlay.ts
+  var log9 = scoped("uooc/quiz-overlay");
+  var READY_SELECTOR = "div.queContainer";
+  var POLL_MS = 250;
+  var cur = null;
+  var ROOT_CSS = [
+    "position:fixed",
+    "inset:0",
+    "z-index:2147483000",
+    "box-sizing:border-box",
+    "display:flex",
+    "flex-direction:column",
+    "gap:10px",
+    "padding:18px 20px",
+    "background:rgba(17,21,27,.9)",
+    "color:#f2f4f7",
+    'font:13px/1.55 -apple-system,"Segoe UI",system-ui,sans-serif'
+  ].join(";");
+  var HIDE_BTN_CSS = [
+    "flex:none",
+    "cursor:pointer",
+    "border:1px solid rgba(255,255,255,.35)",
+    "border-radius:6px",
+    "background:transparent",
+    "color:#f2f4f7",
+    "font:12.5px/1 inherit",
+    "padding:7px 12px"
+  ].join(";");
+  var BAR_CSS = "height:6px;border-radius:3px;background:rgba(255,255,255,.18);overflow:hidden";
+  var BAR_FILL_CSS = "height:100%;width:0;background:#3b82f6;transition:width .2s ease";
+  var LIST_CSS = [
+    "flex:1",
+    "min-height:0",
+    "overflow:auto",
+    "border:1px solid rgba(255,255,255,.14)",
+    "border-radius:8px",
+    "padding:6px 10px",
+    "font-size:12.5px",
+    "line-height:1.75"
+  ].join(";");
+  function mk(doc, tag, css, text2) {
+    const node = doc.createElement(tag);
+    node.style.cssText = css;
+    if (text2 !== void 0) node.textContent = text2;
+    return node;
+  }
+  function questionLine(doc, q) {
+    const status = QUESTION_STATUS_TEXT[q.status];
+    const answer = q.answer === "" ? "—" : q.answer;
+    const tail = q.note === "" ? "" : `（${q.note}）`;
+    return mk(
+      doc,
+      "div",
+      "white-space:nowrap;overflow:hidden;text-overflow:ellipsis",
+      `#${q.no} [${q.typeText}] ${status} → ${answer} · 请求 ${q.requests} 次${tail}`
+    );
+  }
+  function buildRoot(doc) {
+    const node = mk(doc, "div", ROOT_CSS);
+    node.setAttribute("data-sztb", "quiz-overlay");
+    const head = mk(doc, "div", "display:flex;align-items:center;gap:10px");
+    head.appendChild(mk(doc, "div", "flex:1;font-weight:600;font-size:14px", "脚本正在作答这张试卷"));
+    const hide = mk(doc, "button", HIDE_BTN_CSS, "隐藏遮罩");
+    hide.setAttribute("type", "button");
+    hide.addEventListener("click", () => {
+      if (cur === null) return;
+      cur.hidden = true;
+      log9.info("用户点了【隐藏遮罩】，本次测验内不再显示");
+      render(cur);
+    });
+    head.appendChild(hide);
+    node.appendChild(head);
+    const live = mk(doc, "div", "display:flex;flex-direction:column;gap:10px;flex:1;min-height:0");
+    node.appendChild(live);
+    node.appendChild(
+      mk(
+        doc,
+        "div",
+        "flex:none;font-size:12px;opacity:.72",
+        "遮罩只挡视线，不影响脚本作答；走到「等你过人机验证码」那一步会自动让开。"
+      )
+    );
+    return { node, live };
+  }
+  function frameDoc(o) {
+    let doc = null;
+    try {
+      doc = o.frame.contentDocument;
+    } catch {
+      return null;
+    }
+    return doc === null || doc.body === null ? null : doc;
+  }
+  function ensureAttached(o) {
+    const doc = frameDoc(o);
+    if (doc === null) return false;
+    if (o.attached !== doc) {
+      if (o.attached !== null) log9.info("试卷 iframe 换了 document，遮罩已挂到新页面上");
+      doc.body.appendChild(o.node);
+      o.attached = doc;
+      return true;
+    }
+    if (!o.node.isConnected) {
+      doc.body.appendChild(o.node);
+      log9.debug("遮罩被站点重渲染抹掉，已重新挂回");
+      return true;
+    }
+    return false;
+  }
+  function overlayStep(ready, now, deadline) {
+    if (ready) return "attach";
+    return now >= deadline ? "attach-late" : "wait";
+  }
+  function poll(o) {
+    if (cur !== o) return;
+    const doc = frameDoc(o);
+    const ready = doc !== null && doc.querySelector(READY_SELECTOR) !== null;
+    switch (overlayStep(ready, Date.now(), o.deadline)) {
+      case "attach":
+        if (ensureAttached(o)) render(o);
+        return;
+      case "wait":
+        return;
+      default:
+        if (!o.warnedLate) {
+          o.warnedLate = true;
+          log9.warn(
+            `等题目 DOM 超时（${waitTimeoutMs()} ms）仍没见到 ${READY_SELECTOR}，先把遮罩挂上（站点重渲染时会被刷掉一次）`
+          );
+        }
+        if (ensureAttached(o)) render(o);
+        return;
+    }
+  }
+  function render(o) {
+    const doc = frameDoc(o) ?? o.node.ownerDocument;
+    const state2 = monitorState();
+    const quiz2 = state2.quiz !== null && state2.quiz.tid === o.tid ? state2.quiz : null;
+    const phase = quiz2 === null ? "idle" : quiz2.phase;
+    const submitting = phase === "submitting";
+    const visible = !o.hidden && !submitting;
+    ensureAttached(o);
+    o.node.style.setProperty("display", visible ? "flex" : "none");
+    if (!visible) return;
+    o.live.textContent = "";
+    if (quiz2 === null) return;
+    o.live.appendChild(mk(doc, "div", "font-weight:600;font-size:14px", QUIZ_PHASE_TEXT[quiz2.phase]));
+    if (quiz2.message !== "") {
+      o.live.appendChild(mk(doc, "div", "opacity:.85", quiz2.message));
+    }
+    o.live.appendChild(
+      mk(
+        doc,
+        "div",
+        "opacity:.85",
+        `第 ${quiz2.done}/${quiz2.total} 题已定稿 · 任务 tid=${quiz2.tid}${o.hidden ? " · 遮罩已隐藏" : ""}`
+      )
+    );
+    const bar2 = mk(doc, "div", BAR_CSS);
+    const fill = mk(doc, "div", BAR_FILL_CSS);
+    const pct = quiz2.total <= 0 ? 0 : Math.round(quiz2.done / quiz2.total * 100);
+    fill.style.setProperty("width", `${pct}%`);
+    bar2.appendChild(fill);
+    o.live.appendChild(bar2);
+    const list2 = mk(doc, "div", LIST_CSS);
+    if (quiz2.questions.length === 0) {
+      list2.appendChild(mk(doc, "div", "opacity:.7", "还没读到题目"));
+    } else {
+      for (const q of quiz2.questions) list2.appendChild(questionLine(doc, q));
+    }
+    o.live.appendChild(list2);
+  }
+  function quizOverlayOpen(frame, tid) {
+    quizOverlayClose();
+    if (frame === null) {
+      log9.info("整页答题页（页面上没有试卷 iframe），本次不盖遮罩");
+      return;
+    }
+    const seed = frame.contentDocument ?? document;
+    const { node, live } = buildRoot(seed);
+    const o = {
+      tid,
+      frame,
+      node,
+      live,
+      hidden: false,
+      off: null,
+      timer: null,
+      deadline: Date.now() + waitTimeoutMs(),
+      warnedLate: false,
+      attached: null
+    };
+    cur = o;
+    o.off = subscribeMonitor(() => {
+      try {
+        render(o);
+      } catch (err) {
+        log9.warn("遮罩渲染抛错", String(err));
+      }
+    });
+    o.timer = window.setInterval(() => {
+      try {
+        poll(o);
+      } catch (err) {
+        log9.warn("遮罩巡检抛错", String(err));
+      }
+    }, POLL_MS);
+    poll(o);
+    log9.info(`已开始等试卷 tid=${tid} 的题目 DOM 出现（判据 ${READY_SELECTOR}），就绪后再盖遮罩`);
+  }
+  function quizOverlayClose() {
+    const o = cur;
+    if (o === null) return;
+    cur = null;
+    o.off?.();
+    o.off = null;
+    if (o.timer !== null) {
+      window.clearInterval(o.timer);
+      o.timer = null;
+    }
+    o.node.remove();
   }
 
   // src/sites/uooc/ai/index.ts
@@ -4290,7 +4359,7 @@ ${options.desc ?? ""}
   // src/sites/uooc/takeover.ts
   var log14 = scoped("uooc/takeover");
   var VIEWER_SEL = "div.showViewer";
-  var POLL_MS = 200;
+  var POLL_MS2 = 200;
   var STUCK_LIMIT = 3;
   var QUIZ_MAX_ROUNDS = 3;
   var ALERT_DEDUPE = "sztb-uooc-takeover-alert";
@@ -4399,7 +4468,7 @@ ${detail}
       const timer3 = window.setTimeout(finish2, ms);
       const iv = window.setInterval(() => {
         if (t.cancelled) finish2();
-      }, POLL_MS);
+      }, POLL_MS2);
     });
   }
   async function waitFor(pred, timeoutMs, t) {
@@ -4408,7 +4477,7 @@ ${detail}
       if (t.cancelled) return false;
       if (pred()) return true;
       if (Date.now() >= deadline) return false;
-      await sleep2(POLL_MS, t);
+      await sleep2(POLL_MS2, t);
     }
   }
   function viewerSignature() {
@@ -4467,7 +4536,7 @@ ${detail}
       const timer3 = window.setTimeout(() => finish2(video.ended), budget);
       const iv = window.setInterval(() => {
         if (t.cancelled) finish2(false);
-      }, POLL_MS);
+      }, POLL_MS2);
       video.addEventListener("ended", onEnded);
       video.addEventListener("error", onError);
     });
@@ -10111,8 +10180,8 @@ ${text2}
   // src/main.ts
   var log33 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-09T11:27:56.787Z" : null;
-  var BUILD_NO = true ? 95 : null;
+  var BUILD_TIME = true ? "2026-10-09T14:32:11.126Z" : null;
+  var BUILD_NO = true ? 99 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();
