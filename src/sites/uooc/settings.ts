@@ -215,12 +215,14 @@ export function registerUoocSettings(): void {
 /** 读一个毫秒配置项；非法值回退到 `fallbackMs` 并留一条 warn */
 function readMs(id: string, fallbackMs: number): number {
   const raw = getStoredValue<string>(SITE_ID, id);
-  const num = Number(raw);
-  if (!Number.isFinite(num) || num < 0) {
+  // 与 core/limits.ts 的 clampLimit 同一判空口径：空串/纯空白按「没填」处理，
+  // 不能走 Number('')===0——否则程序化写入空串时，等待/超时会被静默当成 0。
+  const n = typeof raw === 'string' && raw.trim() !== '' ? Number(raw.trim()) : Number.NaN;
+  if (!Number.isFinite(n) || n < 0) {
     log.warn(`${id} 取值异常（${String(raw)}），按 ${fallbackMs}ms 处理`);
     return fallbackMs;
   }
-  return num;
+  return n;
 }
 
 /** 改完 `location.hash` 之后、开始等元素出现之前的固定 sleep（ms） */

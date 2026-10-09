@@ -103,8 +103,9 @@ function boot(url: URL, res: Resolution): void {
     booted = null;
   }
 
+  const adapter = res.adapter;
   const siteTabs: TabEntry[] =
-    res.adapter !== null ? res.adapter.tabs.map((tab) => ({ siteId: res.adapter!.id, tab })) : [];
+    adapter !== null ? adapter.tabs.map((tab) => ({ siteId: adapter.id, tab })) : [];
 
   const panel = createPanel(baseCss, buildEntries(siteTabs), {
     siteName: res.adapter?.name ?? null,
