@@ -29,6 +29,7 @@ import { scoped } from '../../common/core/log.ts';
 import type { PanelApi, SiteAdapter } from '../types.ts';
 import { startAutoplay } from './autoplay.ts';
 import { installUoocIntercept } from './intercept.ts';
+import { noticeBind } from './notice.ts';
 import { SITE_ID, UOOC_TOGGLES, applyUoocSettings, registerUoocSettings } from './settings.ts';
 import { UOOC_AI_TAB } from './tabs/ai.ts';
 import { UOOC_AUTOPLAY_TAB } from './tabs/autoplay.ts';
@@ -135,6 +136,8 @@ export const uoocAdapter: SiteAdapter = {
   /** 挂载期：DOM 已就绪，可以开始接管播放器。 */
   init(ctx) {
     applyUoocSettings();
+    // 提示流（notice.ts）要一个 Toast 出口；站点模块拿不到 shadow root，只能在这里绑
+    noticeBind(ctx.panel);
 
     if (isNewVersionPage()) {
       log.info('新版课程页：只弹「要不要切旧版」的提示，本次不启动任何 UOOC 功能');

@@ -326,7 +326,11 @@ location.hash = `#/${cid}/${chapterId}/${sectionId}/${sourceId}/section`;
 
 ### E.2【监视】页（`src/sites/uooc/tabs/monitor.ts`）
 
-**内容区顶部新增一块「课程进度」**，下面是原有的 AI 答题监控列表（用户本轮拍板）：
+**从上到下三块**（**第一块【接管状态】见 §E.7**，是 2026-10-09 用户 m02281 第 2 条加的）：
+
+1. **【接管状态】**（永远第一块）：接管状态行原文 + 提示历史（时间 / 级别记号 / 文案，最新在上）；
+2. **【课程进度】**：下面是原有内容；
+3. **【AI 答题进度】**：逐题表。
 
 - 进度条：`已完成 / 任务点总数`（分母 = 全树 **`learn_task_cnt > 0`** 的节点数，**不用等 DOM**，这是新方案白捡的）。
 - 分层列表：章 → 节 → 任务点，每行显示 `类型图标 + 名称 + ✅/⬜`，**当前正在处理的那一项高亮**。
@@ -395,6 +399,32 @@ showModalAlert(shadowRoot: ShadowRoot, options: ModalOptions): Promise<string | 
 > ⚠️ **刻意不做成全站 `core/http` 的全局重试**：bkxk 的抢课 / 选课走的是同一个 `request()`，
 > 且都是**非幂等 POST**，在那儿加重试会带来重复提交。
 > 这条理由写在这里，**以后别再「顺手统一」**。
+
+### E.7 提示流与试卷遮罩（**2026-10-09 用户 m02281 三条，已落地**）
+
+用户原话三条：
+1. 「重答低分题目的时候提示不够到位，这样子，AI在操作时，iframe加一个遮罩，说明当前进度，
+   然后遮罩上加一个隐藏遮罩按钮（不用再加开启）」；
+2. 「各种状态提示都显示在监视标签页第一的位置」；
+3. 「各种状态提示要有ToastStack」。
+
+拍板与落地（六问六答，全部按推荐项走）：
+
+| 问 | 选项 | 落地 |
+| --- | --- | --- |
+| 遮罩盖在哪 | **A2 注入试卷 iframe 内部** | `src/sites/uooc/ai/overlay.ts`，遮罩节点插在 `frame.contentDocument.body` 末尾 |
+| 验证码阶段怎么办 | **B1 到 `submitting` 自动隐藏** | `overlay.ts` 的 `render()`：`visible = !hidden && phase !== 'submitting'`（**必须**让开，阿里云验证码弹在 iframe 里） |
+| 遮罩里放什么 | **C2 阶段 + 第 N/M 题 + 进度条 + 每题一行** | 同上 `render()`；题行复用 `ai/monitor.ts` 的逐题状态 |
+| 监视页怎么摆 | **D1 新增独立【接管状态】块放最上面** | `tabs/monitor.ts` 的 `statusBox` 与进度 `box` 分开挂，状态块永远第一个 |
+| Toast 什么时候走 | **E1 普通 2.6 秒自动消失、异常常驻手动关** | `widgets/toast.ts` 新增 `ToastOptions.sticky`；`notice.ts` 里 `warn`/`error` 自动 sticky |
+| 点过隐藏之后 | **F1 本次测验内不再出现，下个任务点自动恢复** | `quizOverlayOpen()` 每次新建即 `hidden: false` |
+
+新增的**单一出口** `src/sites/uooc/notice.ts`：所有给用户看的进度/异常都走它，
+一份落成历史（监视页首块），一份转成右上角 Toast。理由：`ai/*` 里若干处拿不到 `host`，
+而监视页需要时间序的历史；两处各写一份必然对不上。
+`noticePost(text, kind, { quiet, dedupe })` —— 连续相同文案合并成 `×N`、上限 40 条、
+`quiet:true` 只记不弹。**`sticky` 由 `notice.ts` 按 kind 决定，不在 `ToastStack` 里自动升级**
+（否则 bkxk 的 warn 提示会全变常驻）。
 
 ---
 

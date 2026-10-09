@@ -46,7 +46,9 @@ import { chatUrl, type LlmConfig } from './llm.ts';
 import { fetchPaper, isAnswerable, type ExamQuestion } from './paper.ts';
 import { answerOne, answerQuestions, type AnswerOutcome } from './runner.ts';
 import { quizBegin, quizClear, quizEnd, quizPatch, quizPhase } from './monitor.ts';
+import { quizOverlayClose, quizOverlayOpen } from './overlay.ts';
 import { aiConcurrency, aiConfig } from '../settings.ts';
+import { noticePost } from '../notice.ts';
 
 const log = scoped('uooc/ai');
 
@@ -118,6 +120,19 @@ export function quizTidOnPage(): string | null {
   return tidFromLocation();
 }
 
+/**
+ * 当前页面上那份试卷的 iframe —— **进度遮罩要盖的就是它**（`./overlay.ts`）。
+ *
+ * 手动打开整页答题页时没有 iframe，返回 `null`（那种情况就不盖遮罩）。
+ */
+export function quizFrameOnPage(): HTMLIFrameElement | null {
+  for (const frame of document.querySelectorAll('iframe')) {
+    const src = frame.getAttribute('src') ?? '';
+    if (src.includes('/exam/') && tidFromLocation(src) !== null) return frame;
+  }
+  return null;
+}
+
 /** 把「没答出来」的原因汇总成一行，放进确认框与日志 */
 function summarizeFailures(outcomes: readonly AnswerOutcome[]): string {
   const bad = outcomes.filter((o) => o.answer === '');
@@ -132,7 +147,7 @@ function summarizeFailures(outcomes: readonly AnswerOutcome[]): string {
 }
 
 /** 点站点【提交】并等它回话 */
-async function submitAndRead(host: PanelApi): Promise<{ submitted: boolean; commit: CommitResult | null }> {
+async function submitAndRead(): Promise<{ submitted: boolean; commit: CommitResult | null }> {
   // ⚠️ 交卷是在**试卷 iframe** 里发出去的，而 iframe 有自己的 realm ——
   // 顶层那套装不上它。这里再补一次（幂等），确保点提交之前钩子一定在。
   installUoocInterceptInFrames();
@@ -141,14 +156,15 @@ async function submitAndRead(host: PanelApi): Promise<{ submitted: boolean; comm
   if (btn === null) {
     const msg = '页面上找不到【提交】按钮，请自己点一下（答案已经填好了）';
     log.error(msg);
-    host.toast(msg, 'warn');
+    noticePost(msg, 'warn');
     return { submitted: false, commit: null };
   }
   // 丢掉上一条结果，否则 waitCommit 会立刻返回旧的那份响应
   clearCommit();
+  // ⚠️ 这一行会**让试卷遮罩自动让开**（`overlay.ts` 里 `phase === 'submitting'` 就隐藏）——
+  // 阿里云验证码是弹在试卷 iframe 里的，遮罩不让开就点不到它。别调换这两行的顺序。
   quizPhase('submitting');
   log.info('已合成点击站点【提交】，接下来请手动完成人机验证码');
-  host.toast('已点提交，请完成人机验证码', 'info');
   btn.click();
   const commit = await waitCommit(SUBMIT_WAIT_MS);
   if (commit === null) log.warn('没截获到交卷响应（可能你还没点完验证码，或站点换了接口）');
@@ -227,11 +243,20 @@ async function retryLowScore(
  * @param host 面板 API（toast / confirm 都用它）
  */
 export async function runQuizAnswer(tid: string, host: PanelApi): Promise<AiQuizResult | null> {
+  try {
+    return await runQuizAnswerBody(tid, host);
+  } finally {
+    // 无论从哪条路出去（含提前 return 与抛错）都要把试卷遮罩收掉，否则会一直盖着
+    quizOverlayClose();
+  }
+}
+
+async function runQuizAnswerBody(tid: string, host: PanelApi): Promise<AiQuizResult | null> {
   const cfg: LlmConfig | null = aiConfig();
   if (cfg === null) {
     const msg = 'AI 作答未配置：请到【AI 作答】标签页填接口地址与模型名';
     log.error(msg);
-    host.toast(msg, 'error');
+    noticePost(msg, 'error');
     host.activateTab('uooc:ai');
     return null;
   }
@@ -246,7 +271,7 @@ export async function runQuizAnswer(tid: string, host: PanelApi): Promise<AiQuiz
   } catch (err) {
     const msg = `拉题失败：${err instanceof Error ? err.message : String(err)}`;
     log.error(msg);
-    host.toast(msg, 'error');
+    noticePost(msg, 'error');
     return null;
   }
 
@@ -261,6 +286,8 @@ export async function runQuizAnswer(tid: string, host: PanelApi): Promise<AiQuiz
     all.map((q) => ({ id: q.id, typeText: q.typeText, hasAnswer: alreadyIds.has(q.id) })),
   );
   for (const q of already) quizPatch(q.id, { status: 'skipped', note: '页面上已有答案，不重复请求' });
+  // 给试卷 iframe 盖上进度遮罩（用户 m02281 第 1 条）。拿不到 iframe（整页答题页）就跳过
+  quizOverlayOpen(quizFrameOnPage(), tid);
 
   log.info(
     `拿到 ${all.length} 道题：页面上已有答案 ${already.length} 道（跳过），` +
@@ -377,7 +404,7 @@ export async function runQuizAnswer(tid: string, host: PanelApi): Promise<AiQuiz
 
   if (!confirmed) {
     log.info('用户选择「再等等」，不提交。答案已填在页面上，你可以自己改');
-    quizEnd('用户取消了提交，答案已填在页面上');
+    quizEnd('用户取消了提交，答案已填在页面上', 'warn');
     return {
       total: all.length,
       alreadyAnswered: already.length,
@@ -390,7 +417,7 @@ export async function runQuizAnswer(tid: string, host: PanelApi): Promise<AiQuiz
   }
 
   buttons.remove();
-  const first = await submitAndRead(host);
+  const first = await submitAndRead();
   let commit = first.commit;
   let retried = 0;
 
@@ -400,21 +427,23 @@ export async function runQuizAnswer(tid: string, host: PanelApi): Promise<AiQuiz
     retried = r.retried;
     filled += r.filled;
     if (r.retried > 0) {
-      const again = await submitAndRead(host);
+      const again = await submitAndRead();
       commit = again.commit ?? commit;
     }
   }
 
   if (commit !== null) {
+    const passed = commit.verdict === 'pass';
     quizEnd(
-      commit.verdict === 'pass'
+      passed
         ? `已通过（得分 ${commit.score}）`
         : commit.verdict === 'fail'
           ? `仍未通过：${commit.message}`
           : `提交完成，但读不懂站点回话：${commit.message}`,
+      passed ? 'success' : 'warn',
     );
   } else {
-    quizEnd('已点提交，但没截获到站点回话（可能验证码还没点完）');
+    quizEnd('已点提交，但没截获到站点回话（可能验证码还没点完）', 'warn');
   }
 
   return {

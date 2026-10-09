@@ -25,6 +25,7 @@ import { scoped } from '../../../common/core/log.ts';
 // 文件头「只依赖 scoped 日志、谁都能引」这条仍然成立，也不会成环
 // （`catalog.ts` 谁也不引）。
 import type { CourseRow } from '../catalog.ts';
+import { noticePost, type NoticeKind } from '../notice.ts';
 
 const log = scoped('uooc/ai/monitor');
 
@@ -38,6 +39,28 @@ export type QuestionStatus =
   | 'failed'
   /** 页面上已经有答案了，不重复请求 */
   | 'skipped';
+
+/**
+ * 状态中文（监视页与试卷遮罩共用，别在各自文件里再抄一份）。
+ */
+export const QUESTION_STATUS_TEXT: Record<QuestionStatus, string> = {
+  pending: '等待中',
+  answered: '已作答',
+  failed: '没答出',
+  skipped: '跳过',
+};
+
+/** 阶段中文（同上，两处共用） */
+export const QUIZ_PHASE_TEXT: Record<QuizPhase, string> = {
+  idle: '空闲',
+  fetching: '正在拉题…',
+  answering: '正在问模型…',
+  filling: '正在回填页面…',
+  submitting: '已点提交，等待站点结果…（人机验证码要你手动点）',
+  retrying: '未通过，正在重答低分题…',
+  done: '已结束',
+  error: '出错',
+};
 
 export interface QuestionProgress {
   readonly qid: string;
@@ -184,13 +207,21 @@ export function quizPhase(phase: QuizPhase, message = ''): void {
   if (quiz === null) return;
   quiz = { ...quiz, phase, message };
   publishQuiz();
+  // 阶段变化就是「给用户看的进度」，从这里统一发出去（监视页 + Toast 一份，见 notice.ts）
+  const detail = message === '' ? '' : ` —— ${message}`;
+  noticePost(`${QUIZ_PHASE_TEXT[phase]}${detail}`, phase === 'error' ? 'error' : 'info');
 }
 
-/** 一份卷子跑完了（成功或失败都调；之后监视页只展示不再动） */
-export function quizEnd(message: string): void {
+/**
+ * 一份卷子跑完了（成功或失败都调；之后监视页只展示不再动）。
+ *
+ * `kind` 决定 Toast 要不要常驻：通过用 `success`，没过/读不懂用 `warn`。
+ */
+export function quizEnd(message: string, kind: NoticeKind = 'info'): void {
   if (quiz === null) return;
   quiz = { ...quiz, phase: 'done', message };
   publishQuiz();
+  noticePost(message, kind);
 }
 
 /** 换一份卷子/清空 */

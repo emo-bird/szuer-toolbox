@@ -404,7 +404,7 @@ export function createPanel(
     collapse: () => setCollapsed(true),
     expand: () => setCollapsed(false),
     isCollapsed: () => collapsed,
-    toast: (message, kind) => toasts.show(message, kind ?? 'info'),
+    toast: (message, kind, options) => toasts.show(message, kind ?? 'info', options ?? {}),
     confirm: (opts: ConfirmOptions) => showConfirm(shadow, opts),
     alert: (opts) => showModalAlert(shadow, opts),
     alertAuthExpired: () => showAuthAlert(shadow),

@@ -610,3 +610,82 @@
   flex: none;
   width: 1.1em;
 }
+
+/* ---- 提示流与接管状态（UOOC【监视】页第一块 / 右上角 Toast，用户 m02281）---- */
+
+.sztb-status-line {
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.sztb-notices {
+  max-height: 200px;
+  overflow-y: auto;
+  font-size: 12px;
+  border: 1px solid var(--sztb-border);
+  border-radius: 4px;
+  padding: 2px 4px;
+}
+
+.sztb-notice-row {
+  display: flex;
+  gap: 5px;
+  line-height: 1.6;
+}
+
+.sztb-notice-time {
+  flex: none;
+  color: var(--sztb-text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.sztb-notice-kind {
+  flex: none;
+  width: 1em;
+  text-align: center;
+}
+
+.sztb-notice-row[data-kind="warn"] .sztb-notice-kind {
+  color: #b3730a;
+}
+
+.sztb-notice-row[data-kind="error"] .sztb-notice-kind {
+  color: var(--sztb-danger);
+}
+
+.sztb-notice-row[data-kind="success"] .sztb-notice-kind {
+  color: var(--sztb-ok);
+}
+
+.sztb-notice-text {
+  word-break: break-word;
+}
+
+/* sticky Toast：多一个「×」，点掉才走 */
+.sztb-toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.sztb-toast-text {
+  flex: 1;
+}
+
+.sztb-toast-close {
+  flex: none;
+  cursor: pointer;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 0 0 2px;
+  opacity: 0.75;
+}
+
+.sztb-toast-close:hover {
+  opacity: 1;
+}

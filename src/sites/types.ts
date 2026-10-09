@@ -8,6 +8,7 @@
  */
 
 import type { ModalOptions } from '../common/ui/widgets/modal.ts';
+import type { ToastOptions } from '../common/ui/widgets/toast.ts';
 
 /** 功能开关的风险分级，决定 UI 门禁强度（见 需求文档 §8.1 N1） */
 export type RiskLevel =
@@ -34,8 +35,13 @@ export interface PanelApi {
   expand(): void;
   /** 当前是否折叠 */
   isCollapsed(): boolean;
-  /** 弹一条 Toast */
-  toast(message: string, kind?: 'info' | 'warn' | 'error' | 'success'): void;
+  /**
+   * 弹一条 Toast。
+   *
+   * `options.sticky = true` 表示**不自动消失**，右上角带「×」由用户点掉 ——
+   * 只有异常/失败这类「错过了就查不到」的提示才该用。
+   */
+  toast(message: string, kind?: 'info' | 'warn' | 'error' | 'success', options?: ToastOptions): void;
   /** 弹二次确认框，resolve 为 true 表示用户点了确认 */
   confirm(options: ConfirmOptions): Promise<boolean>;
   /**

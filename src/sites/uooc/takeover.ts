@@ -46,6 +46,7 @@ import {
   type CatalogFailure,
 } from './fetch-catalog.ts';
 import { isCommitHttpOk, type CommitResult, type CommitVerdict } from './intercept.ts';
+import { noticePost, type NoticeKind } from './notice.ts';
 import { SITE_ID, TOGGLE, holdAfterMs, waitBeforeMs, waitTimeoutMs } from './settings.ts';
 
 const log = scoped('uooc/takeover');
@@ -105,9 +106,12 @@ function notify(): void {
   }
 }
 
-function setStatus(text: string): void {
+function setStatus(text: string, kind: NoticeKind = 'info'): void {
   statusText = text;
   notify();
+  // 状态行的每一句都同时进提示流（监视页顶部的历史 + 右上角 Toast），
+  // 单一出口在 notice.ts；`kind` 决定 Toast 要不要常驻（warn/error 不自动消失）
+  noticePost(text, kind);
 }
 
 export function takeoverStatus(): TakeoverStatus {
@@ -172,9 +176,9 @@ function stop(text: string): void {
  */
 async function fatal(host: PanelApi, status: string, body: string): Promise<void> {
   release();
-  setStatus(status);
+  // `'warn'` 会让这条提示在右上角**常驻**（带「×」），错过了还能回头看
+  setStatus(status, 'warn');
   log.warn(status);
-  host.toast(status, 'warn');
   await host.alert({
     title: '接管已停止',
     body,
