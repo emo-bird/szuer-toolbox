@@ -61,6 +61,8 @@ export const TOGGLE = {
   MUTE: 'mute',
   /** 🟢 防失焦暂停（U4） */
   KEEP_PLAYING: 'keep-playing',
+  /** 🟢 空白片源（V5）：把原片换成等长黑画面，只省流量不省时间 */
+  BLANK_VIDEO: 'blank-video',
   /** 🟠 AI 答题（U6–U9）：连播走到测验就交给它；关掉则停下等用户手动处理 */
   AI_ANSWER: 'ai-answer',
 } as const;
@@ -106,6 +108,17 @@ export const UOOC_TOGGLES: readonly SiteToggleDef[] = [
     id: TOGGLE.KEEP_PLAYING,
     label: '防暂停',
     desc: '暂停会被立刻恢复（含你自己按的暂停）',
+    risk: 'safe',
+    default: true,
+    group: GROUP.VIDEO,
+  },
+  {
+    id: TOGGLE.BLANK_VIDEO,
+    label: '空白片源',
+    desc:
+      '读到原片时长后立刻把片源换成等长的纯黑片段（自制的 1KB MP4），' +
+      '播放进度与上报的时长/进度照旧，但不再下载原片；' +
+      '只省流量不省时间（2 倍速下依然要播满一半时长），且只对本页之后加载的视频生效',
     risk: 'safe',
     default: true,
     group: GROUP.VIDEO,

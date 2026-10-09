@@ -35,6 +35,7 @@ import './suites/bkxk-custom-form.test.ts';
 import './suites/bkxk-tasks.test.ts';
 import './suites/bkxk-monitor.test.ts';
 import './suites/uooc-ai.test.ts';
+import './suites/uooc-blank.test.ts';
 import './suites/uooc-catalog.test.ts';
 import './suites/uooc-fetch-catalog.test.ts';
 import './suites/uooc-intercept.test.ts';

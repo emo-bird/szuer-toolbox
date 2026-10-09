@@ -37,6 +37,7 @@
 
 import { scoped } from '../../common/core/log.ts';
 import { isEnabled } from '../../common/core/settings.ts';
+import { maybeSwapToBlank } from './blank.ts';
 import { SITE_ID, TOGGLE } from './settings.ts';
 
 const log = scoped('uooc/video');
@@ -161,6 +162,10 @@ function findVideo(): HTMLVideoElement | null {
 /** 按当前设置应用一次；开关关掉时只回退我们改过的部分 */
 function apply(v: HTMLVideoElement): void {
   const state: Applied = applied.get(v) ?? { rate: false, mute: false };
+
+  // V5：拿到原片时长之后就换成等长空白片源。只做一次；换源会让元素重新走
+  // 加载算法，下面这些速率/静音设置会在新片源的 loadedmetadata 上再跑一遍。
+  maybeSwapToBlank(v);
 
   // 「已经播过」的判定：接手时它就在播，也算播过
   if (!v.paused && !v.ended) hasStarted.add(v);
