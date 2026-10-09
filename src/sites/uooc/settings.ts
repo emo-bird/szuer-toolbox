@@ -1,18 +1,20 @@
 /**
  * UOOC（优课联盟）的功能开关与配置项声明。
  *
- * 本文件**只声明**，不实现行为 —— 行为在 `video.ts` / `autoplay.ts` 等模块里。
+ * 本文件**只声明**，不实现行为 —— 行为在 `video.ts` / `takeover.ts` 等模块里。
  * 与 bkxk 的 `settings.ts` 同一套路：设置面板一次做完，后续每批只负责
  * 「读 `isEnabled` 然后干活」。
  *
- * ## 分区（用户 m01877 拍板）
+ * ## 分区（用户 m01877 拍板 + 后续调整）
  *
- * 设置项按 `group` 分成三页，分别由 `tabs/video.ts`、`tabs/autoplay.ts`、
- * `tabs/ai.ts` 渲染（`renderSiteSettings(..., { onlyGroups: [...] })`）：
+ * 设置项按 `group` 分组，由对应的站点标签页渲染
+ * （`renderSiteSettings(..., { onlyGroups: [...] })`）：
  *
- *   - `视频`   —— 播放器行为（倍速 / 静音 / 防暂停）
- *   - `连播`   —— 连播行为（等待时间、跳过什么）
- *   - `AI 作答` —— 答题开关与接口配置
+ *   - `视频`（`tabs/video.ts`）   —— `GROUP.VIDEO`：播放器行为（倍速 / 静音 / 防暂停）
+ *   - `等待`（`tabs/wait.ts`）    —— `GROUP.WAIT`：接管的三个等待参数
+ *     （wait-before / hold-after / wait-timeout，§E.5 从【连播】页整组搬过来）
+ *   - `AI 作答`（`tabs/ai.ts`）   —— `GROUP.AI`：答题开关与接口配置
+ *   - 【接管】页（`tabs/autoplay.ts`）只放「开始/停止接管」两个按钮，**不渲染设置**
  *
  * ⚠️ `group` 与标签页是**一体的**：加一个分组就要在同一提交里加对应标签页，
  * 否则那一组设置会在公共【设置】页里也看不到（UOOC 已声明 `settingsInOwnTabs`，
@@ -47,8 +49,8 @@ export const SITE_ID = 'uooc';
 export const GROUP = {
   /** 播放器行为（U1/U2/U4） */
   VIDEO: '视频',
-  /** 连播行为（U3） */
-  AUTOPLAY: '连播',
+  /** 接管的等待参数（wait-before / hold-after / wait-timeout），渲染在【等待】页 */
+  WAIT: '等待参数',
   /** AI 作答（U6–U9） */
   AI: 'AI 作答',
 } as const;
@@ -134,7 +136,7 @@ export function registerUoocSettings(): void {
     desc: '改完地址栏 hash 后先等这么久，再开始等页面元素出现（给页面加载与视频缓冲留时间）',
     default: '5000',
     kind: 'number',
-    group: GROUP.AUTOPLAY,
+    group: GROUP.WAIT,
   });
 
   registerValue<string>({
@@ -144,7 +146,7 @@ export function registerUoocSettings(): void {
     desc: '视频播放结束（ended）后停留这么久，再去重拉课程树确认完成状态',
     default: '5000',
     kind: 'number',
-    group: GROUP.AUTOPLAY,
+    group: GROUP.WAIT,
   });
 
   registerValue<string>({
@@ -154,7 +156,7 @@ export function registerUoocSettings(): void {
     desc: '除取数请求外，所有「等某个东西出现」的超时上限（等元素、等待测验交卷……）',
     default: '30000',
     kind: 'number',
-    group: GROUP.AUTOPLAY,
+    group: GROUP.WAIT,
   });
 
   // ------------------------------------------------------------ AI 作答（U6–U9）
