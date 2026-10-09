@@ -230,9 +230,4 @@ export function quizClear(): void {
   publishQuiz();
 }
 
-/** 测试用：全部清空并断开订阅 */
-export function resetMonitor(): void {
-  state = EMPTY;
-  quiz = null;
-  listeners.clear();
-}
+

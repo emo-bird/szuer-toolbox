@@ -110,14 +110,4 @@ export async function testConnection(
   }
 }
 
-/** 只用于日志：把地址里的 query 去掉，避免把 Key 打进日志 */
-export function safeBase(baseUrl: string): string {
-  const trimmed = baseUrl.trim();
-  if (trimmed === '') return '(未配置)';
-  try {
-    const u = new URL(trimmed);
-    return `${u.origin}${u.pathname.replace(/\/+$/, '')}`;
-  } catch {
-    return trimmed.split('?')[0] ?? trimmed;
-  }
-}
+
