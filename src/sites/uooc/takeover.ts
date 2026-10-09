@@ -406,11 +406,6 @@ async function reload(ctx: Ctx, t: { cancelled: boolean }): Promise<boolean> {
 }
 
 /** 某个任务点在最新的树里还是「未完成」吗（点没了也算不再拦路） */
-function stillUnfinished(ctx: Ctx, nodeId: string): boolean {
-  const found = ctx.points.find((p) => p.nodeId === nodeId);
-  return found !== undefined && !found.finished;
-}
-
 async function loop(host: PanelApi, t: { cancelled: boolean }): Promise<void> {
   // ---- ① 这是哪门课 ----
   const cid = courseIdFromLocation(location.pathname, location.hash);
@@ -496,11 +491,57 @@ async function loop(host: PanelApi, t: { cancelled: boolean }): Promise<void> {
       return;
     }
 
-    const target = firstUnfinishedSource(unit.sources, ctx.skippedSources);
-    if (target === null) {
-      // 站点说这一节还没做完（节点级 `finished=0`），但资源层给不出可做的项。
-      // 两种来路：① 这一节压根没有 10/80 的任务点；② 视频/测验都完成了，
-      // 只是站点的节点级汇总没跟上。无论哪种都**不能**在这儿空转，跳过它。
+    // ---- ③ 把这一节的资源**按顺序做完** ----
+    // 2026-10-09 用户拍板：视频播完**不再重拉课程树核实**，直接接着做这一节里排在后头的
+    // 那一个（通常是测验）。内层循环靠 `ctx.skippedSources` 记住「这一轮已经做过的资源」，
+    // **不靠站点的 `finished`** —— 站点记账是滞后的，靠它必然空转或者把同一集重做一遍。
+    let processed = 0;
+    for (;;) {
+      const target = firstUnfinishedSource(unit.sources, ctx.skippedSources);
+      if (target === null) break;
+
+      const kind: 'video' | 'quiz' = target.kind === 'video' ? 'video' : 'quiz';
+      const task: Task = { point: section, source: target, hash: hashForSource(cid, section, target) };
+      const label = taskLabel(task);
+      setStatus(
+        `接管中：${kind === 'video' ? '正在播放' : '正在作答'} ${label}（${sum.done}/${sum.total} 已完成）`,
+      );
+
+      if (kind === 'quiz') {
+        // §C.2 / D1：交卷响应本身就是结论 —— **不拉树核实**
+        const q = await handleQuiz(ctx, task, t);
+        if (t.cancelled) return;
+        if (!q.ok) return; // 内部已经 fatal() 或 stop() 过了
+        if (q.verdict !== 'pass') {
+          await fatal(
+            host,
+            `已停止 —— 测验「${label}」答了 ${q.rounds} 轮仍未通过`,
+            `这个测验连着作答并提交了 ${q.rounds} 轮，站点每次都判没到及格线。\n\n` +
+              `位置：${label}\n\n` +
+              '去页面看一眼得分与及格线，再决定要不要点【开始接管】接着走。',
+          );
+          return;
+        }
+        processed += 1;
+        // 通过之后同样记「已处理」：课程树这一轮不会再重拉，不记的话下一轮会把同一张卷再做一遍
+        ctx.skippedSources.add(task.source.sourceId);
+        continue;
+      }
+
+      const handled = await handleVideo(ctx, task, t);
+      if (t.cancelled) return;
+      if (!handled) return; // 内部已经 fatal() 或 stop() 过了
+
+      // 播到底了（`handleVideo` 内部已经等过「播完后停留」）—— 记「已处理」，
+      // 内层循环立刻挑这一节的下一个资源（通常就是测验），**不重拉课程树**
+      processed += 1;
+      ctx.skippedSources.add(task.source.sourceId);
+    }
+
+    if (processed === 0) {
+      // 一个可做的都没有。两种来路：① 这一节压根没有 10/80 的任务点；
+      // ② 视频/测验都完成了，只是站点的节点级汇总没跟上。
+      // 无论哪种都**不能**在这儿空转，跳过它（也没必要为它重拉树：什么都没做）
       const taskSources = unit.sources.filter((s) => s.isTask);
       for (const s of unit.sources) {
         if (s.kind === 'unknown' && !ctx.warnedTypes.has(s.type)) {
@@ -520,59 +561,19 @@ async function loop(host: PanelApi, t: { cancelled: boolean }): Promise<void> {
       continue;
     }
 
-    // ---- 视频 / 测验：真干活 ----
-    const kind: 'video' | 'quiz' = target.kind === 'video' ? 'video' : 'quiz';
-    const task: Task = { point: section, source: target, hash: hashForSource(cid, section, target) };
-    const label = taskLabel(task);
-    setStatus(
-      `接管中：${kind === 'video' ? '正在播放' : '正在作答'} ${label}（${sum.done}/${sum.total} 已完成）`,
-    );
-
-    if (kind === 'quiz') {
-      // §C.2 / D1：交卷响应本身就是结论 —— **不再拉树核实**
-      const q = await handleQuiz(ctx, task, t);
-      if (t.cancelled) return;
-      if (!q.ok) return; // 内部已经 fatal() 或 stop() 过了
-      if (q.verdict === 'pass') continue;
-
-      await fatal(
-        host,
-        `已停止 —— 测验「${label}」答了 ${q.rounds} 轮仍未通过`,
-        `这个测验连着作答并提交了 ${q.rounds} 轮，站点每次都判没到及格线。\n\n` +
-          `位置：${label}\n\n` +
-          '去页面看一眼得分与及格线，再决定要不要点【开始接管】接着走。',
-      );
-      return;
+    // ---- ④ 这一节做完了：**重拉一次课程树** ----
+    // 这是整轮接管里**唯一**会重拉的地方（用户 2026-10-09 拍板 C）。节点级 `finished`
+    // 是资源级状态的汇总，所以「这一节都做完了」这一刻重拉，进度、终点判定与
+    // 「下一个未完成的节」才会跟着往前走 —— 只在视频播完那一刻拉是查不出东西的。
+    log.info(`「${section.name}」这一节处理了 ${processed} 个任务点，重拉课程树刷新进度`);
+    if (!(await reload(ctx, t))) return;
+    if (t.cancelled) return;
+    // 重拉之后站点仍标这一节未完成 ⇒ 本轮不再挑它（防死循环）；
+    // 记上了的话它本来就不会再被 `firstUnfinished` 挑中，这一句是幂等的
+    if (ctx.points.find((p) => p.nodeId === section.nodeId)?.finished !== true) {
+      log.warn(`「${section.name}」(${section.nodeId}) 做完了但站点仍标未完成，本轮先跳过它`);
+      ctx.skipped.add(section.nodeId);
     }
-
-    const handled = await handleVideo(ctx, task, t);
-    if (t.cancelled) return;
-    if (!handled) return; // 内部已经 fatal() 或 stop() 过了
-
-    // ---- 统一核实（§B.5：以重拉到的 finished 为准）----
-    if (!(await reload(ctx, t))) return;
-    if (t.cancelled) return;
-    if (!stillUnfinished(ctx, section.nodeId)) continue;
-
-    // §C.1 第 4 步：再等一个「全局等待超时」，再重拉一次；仍不行就弹窗停下
-    setStatus(`接管中：视频「${label}」播完了，等站点记账（最多 ${Math.round(waitTimeoutMs() / 1000)} 秒）…`);
-    log.info(`视频「${label}」播完了但还没记完成，等 ${waitTimeoutMs()}ms 再拉一次`);
-    await sleep(waitTimeoutMs(), t);
-    if (t.cancelled) return;
-    if (!(await reload(ctx, t))) return;
-    if (t.cancelled) return;
-    if (!stillUnfinished(ctx, section.nodeId)) continue;
-
-    await fatal(
-      host,
-      `已停止 —— 视频「${label}」播完两轮仍未记完成`,
-      `这一项已经完整播完，又等了两轮（${holdAfterMs()} 毫秒 + ${waitTimeoutMs()} 毫秒）` +
-        '重新拉取课程目录，站点那边仍然显示未完成。\n\n' +
-        `位置：${label}\n\n` +
-        '可能原因：播放没真正到底（比如一直卡着 / 被暂停）、或者站点记账更慢。\n' +
-        '去页面看一眼这一项现在的状态，再决定要不要点【开始接管】接着走。',
-    );
-    return;
   }
 }
 
@@ -610,9 +611,19 @@ async function handleVideo(ctx: Ctx, task: Task, t: { cancelled: boolean }): Pro
   const ended = await waitVideoEnd(video, t);
   if (t.cancelled) return false;
   if (!ended) {
-    // 没等到 ended：不重播、也不立刻弹窗 —— 交给后面的「重拉核实」去判断，
-    // 那边发现仍未完成会走 §C.1 的两轮等待，最后弹窗，上限是明确的。
-    log.warn(`视频「${label}」没等到播完（被暂停 / 出错 / 超保底时长），转去核实完成状态`);
+    // 2026-10-09 用户拍板 A：**不假报成功**。原来这里靠「重拉树核实」兜住，
+    // 那条路已经按用户要求删掉了 ⇒ 没等到 `ended` 就如实停下（红线：「没抛异常」≠「成功了」）
+    const total = Number.isFinite(video.duration) ? `${video.duration.toFixed(1)}s` : '未知';
+    await fatal(
+      ctx.host,
+      `已停止 —— 视频「${label}」没播到底`,
+      `等着它播完，但一直没等到 \`ended\`（当前 ${video.currentTime.toFixed(1)}s / ${total}，` +
+        `播放速率 ${video.playbackRate}x）。\n\n` +
+        `位置：${label}\n\n` +
+        '可能原因：播放被暂停（比如页面失焦且「防暂停」没开）、加载出错、或者它压根没在播。\n' +
+        '去页面看一眼这一项现在的状态，再决定要不要点【开始接管】接着走。',
+    );
+    return false;
   }
 
   // §C.1 第 3 步：`ended` 之后等 HOLD_AFTER_MS（= 5000），站点上报完成状态需要时间

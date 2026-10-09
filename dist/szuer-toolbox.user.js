@@ -52,7 +52,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-09T14:32:11.126Z（构建号 99） */
+/* 构建信息：2026-10-09T14:51:55.358Z（构建号 101） */
 
 "use strict";
 (() => {
@@ -4573,10 +4573,6 @@ ${detail}
     await fatalCatalog(ctx.host, res.failure, res.attempts);
     return false;
   }
-  function stillUnfinished(ctx, nodeId) {
-    const found = ctx.points.find((p) => p.nodeId === nodeId);
-    return found !== void 0 && !found.finished;
-  }
   async function loop(host2, t) {
     const cid = courseIdFromLocation(location.pathname, location.hash);
     if (cid === null) {
@@ -4648,8 +4644,43 @@ ${detail}
         await fatalCatalog(host2, unit.failure, unit.attempts);
         return;
       }
-      const target = firstUnfinishedSource(unit.sources, ctx.skippedSources);
-      if (target === null) {
+      let processed = 0;
+      for (; ; ) {
+        const target = firstUnfinishedSource(unit.sources, ctx.skippedSources);
+        if (target === null) break;
+        const kind = target.kind === "video" ? "video" : "quiz";
+        const task = { point: section, source: target, hash: hashForSource(cid, section, target) };
+        const label = taskLabel(task);
+        setStatus2(
+          `接管中：${kind === "video" ? "正在播放" : "正在作答"} ${label}（${sum.done}/${sum.total} 已完成）`
+        );
+        if (kind === "quiz") {
+          const q = await handleQuiz(ctx, task, t);
+          if (t.cancelled) return;
+          if (!q.ok) return;
+          if (q.verdict !== "pass") {
+            await fatal(
+              host2,
+              `已停止 —— 测验「${label}」答了 ${q.rounds} 轮仍未通过`,
+              `这个测验连着作答并提交了 ${q.rounds} 轮，站点每次都判没到及格线。
+
+位置：${label}
+
+去页面看一眼得分与及格线，再决定要不要点【开始接管】接着走。`
+            );
+            return;
+          }
+          processed += 1;
+          ctx.skippedSources.add(task.source.sourceId);
+          continue;
+        }
+        const handled = await handleVideo(ctx, task, t);
+        if (t.cancelled) return;
+        if (!handled) return;
+        processed += 1;
+        ctx.skippedSources.add(task.source.sourceId);
+      }
+      if (processed === 0) {
         const taskSources = unit.sources.filter((s) => s.isTask);
         for (const s of unit.sources) {
           if (s.kind === "unknown" && !ctx.warnedTypes.has(s.type)) {
@@ -4664,52 +4695,13 @@ ${detail}
         ctx.skipped.add(section.nodeId);
         continue;
       }
-      const kind = target.kind === "video" ? "video" : "quiz";
-      const task = { point: section, source: target, hash: hashForSource(cid, section, target) };
-      const label = taskLabel(task);
-      setStatus2(
-        `接管中：${kind === "video" ? "正在播放" : "正在作答"} ${label}（${sum.done}/${sum.total} 已完成）`
-      );
-      if (kind === "quiz") {
-        const q = await handleQuiz(ctx, task, t);
-        if (t.cancelled) return;
-        if (!q.ok) return;
-        if (q.verdict === "pass") continue;
-        await fatal(
-          host2,
-          `已停止 —— 测验「${label}」答了 ${q.rounds} 轮仍未通过`,
-          `这个测验连着作答并提交了 ${q.rounds} 轮，站点每次都判没到及格线。
-
-位置：${label}
-
-去页面看一眼得分与及格线，再决定要不要点【开始接管】接着走。`
-        );
-        return;
+      log14.info(`「${section.name}」这一节处理了 ${processed} 个任务点，重拉课程树刷新进度`);
+      if (!await reload(ctx, t)) return;
+      if (t.cancelled) return;
+      if (ctx.points.find((p) => p.nodeId === section.nodeId)?.finished !== true) {
+        log14.warn(`「${section.name}」(${section.nodeId}) 做完了但站点仍标未完成，本轮先跳过它`);
+        ctx.skipped.add(section.nodeId);
       }
-      const handled = await handleVideo(ctx, task, t);
-      if (t.cancelled) return;
-      if (!handled) return;
-      if (!await reload(ctx, t)) return;
-      if (t.cancelled) return;
-      if (!stillUnfinished(ctx, section.nodeId)) continue;
-      setStatus2(`接管中：视频「${label}」播完了，等站点记账（最多 ${Math.round(waitTimeoutMs() / 1e3)} 秒）…`);
-      log14.info(`视频「${label}」播完了但还没记完成，等 ${waitTimeoutMs()}ms 再拉一次`);
-      await sleep2(waitTimeoutMs(), t);
-      if (t.cancelled) return;
-      if (!await reload(ctx, t)) return;
-      if (t.cancelled) return;
-      if (!stillUnfinished(ctx, section.nodeId)) continue;
-      await fatal(
-        host2,
-        `已停止 —— 视频「${label}」播完两轮仍未记完成`,
-        `这一项已经完整播完，又等了两轮（${holdAfterMs()} 毫秒 + ${waitTimeoutMs()} 毫秒）重新拉取课程目录，站点那边仍然显示未完成。
-
-位置：${label}
-
-可能原因：播放没真正到底（比如一直卡着 / 被暂停）、或者站点记账更慢。
-去页面看一眼这一项现在的状态，再决定要不要点【开始接管】接着走。`
-      );
-      return;
     }
   }
   async function handleVideo(ctx, task, t) {
@@ -4743,7 +4735,18 @@ ${detail}
     const ended = await waitVideoEnd(video, t);
     if (t.cancelled) return false;
     if (!ended) {
-      log14.warn(`视频「${label}」没等到播完（被暂停 / 出错 / 超保底时长），转去核实完成状态`);
+      const total = Number.isFinite(video.duration) ? `${video.duration.toFixed(1)}s` : "未知";
+      await fatal(
+        ctx.host,
+        `已停止 —— 视频「${label}」没播到底`,
+        `等着它播完，但一直没等到 \`ended\`（当前 ${video.currentTime.toFixed(1)}s / ${total}，播放速率 ${video.playbackRate}x）。
+
+位置：${label}
+
+可能原因：播放被暂停（比如页面失焦且「防暂停」没开）、加载出错、或者它压根没在播。
+去页面看一眼这一项现在的状态，再决定要不要点【开始接管】接着走。`
+      );
+      return false;
     }
     await sleep2(holdAfterMs(), t);
     return !t.cancelled;
@@ -10180,8 +10183,8 @@ ${text2}
   // src/main.ts
   var log33 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-09T14:32:11.126Z" : null;
-  var BUILD_NO = true ? 99 : null;
+  var BUILD_TIME = true ? "2026-10-09T14:51:55.358Z" : null;
+  var BUILD_NO = true ? 101 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();
