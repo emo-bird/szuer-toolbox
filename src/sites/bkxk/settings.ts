@@ -50,6 +50,19 @@ export const VALUE = {
 } as const;
 
 /**
+ * 功能页判定的路径片段（**单一来源**）。
+ *
+ * 适配器 `pages` 与模块内部判页（list / timetable）都从这里取，禁止各自写裸字符串 ——
+ * 写两处的代价是「面板展开了但模块不干活」这类静默错位（改一处漏一处）。
+ */
+export const PAGE_MARK = {
+  /** 选课页：`…default/grablessons.do…` */
+  GRAB: 'grablessons.do',
+  /** 课表页：`…default/curriculum.do…` */
+  CURRICULUM: 'curriculum.do',
+} as const;
+
+/**
  * 已经废弃、但可能还留在存储里的配置项键。
  *
  * 「监控类别」（`monitorCategory`）在 v0.31 被删掉 —— 每条监控项自己带着类别，
