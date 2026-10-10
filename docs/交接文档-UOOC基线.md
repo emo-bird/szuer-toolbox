@@ -1,5 +1,8 @@
 # 交接文档 · UOOC 基线（szuer-toolbox）
 
+> ⚠️ **历史快照（2026-10 清理后）**：本文描述 `087b476` 的旧基线，其中 `demo/` 适配器、
+> `common/core/bus.ts`、`uooc/autoplay.ts` 等**现已删除**；现行状态见 `docs/README.md`。
+>
 > **基准点**：commit **`087b476`** —— `style(uooc): 简化设置项文案，去掉长说明与 markdown 星号`
 > （分支 `docs/handoff-uooc-baseline`，就是本文所在的分支；工作树干净）。
 >

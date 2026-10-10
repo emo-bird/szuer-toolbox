@@ -503,12 +503,16 @@ showModalAlert(shadowRoot: ShadowRoot, options: ModalOptions): Promise<string | 
 | F | 第二轮 `runQuizAnswer` 会不会变成「原样重交」 | ⚠️ **未定**：`runQuizAnswer` 里 `already = studentAnswer.length > 0 \|\| isAnsweredInDom(id)`，第二轮进来看页面已有答案 ⇒ `todo` 为空 ⇒ **不请求模型，直接把上一轮答案再交一次**。低分题仍有 `retryLowScore` 兜着，所以重做不会彻底失效，但那一轮提交是**浪费**。用户 m01884 Q6 拍的是「轮内」累计投票，**跨 takeover 轮次的累计还没定**，等实测 |
 ---
 
-## §G 落地后要清理的东西
+## §G 落地后要清理的东西（✅ 已于 `cleanup/code-clarity` 执行）
 
-**用户拍板：等新方案写完再清理**（现在一行都不删）。本轮又补拍两条：
+> **本节记录的是清理前的计划；清理已执行**，实际结果见 `docs/清理核验报告.md` §5
+> 与 `docs/README.md` §三。下面保留原始拍板文字供追溯。
+
+**用户拍板：等新方案写完再清理**（当时一行都不删）。本轮又补拍两条：
 
 - **新循环落点 = 新建 `src/sites/uooc/takeover.ts`**（本轮拍板），旧的
-  `src/sites/uooc/autoplay.ts` **一行不动** —— 随时可比对 / 回退。等新方案跑通手测后再按下面清理。
+  `src/sites/uooc/autoplay.ts` 当时**一行不动** —— 随时可比对 / 回退。
+  ⇒ **现已删除**（A2，commit `007b638`）。
 - **不复用 git 历史里的旧 `catalog.ts` 实现**（本轮拍板）：`b701b6b`
   （`feat(uooc): 自动连播 U3`）那版 273 行里确实有实测过的 `parseCatalogTree` /
   `sourceHash`（hash 模板与 §A.2 完全一致）/ `courseIdFromLocation`，但它的模型是
@@ -518,8 +522,8 @@ showModalAlert(shadowRoot: ShadowRoot, options: ModalOptions): Promise<string | 
 
 候选清理清单：
 
-- `src/sites/uooc/autoplay.ts` —— 整份重写，所有 DOM 点击逻辑（`.active` 识别、`SKIP_ATTR` 三道闸、章节展开、看门狗）作废。
-- `src/sites/uooc/intercept.ts`（14 KB）—— XHR 嗅探目录接口，新方案直接自己发请求，需评估是否还有别的用处。
+- `src/sites/uooc/autoplay.ts` —— ✅ **已删除**（A2）：所有 DOM 点击逻辑（`.active` 识别、`SKIP_ATTR` 三道闸、章节展开、看门狗）随文件作废。
+- `src/sites/uooc/intercept.ts` —— ✅ **已收敛**（核验 §2.1）：catalog/unit 缓存层删除；learn 拦截保留、只留痕不缓存；交卷嗅探（`waitCommit`）仍在用。
 - `src/sites/uooc/catalog.ts`（1.8 KB）。
 - `src/sites/uooc/ai/fill.ts` 里的新版分支。
 - 相关文档：`docs/UOOC-连播与答题-需求细则.md`（本文件取代它）、`docs/UOOC-双版目录结构底图.md` 里的旧版目录部分。
