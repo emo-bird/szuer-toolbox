@@ -178,7 +178,7 @@ describe('common/ui/tab-order —— 记忆键与恢复', () => {
   });
 
   it('站点 id 里不含冒号（键结构不会被撑破），也没有空白', () => {
-    for (const id of ['bkxk', 'uooc', 'demo']) {
+    for (const id of ['bkxk', 'uooc']) {
       assert(!id.includes(':'), `${id} 不应含冒号`);
       assert(!/\s/.test(id), `${id} 不应含空白`);
     }

@@ -4,8 +4,7 @@
  * 为什么不用 `list.css` + esbuild 的 `--loader:.css=text`（`src/main.ts:24` 那种写法）：
  * `tests/run.ts` 会 import 站点适配器（`sites-registered` 那套），而 node 原生不认识
  * `.css`，会直接 `ERR_UNKNOWN_FILE_EXTENSION` 把整轮测试打挂。项目里标签页的样式
- * 也一律写在 `.ts` 里（`src/common/ui/tabs/log.ts` 的 `tabCss`、`src/sites/demo/index.ts`
- * 的 `demoCss`），这里跟随同一约定。
+ * 也一律写在 `.ts` 里，这里跟随同一约定。
  *
  * 样式进的是**页面**（`<style>` 塞进 `document.head`），不是悬浮窗的 shadow root ——
  * 因为我们改的是站点自己的行/卡片，必须和站点样式同处一个作用域。
