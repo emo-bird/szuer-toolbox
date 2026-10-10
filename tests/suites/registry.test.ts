@@ -6,7 +6,7 @@
  */
 
 import { describe, it, assert, assertEqual } from '../harness.ts';
-import { resolve, resolveString, isFeaturePage, resetRegistry, registerAdapter, DEBUG_HASH_FLAG } from '../../src/sites/registry.ts';
+import { resolve, resolveString, isFeaturePage, resetRegistry, registerAdapter } from '../../src/sites/registry.ts';
 import type { SiteAdapter } from '../../src/sites/types.ts';
 
 function makeAdapter(over: Partial<SiteAdapter> & Pick<SiteAdapter, 'id' | 'hosts'>): SiteAdapter {
@@ -64,19 +64,6 @@ describe('sites/registry —— 分派规则', () => {
   it('相似域伪装不应被当成 szu 子域', () => {
     assertEqual(resolve(new URL('https://szu.edu.cn.evil.com/'), all).inject, false);
     assertEqual(resolve(new URL('https://notszu.edu.cn/'), all).inject, false);
-  });
-
-  it('hash 带调试标记时强制注入 demo 适配器', () => {
-    const demo = makeAdapter({ id: 'demo', hosts: ['localhost'], pages: ['*'] });
-    const r = resolve(new URL(`https://example.com/x#${DEBUG_HASH_FLAG}`), [...all, demo]);
-    assertEqual(r.inject, true);
-    assertEqual(r.adapter?.id, 'demo');
-    assertEqual(r.reason, 'debug-flag');
-  });
-
-  it('hash 带调试标记但没有 demo 适配器时不注入', () => {
-    const r = resolve(new URL(`https://example.com/x#${DEBUG_HASH_FLAG}`), all);
-    assertEqual(r.inject, false);
   });
 
   it('pages 为空数组表示该站点任意页面都自动展开', () => {

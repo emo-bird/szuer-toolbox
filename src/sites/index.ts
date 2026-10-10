@@ -18,7 +18,6 @@
 
 import { registerAdapter, allAdapters } from './registry.ts';
 import { registerToggles } from '../common/core/settings.ts';
-import { demoAdapter } from './demo/index.ts';
 import { uoocAdapter } from './uooc/index.ts';
 import { bkxkAdapter } from './bkxk/index.ts';
 
@@ -29,7 +28,6 @@ import { bkxkAdapter } from './bkxk/index.ts';
  * 因为它们要读入口模块自己的运行时状态（如当前已装载的适配器 id）。
  */
 export function registerSites(): void {
-  registerAdapter(demoAdapter);
   registerAdapter(uoocAdapter);
   registerAdapter(bkxkAdapter);
 
@@ -45,4 +43,4 @@ export function registeredSiteIds(): string[] {
   return allAdapters().map((a) => a.id);
 }
 
-export { demoAdapter, uoocAdapter, bkxkAdapter };
+export { uoocAdapter, bkxkAdapter };

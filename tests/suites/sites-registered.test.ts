@@ -35,12 +35,11 @@ function bootReal(): void {
 }
 
 describe('sites 真实注册表 —— 与 userscript header 的 @match 对齐', () => {
-  it('registerSites() 至少注册了 demo、uooc 与 bkxk', () => {
+  it('registerSites() 注册了 uooc 与 bkxk', () => {
     bootReal();
     const ids = allAdapters().map((a) => a.id);
     assert(ids.includes('uooc'), `registerSites() 必须注册 uooc，实际=${ids.join(',')}`);
     assert(ids.includes('bkxk'), `registerSites() 必须注册 bkxk，实际=${ids.join(',')}`);
-    assert(ids.includes('demo'), `registerSites() 必须注册 demo，实际=${ids.join(',')}`);
   });
 
   it('UOOC 学习页（旧版 hash 路由）必须注入', () => {

@@ -52,7 +52,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-09T17:04:19.675Z（构建号 104） */
+/* 构建信息：2026-10-10T07:52:55.662Z（构建号 105） */
 
 "use strict";
 (() => {
@@ -388,13 +388,13 @@
       style.dataset["tab"] = tab.id;
       style.textContent = tab.css ?? "";
       this.shadowRoot.appendChild(style);
-      const button2 = el("button", {
+      const button = el("button", {
         class: "sztb-tab",
         text: tab.title,
         attrs: { type: "button", role: "tab", "aria-selected": "false", "data-tab": tab.id },
         on: { click: () => this.activate(tab.id) }
       });
-      this.tabbar.appendChild(button2);
+      this.tabbar.appendChild(button);
       const pane = el("div", { class: "sztb-pane", attrs: { role: "tabpanel" }, data: { tab: tab.id } });
       this.body.appendChild(pane);
       let dispose;
@@ -414,8 +414,8 @@
         return;
       }
       this.current = tabId;
-      for (const button2 of this.tabbar.querySelectorAll(".sztb-tab")) {
-        button2.setAttribute("aria-selected", String(button2.dataset["tab"] === tabId));
+      for (const button of this.tabbar.querySelectorAll(".sztb-tab")) {
+        button.setAttribute("aria-selected", String(button.dataset["tab"] === tabId));
       }
       for (const pane of this.body.querySelectorAll(".sztb-pane")) {
         pane.dataset["active"] = String(pane.dataset["tab"] === tabId);
@@ -1887,7 +1887,6 @@ ${options.desc ?? ""}
 
   // src/sites/registry.ts
   var SUPPORTED_ROOT_DOMAINS = ["szu.edu.cn"];
-  var DEBUG_HASH_FLAG = "sztb-demo";
   var adapters = [];
   function registerAdapter(adapter) {
     const existing = adapters.findIndex((a) => a.id === adapter.id);
@@ -1914,7 +1913,6 @@ ${options.desc ?? ""}
   }
   var NOT_INJECT = { inject: false, adapter: null, autoExpand: false, reason: "none" };
   function resolve(url, registry = adapters) {
-    const debugForced = url.hash.includes(DEBUG_HASH_FLAG);
     for (const adapter of registry) {
       if (matchAnyHost(url.hostname, adapter.hosts)) {
         return {
@@ -1923,12 +1921,6 @@ ${options.desc ?? ""}
           autoExpand: isFeaturePage(url, adapter),
           reason: "adapter"
         };
-      }
-    }
-    if (debugForced) {
-      const demo = registry.find((a) => a.id === "demo");
-      if (demo !== void 0) {
-        return { inject: true, adapter: demo, autoExpand: true, reason: "debug-flag" };
       }
     }
     if (SUPPORTED_ROOT_DOMAINS.some((root) => isUnderDomain(url.hostname, root))) {
@@ -1940,103 +1932,6 @@ ${options.desc ?? ""}
     if (adapter.pages.length === 0) return true;
     return matchAnyPage(url, adapter.pages);
   }
-
-  // src/sites/demo/index.ts
-  var log4 = scoped("site/demo");
-  var demoCss = `
-.demo-box { display: flex; flex-direction: column; gap: 8px; }
-.demo-hint { color: var(--sztb-text-dim); font-size: 12px; }
-`;
-  function button(label, onClick, variant) {
-    return el("button", {
-      class: "sztb-btn",
-      text: label,
-      attrs: { type: "button", ...variant !== void 0 ? { "data-variant": variant } : {} },
-      on: {
-        click: () => {
-          void onClick();
-        }
-      }
-    });
-  }
-  var demoTab = {
-    id: "demo:playground",
-    title: "演示",
-    order: 100,
-    css: demoCss,
-    mount(root, ctx) {
-      const box = el(
-        "div",
-        { class: "demo-box" },
-        el("div", {
-          class: "demo-hint",
-          text: "这个标签页只在本机测试时出现，用来验证框架各部件是否正常。"
-        }),
-        button("弹一条 Toast", () => ctx.host.toast("这是一条测试提示", "success")),
-        button("弹二次确认（危险）", async () => {
-          const ok = await ctx.host.confirm({
-            title: "危险操作确认",
-            body: "这是演示用的二次确认框。\n确认后会弹一条 Toast。",
-            danger: true
-          });
-          ctx.host.toast(ok ? "你点了确认" : "你取消了", ok ? "warn" : "info");
-        }),
-        button("写一条日志", () => {
-          log4.info("来自演示标签页的日志", { siteId: ctx.siteId, queue: queueDepth() });
-          ctx.host.toast("已写入日志，切到「日志」标签页查看");
-        }),
-        button("排一个请求（走限流队列）", async () => {
-          ctx.host.toast(`请求已入队（间隔 ${getIntervalMs()}ms）`);
-          try {
-            const res = await request({ url: `${location.origin}/?_sztb_probe=${Date.now()}`, method: "GET" });
-            log4.info(`探测请求返回 ${res.status}`, { elapsedMs: res.elapsedMs });
-            ctx.host.toast(`返回 ${res.status}，耗时 ${res.elapsedMs}ms`, "success");
-          } catch (err) {
-            log4.warn("探测请求失败", err);
-            ctx.host.toast("请求失败，详见日志", "error");
-          }
-        }),
-        button("折叠悬浮窗", () => ctx.host.collapse())
-      );
-      root.appendChild(box);
-    }
-  };
-  var demoAdapter = {
-    id: "demo",
-    name: "演示站点",
-    hosts: ["localhost", "127.0.0.1", "*.localhost"],
-    pages: ["*"],
-    tabs: [demoTab],
-    toggles: [
-      {
-        id: "demo-safe",
-        label: "只读示例开关",
-        desc: "🟢 只读类，任何时候都能勾。",
-        risk: "safe",
-        default: true,
-        group: "演示"
-      },
-      {
-        id: "demo-trace",
-        label: "留痕示例开关",
-        desc: "🟠 会在站点留下访问记录，默认关闭。",
-        risk: "trace",
-        default: true,
-        group: "演示"
-      },
-      {
-        id: "demo-irreversible",
-        label: "不可逆示例开关",
-        desc: "🔴 勾选后会弹二次确认（提交类操作的门禁演示）。",
-        risk: "irreversible",
-        default: true,
-        group: "演示"
-      }
-    ],
-    init(ctx) {
-      log4.info(`演示适配器已启用：isFeaturePage=${String(ctx.isFeaturePage)}`);
-    }
-  };
 
   // src/common/utils/page.ts
   function pageWindow() {
@@ -2061,7 +1956,7 @@ ${options.desc ?? ""}
   }
 
   // src/sites/uooc/intercept.ts
-  var log5 = scoped("uooc/intercept");
+  var log4 = scoped("uooc/intercept");
   function matchLearnApi(rawUrl) {
     const path = rawUrl.split("#")[0] ?? "";
     if (path.includes("/home/learn/getCatalogList")) {
@@ -2144,16 +2039,16 @@ ${options.desc ?? ""}
     try {
       body = JSON.parse(text2);
     } catch {
-      log5.warn("截获到的响应不是 JSON，已忽略", rawUrl);
+      log4.warn("截获到的响应不是 JSON，已忽略", rawUrl);
       return;
     }
     if (isCommit) {
       const result = primeCommit(body, httpStatus);
-      log5.debug("截获交卷响应", `${result.verdict} / HTTP ${httpStatus} / 得分 ${result.score}`);
+      log4.debug("截获交卷响应", `${result.verdict} / HTTP ${httpStatus} / 得分 ${result.score}`);
     } else if (api !== null && api.kind === "catalog") {
-      log5.debug("截获 getCatalogList（只留痕，缓存层已删）", api.cid);
+      log4.debug("截获 getCatalogList（只留痕，缓存层已删）", api.cid);
     } else if (api !== null) {
-      log5.debug("截获 getUnitLearn（只留痕，缓存层已删）", api.catalogId);
+      log4.debug("截获 getUnitLearn（只留痕，缓存层已删）", api.catalogId);
     }
   }
   function shouldSniff(rawUrl) {
@@ -2191,7 +2086,7 @@ ${options.desc ?? ""}
       return origSend.apply(this, args);
     };
     Object.defineProperty(proto, XHR_MARK, { value: true, enumerable: false, configurable: true });
-    log5.debug("XMLHttpRequest 只读嗅探已装");
+    log4.debug("XMLHttpRequest 只读嗅探已装");
     return true;
   }
   var FETCH_MARK = "__szuUoocFetchInstalled";
@@ -2220,7 +2115,7 @@ ${options.desc ?? ""}
     };
     realm["fetch"] = patched;
     Object.defineProperty(realm, FETCH_MARK, { value: true, enumerable: false, configurable: true });
-    log5.debug("fetch 只读嗅探已装");
+    log4.debug("fetch 只读嗅探已装");
     return true;
   }
   function installUoocIntercept(realm = pageOrSelf()) {
@@ -2246,13 +2141,13 @@ ${options.desc ?? ""}
       } catch {
       }
     }
-    if (n > 0) log5.debug(`已给 ${n} 个 iframe 补装嗅探`);
+    if (n > 0) log4.debug(`已给 ${n} 个 iframe 补装嗅探`);
     return n;
   }
 
   // src/sites/uooc/notice.ts
   var MAX_NOTICES = 40;
-  var log6 = scoped("uooc/notice");
+  var log5 = scoped("uooc/notice");
   var seq3 = 0;
   var list = [];
   var listeners2 = /* @__PURE__ */ new Set();
@@ -2279,7 +2174,7 @@ ${options.desc ?? ""}
       try {
         fn();
       } catch (err) {
-        log6.warn("提示流订阅者抛错", String(err));
+        log5.warn("提示流订阅者抛错", String(err));
       }
     }
   }
@@ -2299,18 +2194,18 @@ ${options.desc ?? ""}
     if (options.quiet === true) return;
     const sticky = kind === "warn" || kind === "error";
     if (sink === null) {
-      log6.debug(`面板还没绑 Toast 出口，只记监视页：${msg}`);
+      log5.debug(`面板还没绑 Toast 出口，只记监视页：${msg}`);
       return;
     }
     try {
       sink.toast(msg, kind, { sticky });
     } catch (err) {
-      log6.warn("Toast 出口抛错", String(err));
+      log5.warn("Toast 出口抛错", String(err));
     }
   }
 
   // src/sites/uooc/settings.ts
-  var log7 = scoped("uooc/settings");
+  var log6 = scoped("uooc/settings");
   var SITE_ID = "uooc";
   var GROUP = {
     /** 播放器行为（U1/U2/U4） */
@@ -2458,9 +2353,12 @@ ${options.desc ?? ""}
   }
   function readMs(id, fallbackMs) {
     const raw = getValue(SITE_ID, id);
-    const n = typeof raw === "string" && raw.trim() !== "" ? Number(raw.trim()) : Number.NaN;
+    let n;
+    if (typeof raw === "number") n = raw;
+    else if (typeof raw === "string" && raw.trim() !== "") n = Number(raw.trim());
+    else n = Number.NaN;
     if (!Number.isFinite(n) || n < 0) {
-      log7.warn(`${id} 取值异常（${String(raw)}），按 ${fallbackMs}ms 处理`);
+      log6.warn(`${id} 取值异常（${String(raw)}），按 ${fallbackMs}ms 处理`);
       return fallbackMs;
     }
     return n;
@@ -2496,7 +2394,7 @@ ${options.desc ?? ""}
     waitBeforeMs();
     holdAfterMs();
     aiConcurrency();
-    log7.info(`AI 作答配置：${aiConfig() === null ? "未配置（AI 答题用不了）" : "已配置"}`);
+    log6.info(`AI 作答配置：${aiConfig() === null ? "未配置（AI 答题用不了）" : "已配置"}`);
   }
 
   // src/sites/uooc/ai/fill-dom.ts
@@ -3215,7 +3113,7 @@ ${options.desc ?? ""}
   }
 
   // src/sites/uooc/ai/monitor.ts
-  var log8 = scoped("uooc/ai/monitor");
+  var log7 = scoped("uooc/ai/monitor");
   var QUESTION_STATUS_TEXT = {
     pending: "等待中",
     answered: "已作答",
@@ -3249,7 +3147,7 @@ ${options.desc ?? ""}
       try {
         fn();
       } catch (err) {
-        log8.warn("监视页订阅者抛异常，已忽略", err instanceof Error ? err.message : String(err));
+        log7.warn("监视页订阅者抛异常，已忽略", err instanceof Error ? err.message : String(err));
       }
     }
   }
@@ -3280,7 +3178,7 @@ ${options.desc ?? ""}
         note: q.hasAnswer ? "页面上已有答案，不重复请求" : ""
       }))
     };
-    log8.debug(`监视：登记 ${tid}，共 ${questions.length} 题`);
+    log7.debug(`监视：登记 ${tid}，共 ${questions.length} 题`);
     publishQuiz();
   }
   function quizPatch(qid, patch) {
@@ -3315,7 +3213,7 @@ ${options.desc ?? ""}
   }
 
   // src/sites/uooc/ai/overlay.ts
-  var log9 = scoped("uooc/quiz-overlay");
+  var log8 = scoped("uooc/quiz-overlay");
   var READY_SELECTOR = "div.queContainer";
   var POLL_MS = 250;
   var cur = null;
@@ -3381,7 +3279,7 @@ ${options.desc ?? ""}
     hide.addEventListener("click", () => {
       if (cur === null) return;
       cur.hidden = true;
-      log9.info("用户点了【隐藏遮罩】，本次测验内不再显示");
+      log8.info("用户点了【隐藏遮罩】，本次测验内不再显示");
       render(cur);
     });
     head.appendChild(hide);
@@ -3411,14 +3309,14 @@ ${options.desc ?? ""}
     const doc = frameDoc(o);
     if (doc === null) return false;
     if (o.attached !== doc) {
-      if (o.attached !== null) log9.info("试卷 iframe 换了 document，遮罩已挂到新页面上");
+      if (o.attached !== null) log8.info("试卷 iframe 换了 document，遮罩已挂到新页面上");
       doc.body.appendChild(o.node);
       o.attached = doc;
       return true;
     }
     if (!o.node.isConnected) {
       doc.body.appendChild(o.node);
-      log9.debug("遮罩被站点重渲染抹掉，已重新挂回");
+      log8.debug("遮罩被站点重渲染抹掉，已重新挂回");
       return true;
     }
     return false;
@@ -3440,7 +3338,7 @@ ${options.desc ?? ""}
       default:
         if (!o.warnedLate) {
           o.warnedLate = true;
-          log9.warn(
+          log8.warn(
             `等题目 DOM 超时（${waitTimeoutMs()} ms）仍没见到 ${READY_SELECTOR}，先把遮罩挂上（站点重渲染时会被刷掉一次）`
           );
         }
@@ -3489,7 +3387,7 @@ ${options.desc ?? ""}
   function quizOverlayOpen(frame, tid) {
     quizOverlayClose();
     if (frame === null) {
-      log9.info("整页答题页（页面上没有试卷 iframe），本次不盖遮罩");
+      log8.info("整页答题页（页面上没有试卷 iframe），本次不盖遮罩");
       return;
     }
     const seed = frame.contentDocument ?? document;
@@ -3511,18 +3409,18 @@ ${options.desc ?? ""}
       try {
         render(o);
       } catch (err) {
-        log9.warn("遮罩渲染抛错", String(err));
+        log8.warn("遮罩渲染抛错", String(err));
       }
     });
     o.timer = window.setInterval(() => {
       try {
         poll(o);
       } catch (err) {
-        log9.warn("遮罩巡检抛错", String(err));
+        log8.warn("遮罩巡检抛错", String(err));
       }
     }, POLL_MS);
     poll(o);
-    log9.info(`已开始等试卷 tid=${tid} 的题目 DOM 出现（判据 ${READY_SELECTOR}），就绪后再盖遮罩`);
+    log8.info(`已开始等试卷 tid=${tid} 的题目 DOM 出现（判据 ${READY_SELECTOR}），就绪后再盖遮罩`);
   }
   function quizOverlayClose() {
     const o = cur;
@@ -3538,7 +3436,7 @@ ${options.desc ?? ""}
   }
 
   // src/sites/uooc/ai/index.ts
-  var log10 = scoped("uooc/ai");
+  var log9 = scoped("uooc/ai");
   var SUBMIT_WAIT_MS = 5 * 60 * 1e3;
   function lettersOf(answer) {
     return answer.split(",").map((s) => s.trim().toUpperCase()).filter((s) => s !== "");
@@ -3587,17 +3485,17 @@ ${options.desc ?? ""}
     const btn = findSubmitButton();
     if (btn === null) {
       const msg = "页面上找不到【提交】按钮，请自己点一下（答案已经填好了）";
-      log10.error(msg);
+      log9.error(msg);
       noticePost(msg, "warn");
       return { submitted: false, commit: null };
     }
     clearCommit();
     quizPhase("submitting");
-    log10.info("已合成点击站点【提交】，接下来请手动完成人机验证码");
+    log9.info("已合成点击站点【提交】，接下来请手动完成人机验证码");
     btn.click();
     const commit = await waitCommit(SUBMIT_WAIT_MS);
-    if (commit === null) log10.warn("没截获到交卷响应（可能你还没点完验证码，或站点换了接口）");
-    else log10.info(`交卷判读：${commit.verdict}，得分 ${commit.score}/${commit.passScore}，msg=${commit.message}`);
+    if (commit === null) log9.warn("没截获到交卷响应（可能你还没点完验证码，或站点换了接口）");
+    else log9.info(`交卷判读：${commit.verdict}，得分 ${commit.score}/${commit.passScore}，msg=${commit.message}`);
     return { submitted: true, commit };
   }
   async function retryLowScore(commit, questions, previous, priorVotes, cfg) {
@@ -3610,19 +3508,19 @@ ${options.desc ?? ""}
       if (Number.isFinite(full) && Number.isFinite(score) && score < full) lows.push(q);
     }
     if (lows.length === 0) {
-      log10.info("这次没过，但 score_list 里挑不出低分题（或没带分数），不重答");
+      log9.info("这次没过，但 score_list 里挑不出低分题（或没带分数），不重答");
       return { retried: 0, filled: 0 };
     }
     quizPhase("retrying", `未通过（得分 ${commit.score} / 门槛 ${commit.passScore}），重答 ${lows.length} 道低分题`);
-    log10.info(`未通过，重答 ${lows.length} 道低分题：${lows.map((q) => q.id).join(", ")}`);
+    log9.info(`未通过，重答 ${lows.length} 道低分题：${lows.map((q) => q.id).join(", ")}`);
     let filled = 0;
     for (const q of lows) {
       const exclude = previous.get(q.id) ?? "";
       const prior = priorVotes.get(q.id) ?? [];
       quizPatch(q.id, { status: "pending", note: "重答中…" });
       const o = await answerOne(q, cfg, {
-        onDebug: (m) => log10.debug(m),
-        onWarn: (m) => log10.warn(m),
+        onDebug: (m) => log9.debug(m),
+        onWarn: (m) => log9.warn(m),
         ...exclude === "" ? {} : { exclude },
         prior,
         maxRequests: 2
@@ -3656,12 +3554,12 @@ ${options.desc ?? ""}
     const cfg = aiConfig();
     if (cfg === null) {
       const msg = "AI 作答未配置：请到【AI 作答】标签页填接口地址与模型名";
-      log10.error(msg);
+      log9.error(msg);
       noticePost(msg, "error");
       host.activateTab("uooc:ai");
       return null;
     }
-    log10.info(`开始 AI 作答：tid=${tid}，接口=${chatUrl(cfg.baseUrl)}，模型=${cfg.model}`);
+    log9.info(`开始 AI 作答：tid=${tid}，接口=${chatUrl(cfg.baseUrl)}，模型=${cfg.model}`);
     installUoocInterceptInFrames();
     quizClear();
     let paper;
@@ -3669,7 +3567,7 @@ ${options.desc ?? ""}
       paper = await fetchPaper(tid);
     } catch (err) {
       const msg = `拉题失败：${err instanceof Error ? err.message : String(err)}`;
-      log10.error(msg);
+      log9.error(msg);
       noticePost(msg, "error");
       return null;
     }
@@ -3684,7 +3582,7 @@ ${options.desc ?? ""}
     );
     for (const q of already) quizPatch(q.id, { status: "skipped", note: "页面上已有答案，不重复请求" });
     quizOverlayOpen(quizFrameOnPage(), tid);
-    log10.info(
+    log9.info(
       `拿到 ${all.length} 道题：页面上已有答案 ${already.length} 道（跳过），可自动作答 ${todo.length} 道，跳过 ${skippedKind} 道填空/主观题`
     );
     const answers = /* @__PURE__ */ new Map();
@@ -3701,15 +3599,15 @@ ${options.desc ?? ""}
     if (todo.length > 0) {
       const concurrency = aiConcurrency();
       quizPhase("answering", `并发 ${concurrency}`);
-      log10.info(`开始问模型（并发 ${concurrency}）…`);
+      log9.info(`开始问模型（并发 ${concurrency}）…`);
       await answerQuestions(todo, {
         cfg,
         concurrency,
-        onDebug: (m) => log10.debug(m),
-        onWarn: (m) => log10.warn(m),
+        onDebug: (m) => log9.debug(m),
+        onWarn: (m) => log9.warn(m),
         onProgress: (ev) => {
           const { question, outcome } = ev;
-          log10.info(
+          log9.info(
             `[${ev.index + 1}/${ev.total}] ${question.typeText} ${question.id} → ${outcome.answer === "" ? "未答出" : outcome.answer}（${outcome.requests} 次请求）`
           );
           if (outcome.answer === "") {
@@ -3752,7 +3650,7 @@ ${options.desc ?? ""}
         const how = clearQuestion(qid, q?.kind ?? "other");
         answers.delete(qid);
         refreshButtons();
-        log10.info(`清除第 ${qid} 题的答案（${how}）`);
+        log9.info(`清除第 ${qid} 题的答案（${how}）`);
       },
       onClearAll: () => {
         for (const q of all) {
@@ -3760,7 +3658,7 @@ ${options.desc ?? ""}
           answers.delete(q.id);
         }
         refreshButtons();
-        log10.info("清除全部答案");
+        log9.info("清除全部答案");
       }
     });
     refreshButtons();
@@ -3783,7 +3681,7 @@ ${options.desc ?? ""}
       cancelText: "再等等"
     });
     if (!confirmed) {
-      log10.info("用户选择「再等等」，不提交。答案已填在页面上，你可以自己改");
+      log9.info("用户选择「再等等」，不提交。答案已填在页面上，你可以自己改");
       quizEnd("用户取消了提交，答案已填在页面上", "warn");
       return {
         total: all.length,
@@ -3829,7 +3727,7 @@ ${options.desc ?? ""}
   }
 
   // src/sites/uooc/tabs/ai.ts
-  var log11 = scoped("uooc/ai-tab");
+  var log10 = scoped("uooc/ai-tab");
   var UOOC_AI_TAB = {
     id: `${SITE_ID}:ai`,
     title: "AI 作答",
@@ -3878,7 +3776,7 @@ ${options.desc ?? ""}
               status.textContent = "正在测试…";
               const r = await testConnection(cfg);
               status.textContent = r.detail;
-              log11.info(`测试连接：${r.ok ? "OK" : "失败"} — ${r.detail}`);
+              log10.info(`测试连接：${r.ok ? "OK" : "失败"} — ${r.detail}`);
               ctx.host.toast(r.ok ? "连接正常" : "连接失败，详见下方说明", r.ok ? "success" : "error");
               testBtn.disabled = false;
             })();
@@ -4127,7 +4025,7 @@ ${options.desc ?? ""}
   }
 
   // src/sites/uooc/takeover-utils.ts
-  var log12 = scoped("uooc/takeover-utils");
+  var log11 = scoped("uooc/takeover-utils");
   var VIEWER_SEL = "div.showViewer";
   var POLL_MS2 = 200;
   var VIDEO_SLACK_MS = 10 * 60 * 1e3;
@@ -4182,10 +4080,10 @@ ${options.desc ?? ""}
     const needsChange = location.hash !== hash;
     const before = needsChange ? viewerSignature() : "";
     if (needsChange) {
-      log12.info(`跳转 ${hash}`);
+      log11.info(`跳转 ${hash}`);
       location.hash = hash;
     } else {
-      log12.debug(`已经在这一项上了（${hash}），不再改 hash`);
+      log11.debug(`已经在这一项上了（${hash}），不再改 hash`);
     }
     await sleep2(waitBeforeMs(), t);
     if (t.cancelled) return false;
@@ -4193,7 +4091,7 @@ ${options.desc ?? ""}
       if (!viewerReady(kind)) return false;
       return !needsChange || viewerSignature() !== before;
     }, waitTimeoutMs(), t);
-    if (ok) log12.info(`内容已就绪：${label}`);
+    if (ok) log11.info(`内容已就绪：${label}`);
     return ok;
   }
   function waitVideoEnd(video, t) {
@@ -4249,7 +4147,7 @@ ${options.desc ?? ""}
   }
 
   // src/sites/uooc/fetch-catalog.ts
-  var log13 = scoped("uooc/fetch-catalog");
+  var log12 = scoped("uooc/fetch-catalog");
   var CATALOG_PATH = "/home/learn/getCatalogList";
   var FALLBACK_ORIGIN = "https://www.uooc.net.cn";
   var CATALOG_ATTEMPTS = 3;
@@ -4352,19 +4250,19 @@ ${options.desc ?? ""}
       if (attempt2 > 1 && plan.shouldAbort?.() === true) return aborted();
       const outcome = await attemptOnce(plan);
       if (outcome.ok) {
-        log13.info(
+        log12.info(
           `取到${plan.label}：${plan.describeOk(outcome.value)}（第 ${attempt2}/${CATALOG_ATTEMPTS} 次）`
         );
         return { ok: true, attempts: attempt2, value: outcome.value, raw: outcome.raw };
       }
       lastFailure = outcome.failure;
-      log13.warn(`取${plan.label}第 ${attempt2}/${CATALOG_ATTEMPTS} 次失败 —— ${describeFailure(lastFailure)}`);
+      log12.warn(`取${plan.label}第 ${attempt2}/${CATALOG_ATTEMPTS} 次失败 —— ${describeFailure(lastFailure)}`);
       if (attempt2 >= CATALOG_ATTEMPTS) break;
       if (plan.shouldAbort?.() === true) return aborted();
       await plan.sleep(CATALOG_RETRY_DELAY_MS);
       if (plan.shouldAbort?.() === true) return aborted();
     }
-    log13.error(`取${plan.label}彻底失败（共 ${attempts} 次）—— ${describeFailure(lastFailure)}`);
+    log12.error(`取${plan.label}彻底失败（共 ${attempts} 次）—— ${describeFailure(lastFailure)}`);
     return { ok: false, attempts, failure: lastFailure };
   }
   async function fetchCatalogPoints(options) {
@@ -4436,7 +4334,7 @@ ${options.desc ?? ""}
   }
 
   // src/sites/uooc/takeover.ts
-  var log14 = scoped("uooc/takeover");
+  var log13 = scoped("uooc/takeover");
   var STUCK_LIMIT = 3;
   var QUIZ_MAX_ROUNDS = 3;
   var ALERT_DEDUPE = "sztb-uooc-takeover-alert";
@@ -4470,7 +4368,7 @@ ${options.desc ?? ""}
   }
   function takeoverStart(host) {
     if (running) {
-      log14.warn("接管已经在跑，这次【开始接管】被忽略");
+      log13.warn("接管已经在跑，这次【开始接管】被忽略");
       return;
     }
     fatalShown = false;
@@ -4480,7 +4378,7 @@ ${options.desc ?? ""}
     setStatus("接管中：正在读取课程目录…");
     void loop(host, t).catch((err) => {
       const detail = err instanceof Error ? err.message : String(err);
-      log14.error("接管循环异常退出", detail);
+      log13.error("接管循环异常退出", detail);
       void fatal(host, `已停止 —— 接管内部出错：${detail}`, `接管循环抛了异常：
 
 ${detail}`);
@@ -4508,7 +4406,7 @@ ${detail}`);
     fatalShown = true;
     release();
     setStatus(status, "warn");
-    log14.warn(status);
+    log13.warn(status);
     await host.alert({
       title: "接管已停止",
       body,
@@ -4519,7 +4417,7 @@ ${detail}`);
   }
   async function fatalCatalog(host, failure, attempts) {
     const detail = describeFailure(failure);
-    log14.error(`取课程目录失败（已试 ${attempts} 次）：${detail}`);
+    log13.error(`取课程目录失败（已试 ${attempts} 次）：${detail}`);
     await fatal(
       host,
       "已停止 —— 读取课程目录失败",
@@ -4544,7 +4442,7 @@ ${detail}
     const cid = courseIdFromLocation(location.pathname, location.hash);
     if (cid === null) {
       stop("已停止 —— 认不出这是哪门课（地址栏里没有 cid）");
-      log14.warn(`认不出 cid：pathname=${location.pathname} hash=${location.hash}`);
+      log13.warn(`认不出 cid：pathname=${location.pathname} hash=${location.hash}`);
       return;
     }
     const ctx = {
@@ -4562,7 +4460,7 @@ ${detail}
       return;
     }
     ctx.points = first.points;
-    log14.info(`课程 ${cid} 共 ${first.points.length} 个任务点`);
+    log13.info(`课程 ${cid} 共 ${first.points.length} 个任务点`);
     if (first.points.length === 0) {
       stop("已停止 —— 这门课一个任务点都没有");
       return;
@@ -4577,12 +4475,12 @@ ${detail}
       if (sum.done === sum.total) {
         release();
         setStatus("已停止 —— 全部任务点都完成了 🎉");
-        log14.info("全部任务点都完成了");
+        log13.info("全部任务点都完成了");
         return;
       }
       if (section === null) {
         stop(`已停止 —— 剩 ${sum.total - sum.done} 个任务点本站不自动处理，其余都完成了`);
-        log14.info(`没有可自动处理的节了，跳过 ${ctx.skipped.size} 个`);
+        log13.info(`没有可自动处理的节了，跳过 ${ctx.skipped.size} 个`);
         return;
       }
       stuck = section.nodeId === lastNodeId ? stuck + 1 : 1;
@@ -4601,7 +4499,7 @@ ${detail}
         return;
       }
       if (section.form === "unsupported") {
-        log14.warn(`「${section.name}」(${section.nodeId}) 的路径形态不支持，已跳过`);
+        log13.warn(`「${section.name}」(${section.nodeId}) 的路径形态不支持，已跳过`);
         ctx.skipped.add(section.nodeId);
         continue;
       }
@@ -4652,21 +4550,21 @@ ${detail}
         for (const s of unit.sources) {
           if (s.kind === "unknown" && !ctx.warnedTypes.has(s.type)) {
             ctx.warnedTypes.add(s.type);
-            log14.warn(`遇到未知类型 ${s.type}（${s.typeName || "无名字"}），已跳过`);
+            log13.warn(`遇到未知类型 ${s.type}（${s.typeName || "无名字"}），已跳过`);
           }
         }
         const reason = taskSources.length === 0 ? "这一节没有本站能处理的任务点" : "这一节的视频/测验都已完成，但目录树仍标未完成（站点记账滞后）";
-        log14.warn(
+        log13.warn(
           `跳过「${section.name}」(${section.nodeId})：${reason}（资源 ${unit.sources.length} 个 / 任务点 ${taskSources.length} 个）`
         );
         ctx.skipped.add(section.nodeId);
         continue;
       }
-      log14.info(`「${section.name}」这一节处理了 ${processed} 个任务点，重拉课程树刷新进度`);
+      log13.info(`「${section.name}」这一节处理了 ${processed} 个任务点，重拉课程树刷新进度`);
       if (!await reload(ctx, t)) return;
       if (t.cancelled) return;
       if (ctx.points.find((p) => p.nodeId === section.nodeId)?.finished !== true) {
-        log14.warn(`「${section.name}」(${section.nodeId}) 做完了但站点仍标未完成，本轮先跳过它`);
+        log13.warn(`「${section.name}」(${section.nodeId}) 做完了但站点仍标未完成，本轮先跳过它`);
         ctx.skipped.add(section.nodeId);
       }
     }
@@ -4698,7 +4596,20 @@ ${detail}
       );
       return false;
     }
-    log14.info(`视频「${label}」开始等播完（当前 ${video.currentTime.toFixed(1)}s / ${String(video.duration)}s）`);
+    if (video.paused && video.currentTime < 1) {
+      try {
+        const started = video.play();
+        if (started !== void 0 && typeof started.catch === "function") {
+          started.catch((err) => {
+            log13.warn(`视频「${label}」主动开播被拒绝：${err instanceof Error ? err.message : String(err)}`);
+          });
+        }
+        log13.info(`视频「${label}」未自动开播（停在 0:00），已主动 play() 一次`);
+      } catch (err) {
+        log13.warn(`视频「${label}」主动 play() 抛错：${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    log13.info(`视频「${label}」开始等播完（当前 ${video.currentTime.toFixed(1)}s / ${String(video.duration)}s）`);
     const ended = await waitVideoEnd(video, t);
     if (t.cancelled) return false;
     if (!ended) {
@@ -4756,11 +4667,11 @@ ${detail}
     const tid = fromPage ?? (task.source.taskId === "" ? null : task.source.taskId);
     if (tid === null) {
       stop(`已停止 —— 测验「${label}」读不出 tid`);
-      log14.warn(`测验「${label}」页面与接口都给不出 tid，无法作答`);
+      log13.warn(`测验「${label}」页面与接口都给不出 tid，无法作答`);
       return give(false, null, 0);
     }
     if (fromPage !== null && task.source.taskId !== "" && fromPage !== task.source.taskId) {
-      log14.warn(`测验「${label}」页面 tid=${fromPage} 与接口 tid=${task.source.taskId} 不一致，按页面的走`);
+      log13.warn(`测验「${label}」页面 tid=${fromPage} 与接口 tid=${task.source.taskId} 不一致，按页面的走`);
     }
     let last = null;
     let rounds = 0;
@@ -4772,7 +4683,7 @@ ${detail}
       if (t.cancelled) return give(false, null, rounds);
       if (result === null) {
         stop(`已停止 —— 测验「${label}」没能开始作答（看日志与提示）`);
-        log14.warn(`runQuizAnswer 返回 null，测验「${label}」没跑起来`);
+        log13.warn(`runQuizAnswer 返回 null，测验「${label}」没跑起来`);
         return give(false, null, rounds);
       }
       const commit = result.commit;
@@ -4804,7 +4715,7 @@ ${detail}
         return give(false, null, rounds);
       }
       if (commit.verdict === "pass") {
-        log14.info(`测验「${label}」第 ${round2} 轮通过（得分 ${commit.score}）`);
+        log13.info(`测验「${label}」第 ${round2} 轮通过（得分 ${commit.score}）`);
         return give(true, "pass", rounds);
       }
       if (commit.verdict === "unknown") {
@@ -4821,7 +4732,7 @@ ${detail}
         );
         return give(false, null, rounds);
       }
-      log14.warn(
+      log13.warn(
         `测验「${label}」第 ${round2} 轮未通过：${commit.message}（得分 ${commit.score} / 门槛 ${commit.passScore}）`
       );
       if (round2 === QUIZ_MAX_ROUNDS) return give(true, "fail", rounds);
@@ -4874,7 +4785,7 @@ ${detail}
   };
 
   // src/sites/uooc/tabs/monitor.ts
-  var log15 = scoped("uooc/monitor-tab");
+  var log14 = scoped("uooc/monitor-tab");
   var KIND_MARK = {
     info: "·",
     success: "✔",
@@ -5018,7 +4929,7 @@ ${detail}
         draw();
       };
       offs.push(subscribeMonitor(onChange), subscribeNotice(onChange), subscribeTakeover(onChange));
-      log15.debug("监视页已挂载");
+      log14.debug("监视页已挂载");
     }
   };
 
@@ -5043,7 +4954,7 @@ ${detail}
   };
 
   // src/sites/uooc/video.ts
-  var log16 = scoped("uooc/video");
+  var log15 = scoped("uooc/video");
   var VIDEO_ID = "player_html5_api";
   var TARGET_RATE = 2;
   var RESCAN_DEBOUNCE_MS = 200;
@@ -5067,7 +4978,7 @@ ${detail}
       if (stamps.length >= FIGHT_MAX) {
         mutedUntil = now + FIGHT_COOLDOWN_MS;
         stamps.length = 0;
-        log16.warn(`${label}在 ${FIGHT_WINDOW_MS / 1e3} 秒内被反复改回，暂停纠正 ${FIGHT_COOLDOWN_MS / 1e3} 秒`);
+        log15.warn(`${label}在 ${FIGHT_WINDOW_MS / 1e3} 秒内被反复改回，暂停纠正 ${FIGHT_COOLDOWN_MS / 1e3} 秒`);
         return false;
       }
       stamps.push(now);
@@ -5100,7 +5011,7 @@ ${detail}
       const found = asVideo(doc.getElementById(VIDEO_ID)) ?? asVideo(doc.querySelector("video"));
       if (found !== null) {
         cachedFrameVideo = found;
-        log16.debug("播放器在同源 iframe 内，已切换查找目标");
+        log15.debug("播放器在同源 iframe 内，已切换查找目标");
         return found;
       }
     }
@@ -5135,7 +5046,7 @@ ${detail}
     applied.set(v, state2);
     if (!announced.has(v)) {
       announced.add(v);
-      log16.info(
+      log15.info(
         `播放器助手已就绪：二倍速=${wantRate ? "开" : "关"}，静音=${wantMute ? "开" : "关"}，防失焦=${isEnabled(SITE_ID, TOGGLE.KEEP_PLAYING) ? "开" : "关"}（当前速率 ${v.playbackRate}x）`
       );
     }
@@ -5149,7 +5060,7 @@ ${detail}
     const p = v.play();
     if (p !== void 0 && typeof p.catch === "function") {
       p.catch((err) => {
-        log16.debug(`抢播被拒绝：${err instanceof Error ? err.message : String(err)}`);
+        log15.debug(`抢播被拒绝：${err instanceof Error ? err.message : String(err)}`);
       });
     }
   }
@@ -5211,7 +5122,7 @@ ${detail}
     document.addEventListener("volumechange", onMediaEvent, true);
     window.addEventListener("hashchange", schedule2);
     window.addEventListener("popstate", schedule2);
-    log16.debug("视频助手已挂载（二倍速 / 静音 / 防失焦）");
+    log15.debug("视频助手已挂载（二倍速 / 静音 / 防失焦）");
     return () => {
       stopped = true;
       if (timer3 !== null) {
@@ -5228,7 +5139,7 @@ ${detail}
   }
 
   // src/sites/uooc/video-quiz.ts
-  var log17 = scoped("uooc/video-quiz");
+  var log16 = scoped("uooc/video-quiz");
   var LAYER_SEL = "#quizLayer";
   var DONE_ATTR = "data-sztb-quiz-done";
   var INPUT_SEL = 'input[name^="answer_"]';
@@ -5277,7 +5188,7 @@ ${detail}
         try {
           parsed = JSON.parse(raw);
         } catch {
-          log17.warn("视频容器的 source 属性不是合法 JSON，跳过");
+          log16.warn("视频容器的 source 属性不是合法 JSON，跳过");
           continue;
         }
         if (parsed === null || typeof parsed !== "object") continue;
@@ -5297,7 +5208,7 @@ ${detail}
     if (inputs.length === 0) return null;
     const answers = videoQuizAnswers();
     if (answers.size === 0) {
-      log17.warn("弹层里有题，但页面上找不到 quiz 数据（视频容器的 source 属性变了？），留给用户");
+      log16.warn("弹层里有题，但页面上找不到 quiz 数据（视频容器的 source 属性变了？），留给用户");
       return null;
     }
     const groups = /* @__PURE__ */ new Map();
@@ -5315,7 +5226,7 @@ ${detail}
       const want = answers.get(id);
       if (want === void 0) {
         missing += 1;
-        log17.warn(`小测 ${id} 在页面的 quiz 数据里找不到，留给用户`);
+        log16.warn(`小测 ${id} 在页面的 quiz 数据里找不到，留给用户`);
         continue;
       }
       const wantSet = new Set(want.map((s) => s.toUpperCase()));
@@ -5328,26 +5239,26 @@ ${detail}
       if (hit > 0) answered += 1;
       else {
         missing += 1;
-        log17.warn(`小测 ${id} 的答案 [${want.join(",")}] 在选项里找不到对应项，留给用户`);
+        log16.warn(`小测 ${id} 的答案 [${want.join(",")}] 在选项里找不到对应项，留给用户`);
       }
     }
     if (answered === 0) return { questions: groups.size, answered: 0, sure: false };
     const box = layer.closest(".layui-layer") ?? layer;
     const sure = box.querySelector(SURE_SEL) ?? box.querySelector(SURE_FALLBACK_SEL);
     if (sure === null) {
-      log17.warn("小测弹层里没有【确定】按钮，答案已选好，请你点一下");
+      log16.warn("小测弹层里没有【确定】按钮，答案已选好，请你点一下");
       return { questions: groups.size, answered, sure: false };
     }
     layer.setAttribute(DONE_ATTR, "1");
     sure.click();
-    log17.info(
+    log16.info(
       `视频小测已作答：${answered}/${groups.size} 题（${missing} 题没对上），已点【确定】`
     );
     await new Promise((resolve2) => {
       window.setTimeout(resolve2, AFTER_SURE_MS);
     });
     if (layer.isConnected) {
-      log17.warn("点了【确定】但小测弹层还在 —— 可能答案不对，交给用户处理（不重试）");
+      log16.warn("点了【确定】但小测弹层还在 —— 可能答案不对，交给用户处理（不重试）");
     }
     return { questions: groups.size, answered, sure: true };
   }
@@ -5372,7 +5283,7 @@ ${detail}
     const observer = new MutationObserver(schedule2);
     observer.observe(document.documentElement, { childList: true, subtree: true });
     window.addEventListener("hashchange", schedule2);
-    log17.debug("视频小测助手已挂载（读 DOM 里的答案，无声作答）");
+    log16.debug("视频小测助手已挂载（读 DOM 里的答案，无声作答）");
     return () => {
       stopped = true;
       if (timer3 !== null) {
@@ -5385,7 +5296,7 @@ ${detail}
   }
 
   // src/sites/uooc/index.ts
-  var log18 = scoped("site/uooc");
+  var log17 = scoped("site/uooc");
   var HOSTS = ["uooc.net.cn", "*.uooc.net.cn"];
   var PAGES = ["/home/learn/index*", "/home/learn/new/*"];
   var OLD_LEARN_PATH = "/home/learn/index";
@@ -5428,7 +5339,7 @@ ${detail}
     earlyInit() {
       registerUoocSettings();
       if (isNewVersionPage()) {
-        log18.debug("新版课程页：不装接口嗅探（本次不启动任何 UOOC 功能）");
+        log17.debug("新版课程页：不装接口嗅探（本次不启动任何 UOOC 功能）");
         return;
       }
       installUoocIntercept();
@@ -5438,17 +5349,17 @@ ${detail}
       applyUoocSettings();
       noticeBind(ctx.panel);
       if (isNewVersionPage()) {
-        log18.info("新版课程页：只弹「要不要切旧版」的提示，本次不启动任何 UOOC 功能");
+        log17.info("新版课程页：只弹「要不要切旧版」的提示，本次不启动任何 UOOC 功能");
         void promptSwitchToOld(ctx.panel);
         return;
       }
       if (!isOldVersionPage()) {
-        log18.debug(`非旧版课程页（${location.pathname}），本次不启动任何 UOOC 功能`);
+        log17.debug(`非旧版课程页（${location.pathname}），本次不启动任何 UOOC 功能`);
         return;
       }
       startVideoAssist();
       startVideoQuiz();
-      log18.info(
+      log17.info(
         `UOOC 旧版课程页已启用：isFeaturePage=${String(ctx.isFeaturePage)}，路径=${location.pathname}，视频助手=已挂载，小测助手=已挂载，接管=等用户点开始`
       );
     }
@@ -5461,22 +5372,22 @@ ${detail}
       cancelText: "不用，我自己看"
     });
     if (!yes) {
-      log18.info("用户选择留在新版页 —— 面板挂空，不启动任何 UOOC 功能");
+      log17.info("用户选择留在新版页 —— 面板挂空，不启动任何 UOOC 功能");
       return;
     }
     const target = oldVersionUrl();
     if (target === null) {
       const msg = "拼不出旧版地址，请手动把地址栏的 /home/learn/new/<cid> 改成 /home/learn/index";
-      log18.error(msg);
+      log17.error(msg);
       host.toast(msg, "error");
       return;
     }
-    log18.info(`切换到旧版：${target}`);
+    log17.info(`切换到旧版：${target}`);
     location.href = target;
   }
 
   // src/sites/bkxk/settings.ts
-  var log19 = scoped("bkxk/settings");
+  var log18 = scoped("bkxk/settings");
   var SITE_ID2 = "bkxk";
   var TOGGLE2 = {
     /** 🔴 写接口总开关（抢课）。旧仓库红线 R1：默认 false，不得改 */
@@ -5627,13 +5538,13 @@ ${detail}
     const raw = getValue(SITE_ID2, VALUE2.INTERVAL_MS);
     const ms = clampLimit("intervalMs", raw);
     if (isBelowRecommended("intervalMs", ms)) {
-      log19.warn(`请求间隔被设为 ${ms}ms，低于建议下限 ${LIMITS.intervalMs.recommended}ms`);
+      log18.warn(`请求间隔被设为 ${ms}ms，低于建议下限 ${LIMITS.intervalMs.recommended}ms`);
     }
     setIntervalMs(ms);
   }
 
   // src/sites/bkxk/session.ts
-  var log20 = scoped("bkxk/session");
+  var log19 = scoped("bkxk/session");
   var DEFAULT_CAMPUS = "01";
   var EMPTY_SESSION = {
     studentCode: "",
@@ -5692,7 +5603,7 @@ ${detail}
   function readSession() {
     const ss = pageSessionStorage();
     if (ss === null) {
-      log20.warn("读不到 sessionStorage，按未登录处理");
+      log19.warn("读不到 sessionStorage，按未登录处理");
       return EMPTY_SESSION;
     }
     try {
@@ -5702,7 +5613,7 @@ ${detail}
         token: ss.getItem("token")
       });
     } catch (err) {
-      log20.warn("读取会话失败，按未登录处理", err);
+      log19.warn("读取会话失败，按未登录处理", err);
       return EMPTY_SESSION;
     }
   }
@@ -5805,7 +5716,7 @@ ${detail}
   }
 
   // src/sites/bkxk/legacy.ts
-  var log21 = scoped("bkxk/legacy");
+  var log20 = scoped("bkxk/legacy");
   var LEGACY_SETTINGS_KEY = "szubkxk.settings.v2";
   var LEGACY_STORE_PREFIX = "szubkxk.v2.";
   var LEGACY_DATA_KEY = {
@@ -5946,12 +5857,12 @@ ${detail}
     const plan = planCustomCarry(site, common);
     write(CARRY_FLAG_KEY, true);
     if (plan.empty) {
-      for (const line of plan.notices) log21.warn(`搬运 · ${line}`);
+      for (const line of plan.notices) log20.warn(`搬运 · ${line}`);
       return [];
     }
     for (const e of plan.entries) write(e.key, e.value);
-    log21.info(`自定义课程搬运完成：${plan.report.join("；")}`);
-    for (const line of plan.notices) log21.warn(`搬运 · ${line}`);
+    log20.info(`自定义课程搬运完成：${plan.report.join("；")}`);
+    for (const line of plan.notices) log20.warn(`搬运 · ${line}`);
     return [...plan.report, ...plan.notices];
   }
   function readLegacySnapshot() {
@@ -5991,7 +5902,7 @@ ${detail}
     const lines = [];
     if (plan.empty && plan.notices.length === 0) {
       write(MIGRATION_FLAG_KEY, true);
-      log21.info("未发现旧版数据，跳过迁移");
+      log20.info("未发现旧版数据，跳过迁移");
       return [];
     }
     for (const e of plan.entries) {
@@ -5999,9 +5910,9 @@ ${detail}
     }
     write(MIGRATION_FLAG_KEY, true);
     lines.push(...plan.report, ...plan.notices);
-    log21.info(`旧数据迁移完成：写入 ${plan.entries.length} 项`);
-    for (const line of plan.report) log21.info(`迁移 · ${line}`);
-    for (const line of plan.notices) log21.warn(`迁移 · ${line}`);
+    log20.info(`旧数据迁移完成：写入 ${plan.entries.length} 项`);
+    for (const line of plan.report) log20.info(`迁移 · ${line}`);
+    for (const line of plan.notices) log20.warn(`迁移 · ${line}`);
     return lines;
   }
 
@@ -6186,7 +6097,7 @@ ${detail}
   }
 
   // src/sites/bkxk/hijack.ts
-  var log22 = scoped("bkxk/hijack");
+  var log21 = scoped("bkxk/hijack");
   var CUSTOM_ID_PREFIX = "szu-custom-";
   var LIST_RE = /elective\/(?:programCourse|unProgramCourse|publicCourse|recommendedCourse|queryCourse|course|minorCourse|retakeCourse|sportCourse)\.do/i;
   var TIMETABLE_RE = /elective\/teachingTime\.do/i;
@@ -6319,7 +6230,7 @@ ${detail}
     if (String(root["code"]) !== "1") return null;
     const res = kind === "timetable" ? augmentTimetable(root, items2) : augmentList(root, items2);
     if (res.changed === 0) return null;
-    log22.info(`[接管] ${kind} 改写了 ${res.changed} 处`);
+    log21.info(`[接管] ${kind} 改写了 ${res.changed} 处`);
     return JSON.stringify(res.json);
   }
   function transformCurrentResponse(kind, text2) {
@@ -6352,7 +6263,7 @@ ${detail}
         Object.defineProperty(xhr, "response", { configurable: true, get: () => JSON.parse(next) });
       }
     } catch {
-      log22.warn("接管响应失败（无法改写 responseText）");
+      log21.warn("接管响应失败（无法改写 responseText）");
       return false;
     }
     return true;
@@ -6394,7 +6305,7 @@ ${detail}
         const next = transformCurrentResponse(kind, text2);
         if (next === null) return res;
         if (typeof ResponseCtor !== "function") {
-          log22.warn("接管响应失败（环境里没有 Response 构造器）");
+          log21.warn("接管响应失败（环境里没有 Response 构造器）");
           return res;
         }
         const Ctor = ResponseCtor;
@@ -6408,7 +6319,7 @@ ${detail}
   function installHijack(target = pageRealm()) {
     const xhr = installXhr2(target);
     const fetch2 = installFetch2(target);
-    if (xhr || fetch2) log22.info(`响应接管已安装（XHR=${String(xhr)} fetch=${String(fetch2)}）`);
+    if (xhr || fetch2) log21.info(`响应接管已安装（XHR=${String(xhr)} fetch=${String(fetch2)}）`);
     return xhr || fetch2;
   }
 
@@ -6656,7 +6567,7 @@ ${detail}
   }
 
   // src/sites/bkxk/api.ts
-  var log23 = scoped("bkxk/api");
+  var log22 = scoped("bkxk/api");
   var BASE_PATH = "/xsxkapp/sys/xsxkapp/";
   var EP = {
     // 只读：课程查询（按类别分派）
@@ -6844,7 +6755,7 @@ code: ${input.code ?? ""} | msg: ${input.msg}
 ${text2}
 ──────────────────────────────
 `;
-    log23.error(
+    log22.error(
       `未识别返回（已全量落档） code=${input.code ?? ""}${input.msg !== "" ? ` msg=${input.msg}` : ""}`
     );
     console.log(`%c${block}`, "color:#c00");
@@ -6856,7 +6767,7 @@ ${text2}
     const requestHeaders = token2 !== "" ? { ...headers(token2), ...extra } : { ...extra };
     if (o.body !== void 0) requestHeaders["Content-Type"] = "application/x-www-form-urlencoded";
     const url = o.timestamp === true ? appendTimestamp(o.url) : o.url;
-    log23.info(`[请求] ${o.action} ${o.url}`);
+    log22.info(`[请求] ${o.action} ${o.url}`);
     const raw = await request({
       url,
       method: o.method ?? "POST",
@@ -6879,7 +6790,7 @@ ${text2}
   }
 
   // src/sites/bkxk/courses.ts
-  var log24 = scoped("bkxk/courses");
+  var log23 = scoped("bkxk/courses");
   function asRecord5(value) {
     if (value === null || typeof value !== "object" || Array.isArray(value)) return {};
     return value;
@@ -6972,12 +6883,12 @@ ${text2}
   function flatten(json) {
     const list2 = listFrom(json);
     if (list2 === null) {
-      log24.warn("列表响应里没有顶层 dataList，返回空列表（站点改版？端点形态变了？）");
+      log23.warn("列表响应里没有顶层 dataList，返回空列表（站点改版？端点形态变了？）");
       return [];
     }
     const out = [];
     for (const item of list2) out.push(...classesOf(item));
-    log24.info(`列表响应 ${list2.length} 项 → ${out.length} 个教学班`);
+    log23.info(`列表响应 ${list2.length} 项 → ${out.length} 个教学班`);
     return out;
   }
   function remainOf(c) {
@@ -7000,15 +6911,15 @@ ${text2}
     });
     const origin = p.origin ?? currentOrigin();
     if (origin === "") {
-      log24.warn("取不到 origin，放弃拉取课程列表");
+      log23.warn("取不到 origin，放弃拉取课程列表");
       return denied("取不到 origin");
     }
     if (p.studentCode === "") {
-      log24.warn("会话里没有学号，放弃拉取课程列表");
+      log23.warn("会话里没有学号，放弃拉取课程列表");
       return denied("缺少学号");
     }
     if (p.batchCode === null || p.batchCode === "") {
-      log24.warn("没有选课批次码，放弃拉取课程列表");
+      log23.warn("没有选课批次码，放弃拉取课程列表");
       return denied("缺少选课批次码");
     }
     const url = endpointUrl(CATEGORY_EP[p.category], origin);
@@ -7402,7 +7313,7 @@ ${text2}
   }
 
   // src/sites/bkxk/monitor.ts
-  var log25 = scoped("bkxk/monitor");
+  var log24 = scoped("bkxk/monitor");
   var panel = null;
   function bindMonitorPanel(p) {
     panel = p;
@@ -7419,7 +7330,7 @@ ${text2}
       try {
         fn();
       } catch (err) {
-        log25.warn("监控订阅回调抛错（已忽略）", err);
+        log24.warn("监控订阅回调抛错（已忽略）", err);
       }
     }
   }
@@ -7476,7 +7387,7 @@ ${text2}
       return false;
     }
     polling = true;
-    log25.info(`开始监控轮询（${currentMode()}），监控项 ${String(store.items.length)} 条`);
+    log24.info(`开始监控轮询（${currentMode()}），监控项 ${String(store.items.length)} 条`);
     panel?.toast(`开始监控（${String(store.items.length)} 条）`, "success");
     notify2();
     void loop2();
@@ -7486,7 +7397,7 @@ ${text2}
     if (!polling) return false;
     polling = false;
     interruptSleep();
-    log25.info("已停止监控轮询");
+    log24.info("已停止监控轮询");
     panel?.toast("已停止监控轮询", "info");
     notify2();
     return true;
@@ -7503,7 +7414,7 @@ ${text2}
       }
     } catch (err) {
       polling = false;
-      log25.error("监控轮询异常结束", err);
+      log24.error("监控轮询异常结束", err);
       panel?.toast("监控轮询异常，已停止（详见日志）", "error");
     } finally {
       notify2();
@@ -7535,7 +7446,7 @@ ${text2}
   async function checkOne(store, tcId) {
     const ctx = bkxkContext();
     if (ctx.batchCode === "") {
-      log25.warn(`查容量跳过 ${tcId}：批次码为空（请刷新选课页）`);
+      log24.warn(`查容量跳过 ${tcId}：批次码为空（请刷新选课页）`);
       return {
         store,
         row: { teachingClassID: tcId, remain: null, kind: "nobatch", msg: "批次码为空（请刷新选课页）" }
@@ -7558,14 +7469,14 @@ ${text2}
       if (kind === RESP_KIND.OK) remain = capacityRemain(r.cls.data);
     } catch (err) {
       const text2 = err instanceof Error ? err.message : String(err);
-      log25.warn(`查容量请求异常：${tcId}`, err);
+      log24.warn(`查容量请求异常：${tcId}`, err);
       const applied3 = applyCheck(store, tcId, null, Date.now(), `请求异常：${text2}`);
       saveMonitorStore(applied3.store);
       return { store: applied3.store, row: { teachingClassID: tcId, remain: null, kind: "exception", msg: text2 } };
     }
     if (kind !== RESP_KIND.OK) {
       noteAuthLost(kind);
-      log25.warn(`查容量失败（${kind}）：${tcId} ${msg}`);
+      log24.warn(`查容量失败（${kind}）：${tcId} ${msg}`);
       const applied3 = applyCheck(store, tcId, null, Date.now(), msg);
       saveMonitorStore(applied3.store);
       return { store: applied3.store, row: { teachingClassID: tcId, remain: null, kind, msg } };
@@ -7590,27 +7501,27 @@ ${text2}
           origin: pageOrigin()
         });
       } catch (err) {
-        log25.warn(`类别 ${category} 请求异常（pageNumber=${String(page)}）`, err);
+        log24.warn(`类别 ${category} 请求异常（pageNumber=${String(page)}）`, err);
         return out.length > 0 ? out : null;
       }
       if (r.kind !== RESP_KIND.OK) {
         noteAuthLost(r.kind);
-        log25.warn(`类别 ${category} 拉取失败（pageNumber=${String(page)}，${r.kind}）：${r.msg}`);
+        log24.warn(`类别 ${category} 拉取失败（pageNumber=${String(page)}，${r.kind}）：${r.msg}`);
         return out.length > 0 ? out : null;
       }
       for (const c of r.classes) out.push(c);
       if (r.classes.length < PAGE_SIZE) return out;
     }
-    log25.warn(`类别 ${category} 超过 ${String(MAX_PAGES)} 页上限，只用前 ${String(out.length)} 条比对`);
+    log24.warn(`类别 ${category} 超过 ${String(MAX_PAGES)} 页上限，只用前 ${String(out.length)} 条比对`);
     return out;
   }
   async function pollCategory(start) {
     const { groups, skipped } = groupByCategory(start.items);
     if (skipped > 0) {
-      log25.warn(`类别监控：跳过 ${String(skipped)} 条缺类别代码的监控项（无法按类别查询）`);
+      log24.warn(`类别监控：跳过 ${String(skipped)} 条缺类别代码的监控项（无法按类别查询）`);
     }
     if (groups.length === 0) {
-      log25.warn("类别监控：监控项都缺类别代码，无法按类别查询");
+      log24.warn("类别监控：监控项都缺类别代码，无法按类别查询");
       return { checked: 0, hits: [] };
     }
     let store = start;
@@ -7646,7 +7557,7 @@ ${text2}
   function noteAuthLost(kind) {
     if (kind !== RESP_KIND.UNAUTHENTICATED) return false;
     stopPolling();
-    log25.error("登录态失效，已停止监控轮询");
+    log24.error("登录态失效，已停止监控轮询");
     panel?.toast("登录态失效，已停止监控，请刷新页面重新登录", "error");
     panel?.alertAuthExpired();
     return true;
@@ -7661,10 +7572,10 @@ ${text2}
     const withCount = addHitCount(loadMonitorStore(), res.hits.length);
     saveMonitorStore(withCount);
     const summary = hitSummaryText(res.hits, (tcId) => nameOf(withCount, tcId));
-    log25.info(`监控命中余量：${summary}`);
+    log24.info(`监控命中余量：${summary}`);
     panel?.toast(`发现余量：${summary}`, "success");
     if (!isEnabled(SITE_ID2, TOGGLE2.WRITE_API)) {
-      log25.warn("监控命中余量，但写接口总开关未开启，只提醒不自动抢");
+      log24.warn("监控命中余量，但写接口总开关未开启，只提醒不自动抢");
       return;
     }
     for (const row3 of res.hits) {
@@ -7696,7 +7607,7 @@ ${text2}
       });
       if (r.cls.kind === RESP_KIND.OK) {
         const name = item.courseName === "" ? item.teachingClassID : item.courseName;
-        log25.info(`监控自动抢成功 ${name}`);
+        log24.info(`监控自动抢成功 ${name}`);
         panel?.toast(`监控抢到：${name}`, "success");
         const removed = removeMonitorItem(loadMonitorStore(), item.teachingClassID);
         if (removed.removed) saveMonitorStore(removed.store);
@@ -7704,12 +7615,12 @@ ${text2}
       }
       const msg = r.cls.msg === "" ? r.cls.kind : r.cls.msg;
       updateMonitor((s) => patchMonitor(s, item.teachingClassID, { lastMsg: msg }));
-      log25.warn(`监控自动抢未成功（${r.cls.kind}）：${msg}`);
+      log24.warn(`监控自动抢未成功（${r.cls.kind}）：${msg}`);
       noteAuthLost(r.cls.kind);
       return { ok: false, reason: r.cls.kind, msg };
     } catch (err) {
       const text2 = err instanceof Error ? err.message : String(err);
-      log25.warn(`监控自动抢请求异常：${item.teachingClassID}`, err);
+      log24.warn(`监控自动抢请求异常：${item.teachingClassID}`, err);
       return { ok: false, reason: "exception", msg: text2 };
     }
   }
@@ -7907,7 +7818,7 @@ ${text2}
   }
 
   // src/sites/bkxk/tasks.ts
-  var log26 = scoped("bkxk/tasks");
+  var log25 = scoped("bkxk/tasks");
   var panel2 = null;
   function bindTaskPanel(p) {
     panel2 = p;
@@ -7924,7 +7835,7 @@ ${text2}
       try {
         fn();
       } catch (err) {
-        log26.warn("任务订阅回调抛错（已忽略）", err);
+        log25.warn("任务订阅回调抛错（已忽略）", err);
       }
     }
   }
@@ -7946,7 +7857,7 @@ ${text2}
   }
   function startTasks() {
     if (!isEnabled(SITE_ID2, TOGGLE2.WRITE_API)) {
-      log26.warn("写接口总开关未开启，拒绝开始抢课");
+      log25.warn("写接口总开关未开启，拒绝开始抢课");
       panel2?.toast("写接口总开关未开启，请先到【设置】里打开", "warn");
       return { ok: false, reason: "write-disabled", count: 0 };
     }
@@ -7956,7 +7867,7 @@ ${text2}
     const stale = clearStaleTasks(loadTaskStore());
     if (stale.cleared > 0) {
       saveTaskStore(stale.store);
-      log26.info(`开始前清洗了 ${String(stale.cleared)} 条「已勾选但上次跑失败」的任务，它们会重新参与`);
+      log25.info(`开始前清洗了 ${String(stale.cleared)} 条「已勾选但上次跑失败」的任务，它们会重新参与`);
     }
     const list2 = activeTasks(loadTaskStore().items);
     if (list2.length === 0) {
@@ -7964,7 +7875,7 @@ ${text2}
       return { ok: false, reason: "no-task", count: 0 };
     }
     running2 = true;
-    log26.info(`开始抢课，任务数 ${String(list2.length)}`);
+    log25.info(`开始抢课，任务数 ${String(list2.length)}`);
     panel2?.toast(`开始抢课（${String(list2.length)} 条）`, "success");
     void loop3();
     return { ok: true, reason: "", count: list2.length };
@@ -7977,7 +7888,7 @@ ${text2}
     const changed = after.items.some((t, i) => t !== before.items[i]);
     if (changed) saveTaskStore(after);
     else notify3();
-    log26.info("已停止抢课");
+    log25.info("已停止抢课");
     panel2?.toast("已停止抢课", "info");
     return true;
   }
@@ -7991,7 +7902,7 @@ ${text2}
       while (running2) {
         if (activeTasks(loadTaskStore().items).length === 0) {
           running2 = false;
-          log26.info("全部任务已结束");
+          log25.info("全部任务已结束");
           panel2?.toast("全部任务已结束", "info");
           return;
         }
@@ -8002,7 +7913,7 @@ ${text2}
       }
     } catch (err) {
       running2 = false;
-      log26.error("抢课循环异常结束", err);
+      log25.error("抢课循环异常结束", err);
       panel2?.toast("抢课循环异常，已停止（详见日志）", "error");
     } finally {
       notify3();
@@ -8028,7 +7939,7 @@ ${text2}
         lastMsg: "缺少学号或选课批次码，请在设置中补全",
         lastKind: TASK_KIND.TERMINAL
       });
-      log26.error(`抢课中止：缺少学号或批次码 ${task.teachingClassID}`);
+      log25.error(`抢课中止：缺少学号或批次码 ${task.teachingClassID}`);
       return;
     }
     if (task.category === "") {
@@ -8037,7 +7948,7 @@ ${text2}
         lastMsg: "未能识别该教学班的类别代码，请重新在列表中点击「添加抢课」",
         lastKind: TASK_KIND.TERMINAL
       });
-      log26.error(`抢课中止：类别代码未知 ${task.teachingClassID}`);
+      log25.error(`抢课中止：类别代码未知 ${task.teachingClassID}`);
       return;
     }
     finish(task.id, { status: TASK_STATUS.RUNNING, attempts: task.attempts + 1 });
@@ -8069,20 +7980,20 @@ ${text2}
         lastMsg: `请求异常：${text2}`,
         lastKind: TASK_KIND.UNKNOWN
       });
-      log26.warn(`抢课请求异常（${retry ? "稍后重试" : "已停手"}）：${task.teachingClassID}`, err);
+      log25.warn(`抢课请求异常（${retry ? "稍后重试" : "已停手"}）：${task.teachingClassID}`, err);
       return;
     }
     if (kind === RESP_KIND.OK) {
       finish(task.id, { status: TASK_STATUS.SUCCESS, lastMsg: msg, lastKind: TASK_KIND.OK });
       const name = task.courseName === "" ? task.teachingClassID : task.courseName;
-      log26.info(`抢课成功 ${name}`);
+      log25.info(`抢课成功 ${name}`);
       panel2?.toast(`抢课成功：${name}`, "success");
       return;
     }
     if (kind === RESP_KIND.UNAUTHENTICATED) {
       running2 = false;
       finish(task.id, { status: TASK_STATUS.FAILED, lastMsg: AUTH_MSG2, lastKind: TASK_KIND.AUTH });
-      log26.error("登录态失效，已停止全部任务");
+      log25.error("登录态失效，已停止全部任务");
       panel2?.toast("登录态失效，已停止全部任务，请刷新页面重新登录", "error");
       panel2?.alertAuthExpired();
       return;
@@ -8090,11 +8001,11 @@ ${text2}
     const cls = kind === RESP_KIND.BUSINESS ? classifyMsg(msg) : TASK_KIND.UNKNOWN;
     if (shouldRetry(task.retryMode, cls)) {
       finish(task.id, { status: TASK_STATUS.PENDING, lastMsg: msg, lastKind: cls });
-      log26.warn(`抢课未成功，稍后重试（${kindLabel(cls)}）：${msg}`);
+      log25.warn(`抢课未成功，稍后重试（${kindLabel(cls)}）：${msg}`);
     } else {
       finish(task.id, { status: TASK_STATUS.FAILED, lastMsg: msg, lastKind: cls });
       const mode = RETRY_MODE_NAME[task.retryMode] ?? task.retryMode;
-      log26.warn(`抢课失败，已按「${mode}」停手（${kindLabel(cls)}）：${msg}`);
+      log25.warn(`抢课失败，已按「${mode}」停手（${kindLabel(cls)}）：${msg}`);
     }
   }
 
@@ -8177,7 +8088,7 @@ ${text2}
   }
 
   // src/sites/bkxk/list.ts
-  var log27 = scoped("site/bkxk/list");
+  var log26 = scoped("site/bkxk/list");
   var LIST_PAGE_MARK = PAGE_MARK.GRAB;
   var RESCAN_DELAY_MS = 120;
   var MAX_BLOCKS_PER_SCAN = 400;
@@ -8194,11 +8105,11 @@ ${text2}
   async function copyId(tcId, panel3) {
     const res = await copyText(tcId);
     if (res.ok) {
-      log27.info(`已复制教学班ID ${tcId} 到剪贴板（方式：${res.method}）`);
+      log26.info(`已复制教学班ID ${tcId} 到剪贴板（方式：${res.method}）`);
       panel3.toast("已复制教学班ID", "success");
       return;
     }
-    log27.warn(`复制教学班ID 失败：${res.detail}（可手动选中那一行复制）`);
+    log26.warn(`复制教学班ID 失败：${res.detail}（可手动选中那一行复制）`);
     panel3.toast("复制失败，请手动选中复制", "warn");
   }
   function applyGrabButton(btn, on) {
@@ -8235,13 +8146,13 @@ ${text2}
     });
     applyGrabButton(btn, nowOn);
     if (nowOn) {
-      log27.info(`已加入抢课队列：${targetText(info)}（本轮只入队，不会发送任何请求）`);
+      log26.info(`已加入抢课队列：${targetText(info)}（本轮只入队，不会发送任何请求）`);
       ctx.panel.toast(
         `已加入抢课队列：${info.courseName === "" ? info.tcId : info.courseName}`,
         "success"
       );
     } else {
-      log27.info(`已移出抢课队列：${targetText(info)}（站点上已经选到的课不会被退掉）`);
+      log26.info(`已移出抢课队列：${targetText(info)}（站点上已经选到的课不会被退掉）`);
       ctx.panel.toast("已移出抢课队列（不会退掉已经选上的课）", "info");
     }
   }
@@ -8257,10 +8168,10 @@ ${text2}
     });
     applyMonitorButton(btn, nowOn);
     if (nowOn) {
-      log27.info(`已加入监控列表：${targetText(info)}（到监控页点【开始监控】才会轮询）`);
+      log26.info(`已加入监控列表：${targetText(info)}（到监控页点【开始监控】才会轮询）`);
       ctx.panel.toast("已加入监控", "success");
     } else {
-      log27.info(`已移出监控列表：${targetText(info)}`);
+      log26.info(`已移出监控列表：${targetText(info)}`);
       ctx.panel.toast("已移出监控", "info");
     }
   }
@@ -8318,7 +8229,7 @@ ${text2}
     if (ownsBlock(unit)) return;
     const tcId = tcIdIn(unit);
     if (tcId === null) {
-      log27.debug("卡片 .cv-info 未取到教学班 id，跳过（站点结构可能已变）");
+      log26.debug("卡片 .cv-info 未取到教学班 id，跳过（站点结构可能已变）");
       return;
     }
     const info = infoForUnit(unit, tcId);
@@ -8335,7 +8246,7 @@ ${text2}
     if (cell === null) return;
     const ids = tcIdsIn(cell);
     if (ids.length === 0) {
-      log27.debug("列表行未取到教学班 id，跳过（站点结构可能已变）");
+      log26.debug("列表行未取到教学班 id，跳过（站点结构可能已变）");
       return;
     }
     const col = el("div", { class: "sztb-bkxk-col" });
@@ -8401,7 +8312,7 @@ ${text2}
     const nodes = document.querySelectorAll(".sztb-bkxk-block, .sztb-bkxk-col, .sztb-bkxk-head");
     if (nodes.length === 0) return;
     for (const node of nodes) node.remove();
-    log27.info(`列表注入开关已关闭：移除 ${String(nodes.length)} 个注入节点`);
+    log26.info(`列表注入开关已关闭：移除 ${String(nodes.length)} 个注入节点`);
   }
   function scan(ctx) {
     if (!isEnabled(SITE_ID2, TOGGLE2.LIST_INJECT)) {
@@ -8421,7 +8332,7 @@ ${text2}
   }
   function startListInjection(panel3) {
     if (!location.pathname.includes(LIST_PAGE_MARK)) {
-      log27.debug(`当前不是选课页（${location.pathname}），跳过列表注入`);
+      log26.debug(`当前不是选课页（${location.pathname}），跳过列表注入`);
       return () => void 0;
     }
     const ctx = {
@@ -8442,7 +8353,7 @@ ${text2}
       scan(ctx);
       observer = new MutationObserver(schedule2);
       observer.observe(document.body, { childList: true, subtree: true });
-      log27.info(
+      log26.info(
         `选课列表注入已就绪：抢课队列 ${String(loadTaskStore().items.length)} 条 / 监控 ${String(loadMonitorStore().items.length)} 条（本轮点击只入队，不发请求）`
       );
     });
@@ -8487,7 +8398,7 @@ ${text2}
   }
 
   // src/sites/bkxk/timetable.ts
-  var log28 = scoped("site/bkxk/timetable");
+  var log27 = scoped("site/bkxk/timetable");
   var TT_PAGE_MARK = PAGE_MARK.CURRICULUM;
   var MAX_TRIES = 20;
   var RETRY_MS = 500;
@@ -8513,12 +8424,12 @@ ${text2}
   function askSiteToRefetch(reason) {
     const mod = pageRecord()[SITE_TIMETABLE_MODULE];
     if (mod === void 0 || typeof mod.init !== "function") {
-      log28.warn(
+      log27.warn(
         `站点没有 ${SITE_TIMETABLE_MODULE}.init（改版了？）—— 这一轮的自定义课程不会出现，刷新页面可重来`
       );
       return false;
     }
-    log28.info(
+    log27.info(
       `请站点重新请求一次课表（${reason}；上一发响应${didRewriteTimetable() ? "已被我们改写" : "我们没赶上"}）⇒ ${SITE_TIMETABLE_MODULE}.init()`
     );
     mod.init.call(mod);
@@ -8539,7 +8450,7 @@ ${text2}
     if (!ok) {
       if (!loggedDrawn && tags > 0) {
         loggedDrawn = true;
-        log28.info(
+        log27.info(
           `站点画出的课表里已经带上我们的标记 ${String(tags)} 个（自定义课程 ${String(enabled)} 门）`
         );
       }
@@ -8559,7 +8470,7 @@ ${text2}
   }
   function startTimetableInjection() {
     if (!location.pathname.includes(TT_PAGE_MARK)) {
-      log28.debug(`当前不是课表页（${location.pathname}），跳过课表接管`);
+      log27.debug(`当前不是课表页（${location.pathname}），跳过课表接管`);
       return () => void 0;
     }
     let observer = null;
@@ -8583,13 +8494,13 @@ ${text2}
         if (tries < MAX_TRIES) {
           retry = window.setTimeout(attempt2, RETRY_MS);
         } else {
-          log28.warn(`未找到课表容器 #${SITE_TABLE_ID}，放弃接管（站点的课表可能还没出数据）`);
+          log27.warn(`未找到课表容器 #${SITE_TABLE_ID}，放弃接管（站点的课表可能还没出数据）`);
         }
         return;
       }
       injectTagStyle();
       const courses = readEnabledCustomCourses();
-      log28.info(
+      log27.info(
         `课表页接管就绪：自定义课程 ${String(courses.length)} 门；课表由站点自己画，我们只加「自定义」标签`
       );
       autoRefetchIfNeeded(table);
@@ -8751,7 +8662,7 @@ ${text2}
 `;
 
   // src/sites/bkxk/tabs/tasks.ts
-  var log29 = scoped("bkxk/tasks-tab");
+  var log28 = scoped("bkxk/tasks-tab");
   var BKXK_TASKS_TAB_ID = "bkxk:tasks";
   var MODE_ORDER = [RETRY_MODE.SMART, RETRY_MODE.NEVER, RETRY_MODE.ALWAYS];
   var GATE_POLL_MS = 1e3;
@@ -8853,7 +8764,7 @@ ${text2}
       check.checked = task.enabled;
       check.addEventListener("change", () => {
         updateTasks((s) => toggleTask2(s, task.id).store);
-        log29.info(
+        log28.info(
           `${task.enabled ? "取消勾选" : "勾选"}任务「${task.courseName === "" ? task.teachingClassID : task.courseName}」`
         );
         render2();
@@ -8924,7 +8835,7 @@ ${text2}
       mode.value = RETRY_MODE_NAME[task.retryMode] === void 0 ? RETRY_MODE.SMART : task.retryMode;
       mode.addEventListener("change", () => {
         updateTasks((s) => setRetryMode(s, task.id, mode.value));
-        log29.info(`任务「${task.courseName || task.teachingClassID}」的重试策略改为 ${mode.value}`);
+        log28.info(`任务「${task.courseName || task.teachingClassID}」的重试策略改为 ${mode.value}`);
         render2();
       });
       ops.appendChild(mode);
@@ -8935,7 +8846,7 @@ ${text2}
       });
       del.addEventListener("click", () => {
         updateTasks((s) => removeTask(s, task.id).store);
-        log29.info(`已从队列删除任务「${task.courseName || task.teachingClassID}」`);
+        log28.info(`已从队列删除任务「${task.courseName || task.teachingClassID}」`);
         render2();
       });
       ops.appendChild(del);
@@ -8943,7 +8854,7 @@ ${text2}
       return item;
     }
     startBtn.addEventListener("click", () => {
-      if (!syncGate()) log29.warn("写接口总开关未开，拒绝开始");
+      if (!syncGate()) log28.warn("写接口总开关未开，拒绝开始");
       const res = startTasks();
       if (!res.ok && res.reason === "already-running") ctx.host.toast("已经在抢课中了", "info");
       render2();
@@ -8966,7 +8877,7 @@ ${text2}
       }).then((yes) => {
         if (!yes) return;
         updateTasks((s) => resetTasks(s));
-        log29.info(`已重置 ${String(stale)} 条未成功的任务`);
+        log28.info(`已重置 ${String(stale)} 条未成功的任务`);
         ctx.host.toast("已重置", "success");
         render2();
       });
@@ -8986,7 +8897,7 @@ ${text2}
       }).then((yes) => {
         if (!yes) return;
         updateTasks(() => clearTasks());
-        log29.info(`已清空抢课队列（${String(n)} 条）`);
+        log28.info(`已清空抢课队列（${String(n)} 条）`);
         ctx.host.toast("已清空队列", "success");
         render2();
       });
@@ -9130,7 +9041,7 @@ ${text2}
 `;
 
   // src/sites/bkxk/tabs/monitor.ts
-  var log30 = scoped("bkxk/monitor-tab");
+  var log29 = scoped("bkxk/monitor-tab");
   var BKXK_MONITOR_TAB_ID = "bkxk:monitor";
   var TICK_MS = 1e3;
   var GRAB_REASON = {
@@ -9166,7 +9077,7 @@ ${text2}
     modeRow.appendChild(modeSelect);
     modeSelect.addEventListener("change", () => {
       setValue(SITE_ID2, VALUE2.MONITOR_MODE, modeSelect.value);
-      log30.info(`监控模式改为 ${modeSelect.value}`);
+      log29.info(`监控模式改为 ${modeSelect.value}`);
       render2();
     });
     const modeHint = el("span", { class: "sztb-bkxk-mo-meta" });
@@ -9306,7 +9217,7 @@ ${text2}
       });
       del.addEventListener("click", () => {
         updateMonitor((s) => removeMonitorItem(s, item.teachingClassID).store);
-        log30.info(`已移出监控列表：${item.courseName || item.teachingClassID}`);
+        log29.info(`已移出监控列表：${item.courseName || item.teachingClassID}`);
         render2();
       });
       ops.appendChild(del);
@@ -9340,7 +9251,7 @@ ${text2}
     });
     resetBtn.addEventListener("click", () => {
       updateMonitor((s) => resetMonitorStats(s));
-      log30.info("已重置监控统计（余量、检查时间、命中次数与上次抢课结果）");
+      log29.info("已重置监控统计（余量、检查时间、命中次数与上次抢课结果）");
       ctx.host.toast("已重置统计，下次检查会重新填", "success");
       render2();
     });
@@ -9360,7 +9271,7 @@ ${text2}
         if (!yes) return;
         stopPolling();
         updateMonitor(() => clearMonitor());
-        log30.info(`已清空监控列表（${String(n)} 条）`);
+        log29.info(`已清空监控列表（${String(n)} 条）`);
         ctx.host.toast("已清空监控列表", "success");
         render2();
       });
@@ -9627,7 +9538,7 @@ ${text2}
 `;
 
   // src/sites/bkxk/tabs/custom.ts
-  var log31 = scoped("bkxk/custom-tab");
+  var log30 = scoped("bkxk/custom-tab");
   var BKXK_CUSTOM_TAB_ID = "bkxk:custom";
   var PARITY_OPTIONS = [
     ["", "每周"],
@@ -9909,7 +9820,7 @@ ${text2}
       }
       const parsed = parsePlace(place);
       if (parsed.length !== segs.length) {
-        log31.warn(
+        log30.warn(
           `生成的时间文本与解析结果对不上：${place}（解析出 ${String(parsed.length)} 段，表单有 ${String(segs.length)} 段）`
         );
         const msg = "时间文本生成异常，已取消本次提交（请把这条日志报给开发者）";
@@ -9922,7 +9833,7 @@ ${text2}
       const next = editing === null ? appendCourse(courses, draft, makeCourseId(Date.now(), Math.random())) : updateCourse(courses, editing, draft);
       mutate(next);
       resetForm();
-      log31.info(`${editing === null ? "添加" : "修改"}自定义课程「${name}」（${place}）`);
+      log30.info(`${editing === null ? "添加" : "修改"}自定义课程「${name}」（${place}）`);
       ctx.host.toast(editing === null ? "已添加" : "已保存修改", "success");
     }
     function beginEdit(course) {
@@ -9936,7 +9847,7 @@ ${text2}
         const msg = "这门课原本的时间文本解析不出，已按默认值回填，请重新填写";
         showHint(msg);
         ctx.host.toast(msg, "warn");
-        log31.warn(`自定义课程「${course.name}」的 place 解析不出：${course.place}`);
+        log30.warn(`自定义课程「${course.name}」的 place 解析不出：${course.place}`);
       } else {
         segs = drafts.map((d) => ({ ...d }));
         hideHint();
@@ -9960,7 +9871,7 @@ ${text2}
           return;
         }
         mutate(setCourseEnabled(courses, course.id, toggle.checked));
-        log31.info(`${toggle.checked ? "启用" : "停用"}自定义课程「${course.name}」`);
+        log30.info(`${toggle.checked ? "启用" : "停用"}自定义课程「${course.name}」`);
       });
       item.appendChild(toggle);
       const main2 = el("div", { class: "sztb-bkxk-itemmain" });
@@ -9994,7 +9905,7 @@ ${text2}
         const wasEditing = editingId === course.id;
         mutate(removeCourse(courses, course.id));
         if (wasEditing) resetForm();
-        log31.info(`删除自定义课程「${course.name}」`);
+        log30.info(`删除自定义课程「${course.name}」`);
         ctx.host.toast("已删除", "success");
       });
       ops.appendChild(editBtn);
@@ -10030,7 +9941,7 @@ ${text2}
       writeCustomCourses(next);
       renderList();
       renderConflicts();
-      if (refreshTimetable() > 0) log31.info("已请站点重画课表（这次带的课程就是你刚改的）");
+      if (refreshTimetable() > 0) log30.info("已请站点重画课表（这次带的课程就是你刚改的）");
     }
     addSegBtn.addEventListener("click", () => {
       if (!guard()) return;
@@ -10062,7 +9973,7 @@ ${text2}
         if (!ok) return;
         mutate([]);
         resetForm();
-        log31.info(`清空自定义课程：删除 ${String(n)} 门`);
+        log30.info(`清空自定义课程：删除 ${String(n)} 门`);
         ctx.host.toast("已清空", "success");
       });
     });
@@ -10090,7 +10001,7 @@ ${text2}
   };
 
   // src/sites/bkxk/index.ts
-  var log32 = scoped("site/bkxk");
+  var log31 = scoped("site/bkxk");
   var HOSTS2 = ["bkxk.szu.edu.cn"];
   var PAGES2 = [`*default/${PAGE_MARK.GRAB}*`, `*default/${PAGE_MARK.CURRICULUM}*`];
   var bkxkAdapter = {
@@ -10116,13 +10027,13 @@ ${text2}
       registerBkxkSettings();
       const carried = runCustomCarry();
       if (lines.length > 0) {
-        log32.info(`已从旧版迁移 ${lines.length} 条内容，详情见日志页`);
+        log31.info(`已从旧版迁移 ${lines.length} 条内容，详情见日志页`);
       }
       if (carried.length > 0) {
-        log32.info(`自定义课程已搬到通用键（${carried.length} 条说明见日志页）`);
+        log31.info(`自定义课程已搬到通用键（${carried.length} 条说明见日志页）`);
       }
       if (lines.length === 0 && carried.length === 0) {
-        log32.debug(`无旧数据需要迁移（earlyInit @ ${ctx.url.pathname}）`);
+        log31.debug(`无旧数据需要迁移（earlyInit @ ${ctx.url.pathname}）`);
       }
     },
     /** 挂载期：DOM 已就绪，可以安全地把配置推给运行时并报登录态。 */
@@ -10132,11 +10043,11 @@ ${text2}
       bindMonitorPanel(ctx.panel);
       const session = readSession();
       if (!session.loggedIn) {
-        log32.warn("未读到有效登录态：学号或 token 缺失，功能接口会失败。请先在站内完成登录。");
+        log31.warn("未读到有效登录态：学号或 token 缺失，功能接口会失败。请先在站内完成登录。");
       } else {
-        log32.info(`站点已就绪：${sessionSummary(session)}`);
+        log31.info(`站点已就绪：${sessionSummary(session)}`);
       }
-      log32.info(`功能页=${String(ctx.isFeaturePage)}（任务 / 监控 / 自定义 / 设置四个站点标签页已就绪）`);
+      log31.info(`功能页=${String(ctx.isFeaturePage)}（任务 / 监控 / 自定义 / 设置四个站点标签页已就绪）`);
       startListInjection(ctx.panel);
       startTimetableInjection();
     }
@@ -10144,7 +10055,6 @@ ${text2}
 
   // src/sites/index.ts
   function registerSites() {
-    registerAdapter(demoAdapter);
     registerAdapter(uoocAdapter);
     registerAdapter(bkxkAdapter);
     for (const adapter of allAdapters()) {
@@ -10155,10 +10065,10 @@ ${text2}
   }
 
   // src/main.ts
-  var log33 = scoped("main");
+  var log32 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-09T17:04:19.675Z" : null;
-  var BUILD_NO = true ? 104 : null;
+  var BUILD_TIME = true ? "2026-10-10T07:52:55.662Z" : null;
+  var BUILD_NO = true ? 105 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();
@@ -10199,7 +10109,7 @@ ${text2}
       version: VERSION
     }));
     booted = { panel: panel3, adapterId: res.adapter?.id ?? null };
-    log33.info(
+    log32.info(
       `深大人工具箱 ${VERSION_LABEL} 已装载（host=${url.hostname}，分派=${res.reason}，站点=${res.adapter?.id ?? "无"}，功能页=${res.autoExpand ? "是" : "否"}）`
     );
     res.adapter?.init?.({
@@ -10219,10 +10129,10 @@ ${text2}
         return;
       }
       if (!res.inject) {
-        log33.debug(`站内跳转后不再属于支持范围，保持现有悬浮窗`);
+        log32.debug(`站内跳转后不再属于支持范围，保持现有悬浮窗`);
         return;
       }
-      log33.info(`站内跳转导致重新分派：${bootedFor} → ${location.href}`);
+      log32.info(`站内跳转导致重新分派：${bootedFor} → ${location.href}`);
       bootedFor = location.href;
       boot(url, res);
     };
@@ -10249,9 +10159,9 @@ ${text2}
     if (res.adapter?.earlyInit !== void 0) {
       try {
         res.adapter.earlyInit({ adapter: res.adapter, url });
-        log33.debug(`已执行启动期钩子：${res.adapter.id}`);
+        log32.debug(`已执行启动期钩子：${res.adapter.id}`);
       } catch (err) {
-        log33.error(`启动期钩子执行失败：${res.adapter.id}`, err);
+        log32.error(`启动期钩子执行失败：${res.adapter.id}`, err);
       }
     }
     whenDomReady(() => {

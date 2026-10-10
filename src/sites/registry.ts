@@ -14,12 +14,6 @@ import { matchAnyHost, matchAnyPage, isUnderDomain, parseUrl } from '../common/u
 /** 即使没有任何适配器命中，也依然注入悬浮球的根域（深大校园域） */
 export const SUPPORTED_ROOT_DOMAINS: readonly string[] = ['szu.edu.cn'];
 
-/**
- * 调试开关：URL hash 里带上它时，忽略域名限制强制注入 demo 适配器。
- * 仅用于开发期在本机页面上验证悬浮窗，发布脚本里保留但不会自动触发。
- */
-export const DEBUG_HASH_FLAG = 'sztb-demo';
-
 const adapters: SiteAdapter[] = [];
 
 /** 注册一个站点适配器。后注册的同 id 适配器会覆盖先前的。 */
@@ -57,7 +51,7 @@ export function settingsTabId(siteId: string): string {
  * 两条都算「自己管设置」：
  *   1. 有一个 id 等于 `<siteId>:settings` 的标签页（约定见上，bkxk 走这条）；
  *   2. 适配器显式声明了 `settingsInOwnTabs: true` —— 站点把设置**拆成多个**标签页，
- *      没有任何一个 id 能代表全部（UOOC = 视频 / 连播 / AI 作答，走这条）。
+ *      没有任何一个 id 能代表全部（UOOC = 视频 / 接管+等待 / AI 作答，走这条）。
  *
  * 判定错了的代价不是「少显示一项」，而是同一个开关在面板里出现两遍、还能从两处改。
  */
@@ -76,7 +70,7 @@ export interface Resolution {
   /** 是否应当自动展开面板（命中功能页） */
   readonly autoExpand: boolean;
   /** 命中的原因，仅用于日志 */
-  readonly reason: 'adapter' | 'root-domain' | 'debug-flag' | 'none';
+  readonly reason: 'adapter' | 'root-domain' | 'none';
 }
 
 const NOT_INJECT: Resolution = { inject: false, adapter: null, autoExpand: false, reason: 'none' };
@@ -86,8 +80,6 @@ const NOT_INJECT: Resolution = { inject: false, adapter: null, autoExpand: false
  * 纯函数（不读 DOM、不读 storage），可以直接被测试覆盖。
  */
 export function resolve(url: URL, registry: readonly SiteAdapter[] = adapters): Resolution {
-  const debugForced = url.hash.includes(DEBUG_HASH_FLAG);
-
   for (const adapter of registry) {
     if (matchAnyHost(url.hostname, adapter.hosts)) {
       return {
@@ -96,13 +88,6 @@ export function resolve(url: URL, registry: readonly SiteAdapter[] = adapters): 
         autoExpand: isFeaturePage(url, adapter),
         reason: 'adapter',
       };
-    }
-  }
-
-  if (debugForced) {
-    const demo = registry.find((a) => a.id === 'demo');
-    if (demo !== undefined) {
-      return { inject: true, adapter: demo, autoExpand: true, reason: 'debug-flag' };
     }
   }
 

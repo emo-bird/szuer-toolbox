@@ -40,7 +40,6 @@ const checks = [
   ['无 require(', !text.includes('require(')],
   ['是 IIFE（没有顶层 await/export）', !/^export\s/m.test(text) && text.includes('(() => {')],
   ['含公共标签页 id', text.includes('common:settings') && text.includes('common:log')],
-  ['含演示适配器 id', text.includes('demo:playground')],
   // uooc 适配器的 id 用的是 SITE_ID 常量（src/sites/uooc/index.ts:53 id: SITE_ID，
   // 常量在 src/sites/uooc/settings.ts 里定义），产物里只会留下 `var SITE_ID = "uooc"`，
   // 不会有 `id: "uooc"` 这个字面量 —— 所以断言必须认常量，不能认字面量。
