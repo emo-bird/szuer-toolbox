@@ -217,7 +217,11 @@ function readMs(id: string, fallbackMs: number): number {
   const raw = getStoredValue<string>(SITE_ID, id);
   // 与 core/limits.ts 的 clampLimit 同一判空口径：空串/纯空白按「没填」处理，
   // 不能走 Number('')===0——否则程序化写入空串时，等待/超时会被静默当成 0。
-  const n = typeof raw === 'string' && raw.trim() !== '' ? Number(raw.trim()) : Number.NaN;
+  // 但数字形态的存量值要照旧接受（早期版本可能写成 number），别一刀切成 NaN 回默认。
+  let n: number;
+  if (typeof raw === 'number') n = raw;
+  else if (typeof raw === 'string' && raw.trim() !== '') n = Number(raw.trim());
+  else n = Number.NaN;
   if (!Number.isFinite(n) || n < 0) {
     log.warn(`${id} 取值异常（${String(raw)}），按 ${fallbackMs}ms 处理`);
     return fallbackMs;

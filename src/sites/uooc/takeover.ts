@@ -440,6 +440,24 @@ async function handleVideo(ctx: Ctx, task: Task, t: { cancelled: boolean }): Pro
     return false;
   }
 
+  // ⚠️ 视频是站点路由加载的，**是否自动开播取决于站点 + 浏览器自动播放策略**，
+  // 实测「有概率停在 0:00 不播」（hash 跳转后站点没自己 play，或自动播放被拦）。
+  // 接管既然把这一项导航进来了，就负责把它踢起来：只在「还没开始过」（暂停且几乎在 0 秒）
+  // 时主动 play() 一次；已经在播、或播到一半再暂停的，交给 video.ts 的「防暂停」处理，这里不抢。
+  if (video.paused && video.currentTime < 1) {
+    try {
+      const started = video.play();
+      if (started !== undefined && typeof started.catch === 'function') {
+        started.catch((err: unknown) => {
+          log.warn(`视频「${label}」主动开播被拒绝：${err instanceof Error ? err.message : String(err)}`);
+        });
+      }
+      log.info(`视频「${label}」未自动开播（停在 0:00），已主动 play() 一次`);
+    } catch (err) {
+      log.warn(`视频「${label}」主动 play() 抛错：${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   log.info(`视频「${label}」开始等播完（当前 ${video.currentTime.toFixed(1)}s / ${String(video.duration)}s）`);
   const ended = await waitVideoEnd(video, t);
   if (t.cancelled) return false;
