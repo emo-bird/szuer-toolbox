@@ -1,6 +1,6 @@
 {
   "name": "szuer-toolbox",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "license": "MIT",
   "description": "深大人工具箱 —— 面向深圳大学校园站点的一体化油猴脚本（框架 + 站点适配层 + 统一悬浮窗）",

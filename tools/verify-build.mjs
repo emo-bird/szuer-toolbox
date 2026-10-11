@@ -9,7 +9,7 @@ const checks = [
   ['文件非空', text.length > 1000],
   ['首行是 ==UserScript==', lines[0] === '// ==UserScript=='],
   ['@name 深大人工具箱', /^\/\/ @name\s+深大人工具箱$/m.test(text)],
-  ['@version 0.1.0', /^\/\/ @version\s+0\.1\.0$/m.test(text)],
+  ['@version 1.0.0', /^\/\/ @version\s+1\.0\.0$/m.test(text)],
   ['@match szu.edu.cn', /^\/\/ @match\s+\*:\/\/\*\.szu\.edu\.cn\/\*$/m.test(text)],
   ['@match uooc.net.cn', /^\/\/ @match\s+\*:\/\/\*\.uooc\.net\.cn\/\*$/m.test(text)],
   // 请求出口分两个（需求文档 Q-AE 的后续演进）：
