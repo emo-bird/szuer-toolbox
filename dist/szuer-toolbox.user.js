@@ -48,11 +48,11 @@
  *     请立即停止使用并卸载本脚本。
  *
  *  项目地址：https://github.com/emo-bird/szuer-toolbox
- *  开源许可：见仓库 README（当前未附带 LICENSE 文件，保留所有权利）
+ *  开源许可：MIT License（见仓库根目录 LICENSE）
  * ============================================================================
  */
 
-/* 构建信息：2026-10-11T05:28:12.886Z（构建号 110） */
+/* 构建信息：2026-10-11T08:15:08.833Z（构建号 111） */
 
 "use strict";
 (() => {
@@ -10067,8 +10067,8 @@ ${text2}
   // src/main.ts
   var log32 = scoped("main");
   var VERSION = true ? "0.1.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-11T05:28:12.886Z" : null;
-  var BUILD_NO = true ? 110 : null;
+  var BUILD_TIME = true ? "2026-10-11T08:15:08.833Z" : null;
+  var BUILD_NO = true ? 111 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();
