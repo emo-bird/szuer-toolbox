@@ -14,7 +14,22 @@
 | `docs/UOOC-API驱动连播-需求.md` | UOOC「接管」的**唯一口径**（现行） |
 | `docs/手测清单-UOOC-接管.md` | UOOC 接管的现行手测清单 |
 | `docs/清理问题清单.md` / `docs/清理核验报告.md` | `cleanup/code-clarity` 的清理底稿与核验/执行记录（本轮） |
+| **`docs/architecture.html`** | **架构依赖图**（87 模块 / 292 条 import / 0 循环依赖）。自包含交互页：拖节点 / 滚轮缩放 / 拖空白平移 / 点节点高亮依赖。用 `npm run graph`（`tools/arch-graph.mjs`，零依赖）重新生成 |
 | 源码 | `src/`；测试 `tests/`；构建 `build.mjs` / `tools/verify-build.mjs` |
+
+### 开发工具（`npm run`）
+
+| 命令 | 作用 |
+|---|---|
+| `npm run graph` | 重新生成 `docs/architecture.html`（自包含依赖图；正则扫 import，零依赖） |
+| `npm run knip` | 查未使用的文件 / 导出 / 类型 / 依赖（`knip.json`）。value 导出与文件应为 0；type 导出为 warn（见下） |
+| `npm run check` | typecheck + 测试 + build + 产物自检，一条龙 |
+
+> **关于 knip 的 type 警告**：`knip.json` 里把 `types` 设为 `warn`。那 18 个「未使用导出的
+> type」只出现在**已导出接口的签名**里（如 `SiteEarlyContext`、`ModalAction`），
+> `export type` 运行期被擦除、零成本，是公开契约形状 —— 刻意保留，不清。
+> **为什么不集成 madge**：madge 需要经典 TypeScript 的 JS API，而本项目 pin 的是 `typescript@7`
+> 原生编译器（不提供该 API），运行会崩；所以 `tools/arch-graph.mjs` 用零依赖的正则实现。
 
 ## 二、历史 / 快照类（可参考，勿当现状）
 

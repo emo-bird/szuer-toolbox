@@ -12,6 +12,14 @@
 | `npm run verify` | 产物自检（头部字段 / 无 ESM 残留 / 适配器已注册 …） |
 | `npm run check` | 上面四步串起来 |
 
+## 开发辅助
+
+| 命令 | 作用 |
+|---|---|
+| `npm run graph` | 生成/刷新架构依赖图 `docs/architecture.html`（自包含交互页，零依赖） |
+| `npm run knip` | 查未使用的文件 / 导出 / 类型 / 依赖（`knip.json`） |
+
 ## 文档
 
 先看 **[`docs/README.md`](docs/README.md)** —— 它标明了哪些文档描述**当前代码**、哪些只是**历史快照**。
+架构总览：**[`docs/architecture.html`](docs/architecture.html)**（浏览器打开，可拖拽/缩放）。
