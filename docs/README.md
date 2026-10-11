@@ -1,62 +1,42 @@
-# docs 索引与状态
+# docs 索引
 
-> 本文件是 `docs/` 的**入口说明**：哪些文档描述**当前代码**、哪些只是**历史快照**。
-> 目录里文档很多、且带版本日志性质，读之前先在这里对一下状态，别拿历史快照当现状。
+> 给仓库的文档做个总目录。核心三份是**需求 / 开发 / 交接**，其余按需查。
 
-## 一、当前代码的权威来源（先看这些）
+## 核心文档（先看这三份）
 
-| 文档 | 说明 |
+| 文档 | 回答什么 |
 |---|---|
-| `README.md`（仓库根） | 项目一句话说明 |
-| `docs/环境文档.md` | 本机构建 / 运行环境 |
-| `docs/开发文档.md` | **活的开发文档**：结构、接口、进度、待办。⚠️ 正文含大量按版本记录的历史快照（构建号 / 用例数 / 文件树），与当前代码可能不一致，以源码为准 |
-| `docs/需求文档.md` | 需求与决策记录（含 Q-XX 拍板） |
-| `docs/UOOC-API驱动连播-需求.md` | UOOC「接管」的**唯一口径**（现行） |
-| `docs/手测清单-UOOC-接管.md` | UOOC 接管的现行手测清单 |
-| `docs/清理问题清单.md` / `docs/清理核验报告.md` | `cleanup/code-clarity` 的清理底稿与核验/执行记录（本轮） |
-| **`docs/architecture.html`** | **架构依赖图**（87 模块 / 292 条 import / 0 循环依赖）。自包含交互页：拖节点 / 滚轮缩放 / 拖空白平移 / 点节点高亮依赖。用 `npm run graph`（`tools/arch-graph.mjs`，零依赖）重新生成 |
-| 源码 | `src/`；测试 `tests/`；构建 `build.mjs` / `tools/verify-build.mjs` |
+| [交接文档.md](交接文档.md) | 5 分钟上手：项目是什么、必须知道的 4 件事、改动入口表 |
+| [开发文档.md](开发文档.md) | 架构、分层铁律、契约、模块地图、8 条红线、命令 |
+| [需求文档.md](需求文档.md) | 功能清单、设置项、关键决策、明确不做的事 |
 
-### 开发工具（`npm run`）
+## 架构图
 
-| 命令 | 作用 |
+| 文件 | 说明 |
 |---|---|
-| `npm run graph` | 重新生成 `docs/architecture.html`（自包含依赖图；正则扫 import，零依赖） |
-| `npm run knip` | 查未使用的文件 / 导出 / 类型 / 依赖（`knip.json`）。value 导出与文件应为 0；type 导出为 warn（见下） |
-| `npm run check` | typecheck + 测试 + build + 产物自检，一条龙 |
+| [architecture.html](architecture.html) | 交互式依赖图（拖拽/滚轮/点节点高亮依赖），由 `npm run graph` 生成 |
+| [architecture-preview.png](architecture-preview.png) | 上面那张图的静态预览 |
 
-> **关于 knip 的 type 警告**：`knip.json` 里把 `types` 设为 `warn`。那 18 个「未使用导出的
-> type」只出现在**已导出接口的签名**里（如 `SiteEarlyContext`、`ModalAction`），
-> `export type` 运行期被擦除、零成本，是公开契约形状 —— 刻意保留，不清。
-> **为什么不集成 madge**：madge 需要经典 TypeScript 的 JS API，而本项目 pin 的是 `typescript@7`
-> 原生编译器（不提供该 API），运行会崩；所以 `tools/arch-graph.mjs` 用零依赖的正则实现。
+## 站点专项（改对应模块前查）
 
-## 二、历史 / 快照类（可参考，勿当现状）
-
-| 文档 | 状态 |
+| 文档 | 内容 |
 |---|---|
-| `docs/交接文档.md`、`docs/交接文档-UOOC基线.md` | **历史交接快照**（写作时点的代码状态） |
-| `docs/手测清单-阶段1.md`、`docs/手测清单-阶段2批1.md` | 历史手测清单 |
-| `docs/手测清单-UOOC视频助手.md`、`...-第2轮.md`、`docs/手测清单-任务与监控.md`、`docs/手测清单-列表注入.md`、`docs/手测清单-晚到补偿.md`、`docs/手测清单-标签栏与悬浮球.md`、`docs/手测清单-记忆与悬浮球复测.md`、`docs/手测清单-自定义课程与注入.md`、`docs/手测清单-模板.md` | 各阶段历史手测清单 |
-| `docs/UOOC-双版目录结构底图.md`、`docs/UOOC-抓包作业单.md`、`docs/UOOC-AI方案-逆向笔记.md`、`docs/UOOC-AI提示词-草稿.md`、`docs/逆向入门笔记.md` | 逆向 / 方案 / 教学笔记（取证材料，非现状） |
-| `docs/DSH-子代理重复工具调用-汇报.md` | 一次性排查汇报 |
+| [UOOC-API驱动连播-需求.md](UOOC-API驱动连播-需求.md) | 接管连播的完整口径（接口、状态机、边界） |
+| [UOOC-双版目录结构底图.md](UOOC-双版目录结构底图.md) | 旧版/新版页面的目录结构对照 |
+| [UOOC-抓包作业单.md](UOOC-抓包作业单.md) | 接口抓包记录 |
+| [UOOC-AI方案-逆向笔记.md](UOOC-AI方案-逆向笔记.md) | AI 答题的页面逆向笔记 |
+| [逆向入门笔记.md](逆向入门笔记.md) | 站点逆向的通用方法（入门向） |
+| [环境文档.md](环境文档.md) | 开发/构建环境说明 |
 
-## 三、`cleanup/code-clarity` 已删除 / 改名的对象
+## 历史归档（只作记录，不代表当前状态）
 
-历史文档里出现下面这些名字，都是**当时**的代码；现在已不存在或已改名：
-
-| 已删 / 旧名 | 现状 |
+| 文档 | 内容 |
 |---|---|
-| `src/sites/demo/`（演示适配器）、`sztb-demo` / `DEBUG_HASH_FLAG` | **已删除**（A6）：`registerSites()` 不再注册 demo；`registry.ts` 的分派只剩 adapter / root-domain / none |
-| `src/sites/uooc/autoplay.ts`（旧 DOM 点击连播） | **已删除**（A2）：基线时即无调用方，由 API 驱动接管 `takeover.ts` 取代 |
-| `src/common/core/bus.ts`（事件总线） | **已删除**（A1）：从未被 import |
-| `uooc/intercept.ts` 的 `waitCatalog` / `waitUnitLearn` / `peekCatalog` / `peekUnitLearn` / `resetInterceptStore` + catalog/unit 缓存 | **已删除**（核验 §2.1）：无消费者；learn 拦截保留、只留痕不缓存 |
-| `onRemoteChange`、`safeBase`、`findSaveButton`、`waitForOptionInputs`、`isAnswerBoxVisible`、`hasInputsFor`、`resetMonitor`、`findByTc` | **已删除**（核验 §2.2）：全仓 0 调用的死导出 |
-| `GROUP.AUTOPLAY = '连播'` | **改名** `GROUP.WAIT = '等待参数'`（仅展示名，存储 id 不变） |
-| `takeover.ts` 的 `sleep/waitFor/gotoPoint/waitVideoEnd/...` | **已移到** `takeover-utils.ts`（C2 批2，逐字搬移） |
-| `ai/fill.ts` 的 DOM 工具 / 就绪判定 | **已移到** `ai/fill-dom.ts` / `ai/quiz-ready.ts`（C2 批3） |
-| `uooc/catalog.ts` 的纯模型 | **已移到** `catalog-model.ts`，`catalog.ts` 变成视图层 + `export *` 门户（C2 批1） |
-| `bkxk/list.ts` 的 DOM 读取工具 | **已移到** `list-dom.ts`（C2 批4） |
+| [清理问题清单.md](清理问题清单.md) | 清理前的问题盘点（A 残留 / B 错误 / C 结构） |
+| [清理核验报告.md](清理核验报告.md) | 对上面清单的核验与执行结论；本轮删了哪些东西都在这 |
 
-> 清理的完整证据、commit 与验证记录见 `docs/清理核验报告.md` §5 / §6 与
-> `docs/清理问题清单.md` §E。
+## 文档维护约定
+
+- 功能/接口有变，先改 [需求文档.md](需求文档.md) 与 [开发文档.md](开发文档.md)，别只留在 commit message 里。
+- 依赖关系变了跑一次 `npm run graph` 重新生成 `architecture.html`。
+- 手测清单类文档已删除：可执行校验统一交给 `npm run check`（typecheck + 测试 + 产物自检）。
