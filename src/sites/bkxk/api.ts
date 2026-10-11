@@ -96,7 +96,7 @@ export const RESP_KIND = {
 
 export type RespKind = (typeof RESP_KIND)[keyof typeof RESP_KIND];
 
-export const RESP_CODE = {
+const RESP_CODE = {
   SUCCESS: '1',
   BUSINESS_ERROR: '2',
   UNAUTHENTICATED: '302',
@@ -106,7 +106,7 @@ export const RESP_CODE = {
 export const AUTH_MSG = /登录|认证/;
 
 /** extractBatchCode 扫描整棵响应树时的节点预算（防病态响应把主线程拖住） */
-export const MAX_BATCH_SCAN_NODES = 20000;
+const MAX_BATCH_SCAN_NODES = 20000;
 
 export interface Classified {
   readonly kind: RespKind;
@@ -122,7 +122,7 @@ export interface ClassifyInput {
 }
 
 /** HTTP 状态码是否表示登录态失效 */
-export function isAuthStatus(status: number): boolean {
+function isAuthStatus(status: number): boolean {
   return status === 401 || status === 403;
 }
 
@@ -359,7 +359,7 @@ export interface UnknownDumpInput {
  * 「看不懂就留下，便于事后补分支」—— 走站点改版时，这段输出就是唯一线索，
  * 所以**原文不裁剪**。日志行里同时提一下 code/msg，便于一眼看出服务端在抱怨什么。
  */
-export function dumpUnknown(input: UnknownDumpInput): string {
+function dumpUnknown(input: UnknownDumpInput): string {
   const text = input.text ?? '';
   const block =
     '\n──────── [未识别返回] ────────\n' +

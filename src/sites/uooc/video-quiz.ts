@@ -120,7 +120,7 @@ function toVideoQuiz(raw: unknown): VideoQuiz | null {
  * 先用最精确的选择器（`[uooc-video][source]`，实测的视频容器），拿不到再退到
  * 「任何带 `source` 且里面写着 `"quiz"` 的元素」—— 站点换模板时不至于直接失效。
  */
-export function videoQuizAnswers(): Map<string, readonly string[]> {
+function videoQuizAnswers(): Map<string, readonly string[]> {
   const out = new Map<string, readonly string[]>();
 
   for (const sel of [VIDEO_SOURCE_SEL, ANY_SOURCE_SEL]) {
@@ -166,7 +166,7 @@ export interface VideoQuizOutcome {
  *
  * 不抛异常。可能返回 `null`（这一层还没渲染出选项，等下一轮扫描再看）。
  */
-export async function answerVideoQuizLayer(layer: HTMLElement): Promise<VideoQuizOutcome | null> {
+async function answerVideoQuizLayer(layer: HTMLElement): Promise<VideoQuizOutcome | null> {
   const inputs = Array.from(layer.querySelectorAll<HTMLInputElement>(INPUT_SEL));
   if (inputs.length === 0) return null; // 还没渲染出来，下一轮再说
 

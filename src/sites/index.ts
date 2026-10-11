@@ -38,9 +38,3 @@ export function registerSites(): void {
   }
 }
 
-/** 已声明支持的站点 id（按注册顺序） */
-export function registeredSiteIds(): string[] {
-  return allAdapters().map((a) => a.id);
-}
-
-export { uoocAdapter, bkxkAdapter };

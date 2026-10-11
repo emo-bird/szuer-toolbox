@@ -142,7 +142,7 @@ export interface MonitorStore {
 }
 
 /** 新任务初始状态（旧仓库 `tasks.js:22` 的 `STATUS.PENDING`） */
-export const TASK_STATUS_PENDING = 'pending';
+const TASK_STATUS_PENDING = 'pending';
 
 function asRecord(v: unknown): Record<string, unknown> | null {
   if (v === null || typeof v !== 'object' || Array.isArray(v)) return null;

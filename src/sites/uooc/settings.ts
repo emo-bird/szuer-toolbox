@@ -68,7 +68,7 @@ export const TOGGLE = {
 } as const;
 
 /** 配置项 id 常量 */
-export const VALUE = {
+const VALUE = {
   /** 改完 `location.hash` 之后、开始等元素出现之前的固定 sleep（ms） */
   WAIT_BEFORE_MS: 'wait-before-ms',
   /** 一项处理完（`ended` 之后）停留多久再重拉课程树（ms） */

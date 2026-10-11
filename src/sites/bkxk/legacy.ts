@@ -33,7 +33,7 @@ export const LEGACY_SETTINGS_KEY = 'szubkxk.settings.v2';
 export const LEGACY_STORE_PREFIX = 'szubkxk.v2.';
 
 /** 旧 store 里实际用到的三个键（已核 `custom.js:15` / `monitor.js:30` / `tasks.js:57`） */
-export const LEGACY_DATA_KEY = {
+const LEGACY_DATA_KEY = {
   CUSTOM_COURSES: 'customCourses',
   MONITOR: 'monitor',
   TASKS: 'tasks',
@@ -59,7 +59,7 @@ export const BKXK_STORE_KEY = {
 export const BKXK_SITE_CUSTOM_KEY = LEGACY_SITE_CUSTOM_KEY;
 
 /** 迁移完成标记 */
-export const MIGRATION_FLAG_KEY = 'migrate:bkxk:v2';
+const MIGRATION_FLAG_KEY = 'migrate:bkxk:v2';
 
 /** 自定义课程搬运完成标记（与上面那个是两件事：迁移可能早就跑过了，搬运才需要补） */
 export const CARRY_FLAG_KEY = 'migrate:bkxk:custom-to-common';

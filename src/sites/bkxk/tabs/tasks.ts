@@ -57,7 +57,7 @@ import { TASKS_TAB_CSS } from './tasks-style.ts';
 const log = scoped('bkxk/tasks-tab');
 
 /** 本标签页的 id。任务 100 / 监控 120 / 自定义 150 /【设置】200。 */
-export const BKXK_TASKS_TAB_ID = 'bkxk:tasks';
+const BKXK_TASKS_TAB_ID = 'bkxk:tasks';
 
 /** 策略下拉的取值顺序（与旧仓库一致） */
 const MODE_ORDER: readonly string[] = [RETRY_MODE.SMART, RETRY_MODE.NEVER, RETRY_MODE.ALWAYS];

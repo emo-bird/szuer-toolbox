@@ -31,7 +31,7 @@ export function allAdapters(): readonly SiteAdapter[] {
   return adapters;
 }
 
-export function getAdapter(id: string): SiteAdapter | undefined {
+function getAdapter(id: string): SiteAdapter | undefined {
   return adapters.find((a) => a.id === id);
 }
 

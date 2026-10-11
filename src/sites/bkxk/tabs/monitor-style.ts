@@ -8,8 +8,6 @@
  * 类名一律 `sztb-bkxk-mo-` 前缀，只活在悬浮窗的 Shadow DOM 里。
  */
 
-export const MONITOR_TAB_STYLE_ID = 'sztb-bkxk-monitor-style';
-
 export const MONITOR_TAB_CSS = `
 .sztb-bkxk-mo-item {
   display: flex;

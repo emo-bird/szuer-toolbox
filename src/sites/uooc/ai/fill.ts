@@ -136,19 +136,6 @@ export function findSubmitButton(top: Document = document): HTMLElement | null {
   return null;
 }
 
-/** 页面上有几个选项控件（radio / checkbox）—— 卷子渲染出来没有的判据 */
-export function countOptionInputs(top: Document = document): number {
-  let n = 0;
-  for (const doc of collectRoots(top)) {
-    try {
-      n += doc.querySelectorAll('input[type="radio"], input[type="checkbox"]').length;
-    } catch {
-      // 忽略
-    }
-  }
-  return n;
-}
-
 // ================================================================== 已答 / 清除（m04879）
 
 /** 这道题在 DOM 上已经勾了答案吗（`student_answer` 之外的第二道判据） */
@@ -266,7 +253,7 @@ export interface QuestionAnchor {
  * ```
  * 不用位置选择器（第几个 `queContainer`）—— 题号分组顺序会变。
  */
-export function findQuestionAnchors(top: Document = document): QuestionAnchor[] {
+function findQuestionAnchors(top: Document = document): QuestionAnchor[] {
   const out: QuestionAnchor[] = [];
   for (const doc of collectRoots(top)) {
     let list: Element[];

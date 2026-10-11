@@ -93,7 +93,7 @@ function asString(v: unknown): string {
  * `<p><span style="…">…</span></p>`，tid=291597830 的单选题却是纯文本）
  * ⇒ 有标签就剥掉再给模型，否则提示词里全是噪音。
  */
-export function stripHtml(s: string): string {
+function stripHtml(s: string): string {
   if (!s.includes('<')) return s;
   return s
     .replace(/<[^>]*>/g, ' ')
@@ -113,7 +113,7 @@ function toStudentAnswer(raw: unknown): string[] {
 }
 
 /** 把 `getTaskPaper` 的一条 question 转成我们的模型；字段缺失时返回 null 而不是抛异常 */
-export function toExamQuestion(raw: unknown): ExamQuestion | null {
+function toExamQuestion(raw: unknown): ExamQuestion | null {
   if (raw === null || typeof raw !== 'object') return null;
   const o = raw as Record<string, unknown>;
   const id = asString(o['id']).trim();

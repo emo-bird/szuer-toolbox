@@ -9,8 +9,6 @@
  * 需要压公共样式的两处用「两个类名」提高特异性，不用 `!important`。
  */
 
-export const TASKS_TAB_STYLE_ID = 'sztb-bkxk-tasks-style';
-
 export const TASKS_TAB_CSS = `
 .sztb-bkxk-tk-item {
   display: flex;

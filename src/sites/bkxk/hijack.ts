@@ -331,7 +331,7 @@ export function rewriteXhr(xhr: XhrLike): boolean {
 }
 
 /** 包一层构造函数；`prototype` 必须指回原型的原型，否则站点的 `instanceof` 判断会挂 */
-export function makeXhrCtor(Orig: XhrCtor): XhrCtor {
+function makeXhrCtor(Orig: XhrCtor): XhrCtor {
   function Wrapped(this: unknown): XhrLike {
     const xhr = new Orig();
     xhr.addEventListener('readystatechange', () => {

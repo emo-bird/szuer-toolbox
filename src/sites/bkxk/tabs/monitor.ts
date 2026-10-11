@@ -52,7 +52,7 @@ import { MONITOR_TAB_CSS } from './monitor-style.ts';
 const log = scoped('bkxk/monitor-tab');
 
 /** 本标签页的 id。任务 100 / 监控 120 / 自定义 150 /【设置】200。 */
-export const BKXK_MONITOR_TAB_ID = 'bkxk:monitor';
+const BKXK_MONITOR_TAB_ID = 'bkxk:monitor';
 
 /** 「多久之前」与写开关的刷新间隔：只改文本，不重建 DOM */
 const TICK_MS = 1000;

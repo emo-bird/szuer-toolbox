@@ -105,8 +105,6 @@ export function scoped(scope: string) {
   };
 }
 
-export type ScopedLogger = ReturnType<typeof scoped>;
-
 const EMPTY_TIME = '';
 
 function pad(n: number, width = 2): string {

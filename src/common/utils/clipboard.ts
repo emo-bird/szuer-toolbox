@@ -58,7 +58,7 @@ export function pickCopyMethod(env: CopyEnv): CopyMethod {
 }
 
 /** 真机探测三个能力位 */
-export function detectCopyEnv(): CopyEnv {
+function detectCopyEnv(): CopyEnv {
   const g = globalThis as Record<string, unknown>;
   return {
     hasGm: typeof g['GM_setClipboard'] === 'function',

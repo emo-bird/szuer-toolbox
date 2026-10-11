@@ -33,7 +33,7 @@ export interface BkxkSession {
 }
 
 /** 空会话（读不到 sessionStorage 时） */
-export const EMPTY_SESSION: BkxkSession = {
+const EMPTY_SESSION: BkxkSession = {
   studentCode: '',
   batchCode: null,
   campus: DEFAULT_CAMPUS,

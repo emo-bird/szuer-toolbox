@@ -11,8 +11,6 @@
  *     用「两个类名」提高特异性就够（`.sztb-input.sztb-bkxk-num`）。
  */
 
-export const CUSTOM_TAB_STYLE_ID = 'sztb-bkxk-custom-style';
-
 export const CUSTOM_TAB_CSS = `
 .sztb-bkxk-seg {
   border: 1px solid var(--sztb-border);
