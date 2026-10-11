@@ -37,7 +37,7 @@ const log = scoped('uooc/fetch-catalog');
 export const CATALOG_PATH = '/home/learn/getCatalogList';
 
 /** 没拿到页面 origin 时的兜底（脚本本来就只在 uooc 域上跑） */
-export const FALLBACK_ORIGIN = 'https://www.uooc.net.cn';
+const FALLBACK_ORIGIN = 'https://www.uooc.net.cn';
 
 /** **总请求次数**（含首次）。§E.6 拍板 3 次 */
 export const CATALOG_ATTEMPTS = 3;
@@ -49,12 +49,12 @@ export const CATALOG_RETRY_DELAY_MS = 2000;
 export const CATALOG_TIMEOUT_MS = 30_000;
 
 /** 失败 detail 里回显响应正文的截断长度（错误页可能是整页 HTML） */
-export const DETAIL_MAX_CHARS = 200;
+const DETAIL_MAX_CHARS = 200;
 
 // ------------------------------------------------------------------ URL
 
 /** 当前页面的 origin；取不到时回退到 `FALLBACK_ORIGIN` */
-export function defaultOrigin(): string {
+function defaultOrigin(): string {
   const loc = (globalThis as { location?: { origin?: unknown } }).location;
   const origin = loc?.origin;
   return typeof origin === 'string' && origin !== '' ? origin : FALLBACK_ORIGIN;

@@ -35,7 +35,7 @@ export const RECOMMENDED_MIN_INTERVAL_MS = LIMITS.intervalMs.recommended;
 export const DEFAULT_INTERVAL_MS = LIMITS.intervalMs.def;
 
 /** 队列长度上限：积压过多说明调用方在失控，早点拒绝比雪崩好 */
-export const MAX_QUEUE_SIZE = 10;
+const MAX_QUEUE_SIZE = 10;
 
 /** 优先级：数字越小越先出队（沿用旧仓库 szu_bkxk 的语义） */
 export const PRIORITY = {
@@ -44,8 +44,6 @@ export const PRIORITY = {
   HIGH: 0,
   NORMAL: 10,
 } as const;
-
-export type Priority = (typeof PRIORITY)[keyof typeof PRIORITY];
 
 export interface HttpRequest {
   url: string;

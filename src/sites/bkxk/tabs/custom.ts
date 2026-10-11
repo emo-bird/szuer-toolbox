@@ -60,7 +60,7 @@ import { CUSTOM_TAB_CSS } from './custom-style.ts';
 const log = scoped('bkxk/custom-tab');
 
 /** 本标签页的 id。任务 / 监控两页将来接在 100 / 120，本页 150，【设置】200。 */
-export const BKXK_CUSTOM_TAB_ID = 'bkxk:custom';
+const BKXK_CUSTOM_TAB_ID = 'bkxk:custom';
 
 /** 单双周下拉（取值必须与 `ParityChoice` 一致） */
 const PARITY_OPTIONS: readonly (readonly [ParityChoice, string])[] = [

@@ -93,7 +93,7 @@ export function loadMonitorStore(): MonitorStore {
   return normalizeMonitorStore(read<unknown>(BKXK_STORE_KEY.MONITOR, null));
 }
 
-export function saveMonitorStore(store: MonitorStore): void {
+function saveMonitorStore(store: MonitorStore): void {
   write(BKXK_STORE_KEY.MONITOR, slimMonitor(store));
   notify();
 }
@@ -107,7 +107,7 @@ export function updateMonitor(fn: (store: MonitorStore) => MonitorStore): Monito
 
 // -------------------------------------------------------------- 设置
 
-export function currentMode(): MonitorMode {
+function currentMode(): MonitorMode {
   return normalizeMonitorMode(getValue<unknown>(SITE_ID, VALUE.MONITOR_MODE));
 }
 

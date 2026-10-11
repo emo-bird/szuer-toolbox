@@ -23,7 +23,7 @@ import { settingsTabId } from '../../registry.ts';
 import type { TabRegistration, TabContext } from '../../types.ts';
 
 /** 本标签页的 id（= registry 约定的 `bkxk:settings`） */
-export const BKXK_SETTINGS_TAB_ID = settingsTabId('bkxk');
+const BKXK_SETTINGS_TAB_ID = settingsTabId('bkxk');
 
 /** 固定 id：`ctx.host.activateTab()` 与测试都用它，别在别处写裸字符串 */
 export const BKXK_SETTINGS_TAB: TabRegistration = {

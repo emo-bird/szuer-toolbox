@@ -73,7 +73,7 @@ export interface AiQuizResult {
 }
 
 /** `A,C` → `['A','C']` */
-export function lettersOf(answer: string): string[] {
+function lettersOf(answer: string): string[] {
   return answer
     .split(',')
     .map((s) => s.trim().toUpperCase())
@@ -89,7 +89,7 @@ export function lettersOf(answer: string): string[] {
  *
  * ⚠️ 相对地址（iframe 的 `src` 常写成 `/exam/1208164042`）要以当前页为基准解析。
  */
-export function tidFromLocation(href: string = location.href): string | null {
+function tidFromLocation(href: string = location.href): string | null {
   let u: URL;
   try {
     u = new URL(href, location.href);
@@ -125,7 +125,7 @@ export function quizTidOnPage(): string | null {
  *
  * 手动打开整页答题页时没有 iframe，返回 `null`（那种情况就不盖遮罩）。
  */
-export function quizFrameOnPage(): HTMLIFrameElement | null {
+function quizFrameOnPage(): HTMLIFrameElement | null {
   for (const frame of document.querySelectorAll('iframe')) {
     const src = frame.getAttribute('src') ?? '';
     if (src.includes('/exam/') && tidFromLocation(src) !== null) return frame;

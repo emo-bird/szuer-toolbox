@@ -56,7 +56,7 @@ export function afterAll(fn: Fn): void {
 
 // ------------------------------------------------------------- 断言
 
-export class AssertionError extends Error {
+class AssertionError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'AssertionError';
@@ -81,19 +81,6 @@ export function assertDeepEqual(actual: unknown, expected: unknown, message?: st
   if (a !== b) {
     throw new AssertionError(`${message ?? '结构不相等'}\n    实际: ${a}\n    期望: ${b}`);
   }
-}
-
-export function assertThrows(fn: Fn, message?: string): void {
-  let threw = false;
-  try {
-    const r = fn();
-    if (r instanceof Promise) {
-      throw new AssertionError(`${message ?? '期望抛错'}：拿到的是 Promise，请改用 assertRejects`);
-    }
-  } catch {
-    threw = true;
-  }
-  if (!threw) throw new AssertionError(message ?? '期望抛错，但没有抛');
 }
 
 function format(v: unknown): string {

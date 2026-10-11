@@ -6,7 +6,7 @@
  * 注意：跨 realm 判元素一律用鸭子类型（见 fill.ts 头注释的实测教训），这里不许用 instanceof。
  */
 
-export function isElement(node: Element | null | undefined): node is HTMLElement {
+function isElement(node: Element | null | undefined): node is HTMLElement {
   return node !== null && node !== undefined && node.nodeType === 1;
 }
 
@@ -16,7 +16,7 @@ export function asElement(node: Element | null): HTMLElement | null {
 }
 
 /** 收窄成 input（替代 `x instanceof HTMLInputElement`） */
-export function asInput(node: Element | null): HTMLInputElement | null {
+function asInput(node: Element | null): HTMLInputElement | null {
   return isElement(node) && node.tagName === 'INPUT'
     ? (node as unknown as HTMLInputElement)
     : null;

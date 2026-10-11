@@ -66,7 +66,7 @@ let loggedDrawn = false;
 // ------------------------------------------------------------ 页面事实
 
 /** 找课表容器；找不到返回 null（非课表页、或还没渲染出来、或站点结构变了） */
-export function findTable(doc: Document = document): HTMLElement | null {
+function findTable(doc: Document = document): HTMLElement | null {
   return doc.getElementById(SITE_TABLE_ID) ?? doc.querySelector<HTMLElement>(SITE_TABLE_SELECTOR);
 }
 

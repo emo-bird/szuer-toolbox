@@ -63,7 +63,7 @@ export function el<K extends keyof HTMLElementTagNameMap>(
 }
 
 /** 批量追加子节点，自动跳过 null / undefined / false */
-export function append(parent: Node, children: Child[]): void {
+function append(parent: Node, children: Child[]): void {
   for (const child of children) {
     if (child === null || child === undefined || child === false) continue;
     parent.appendChild(typeof child === 'string' ? document.createTextNode(child) : child);
@@ -96,12 +96,12 @@ export function clamp(value: number, min: number, max: number): number {
  *
  * 单独抽成纯函数是为了能在 node 下直接测（`document` 不存在也能测判定逻辑）。
  */
-export function readyStateAllowsMount(state: string): boolean {
+function readyStateAllowsMount(state: string): boolean {
   return state === 'interactive' || state === 'complete';
 }
 
 /** 当前文档是否已可挂载 */
-export function isDomReady(): boolean {
+function isDomReady(): boolean {
   return readyStateAllowsMount(document.readyState);
 }
 

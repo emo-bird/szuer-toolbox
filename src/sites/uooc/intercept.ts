@@ -44,7 +44,7 @@ type LearnApi =
  * 入参可能是相对地址（`/home/learn/getCatalogList?cid=...`）也可能是绝对地址。
  * 这里不去 `new URL()`（页面里 page realm 的 URL 未必同源），直接做子串 + 正则。
  */
-export function matchLearnApi(rawUrl: string): LearnApi | null {
+function matchLearnApi(rawUrl: string): LearnApi | null {
   const path = rawUrl.split('#')[0] ?? '';
 
   if (path.includes('/home/learn/getCatalogList')) {
@@ -142,7 +142,7 @@ let lastCommit: CommitResult | null = null;
 let commitWaiters: Array<(v: CommitResult | null) => void> = [];
 
 /** 把一份交卷响应喂进仓库（截获到） */
-export function primeCommit(body: unknown, httpStatus = 0): CommitResult {
+function primeCommit(body: unknown, httpStatus = 0): CommitResult {
   const result = readCommit(body, httpStatus);
   lastCommit = result;
   const pending = commitWaiters;

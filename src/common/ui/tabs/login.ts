@@ -8,10 +8,11 @@
  *   - bkxk 是 cookie + token 双检测（已验证）；
  *   - 未来还可能有办事大厅等站点，各自不同。
  * 所以在站点适配器落地前做不出可靠实现 —— 按用户拍板「两个都留」，
- * 这里先占位，等对应站点适配器写好后再通过 `setLoginStateProvider` 注入。
+ * 这里先占位。
  *
- * 站点侧用法（阶段 2/3 落地时）：
- *   setLoginStateProvider('bkxk', async () => ({ loggedIn: true, fields: [...] }));
+ * ⚠️ 2026-10 清理：原先预留的站点注册入口 `setLoginStateProvider` **从未被任何站点调用**
+ * （死代码），已随 cleanup/code-clarity 删除。将来真要接站点登录态时，按当时的契约重新设计
+ * 注册方式 —— 不要再复活一个没人调的 setter。
  */
 
 import { el, clear } from '../../utils/dom.ts';
@@ -40,11 +41,6 @@ type Provider = () => LoginState | Promise<LoginState>;
 /** siteId → 探测函数。公共标签页不知道任何站点，全靠站点自己注册进来。 */
 const providers = new Map<string, Provider>();
 
-/** 站点适配器注册自己的登录态探测器 */
-export function setLoginStateProvider(siteId: string, fn: Provider): void {
-  providers.set(siteId, fn);
-}
-
 /** 由 main 装配时注入：当前页面命中的站点 id（未命中为 null） */
 let currentSite: () => string | null = () => null;
 
@@ -53,7 +49,7 @@ export function setCurrentSiteResolver(fn: () => string | null): void {
 }
 
 /** 敏感值打码：保留首尾，其余用 • 填满 */
-export function maskValue(value: string): string {
+function maskValue(value: string): string {
   const chars = [...value];
   if (chars.length <= 2) return '•'.repeat(chars.length);
   if (chars.length <= 6) return `${chars[0]}${'•'.repeat(chars.length - 2)}${chars[chars.length - 1]}`;

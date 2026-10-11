@@ -12,7 +12,7 @@
  */
 
 /** Tampermonkey 注入的页面 window（`@grant unsafeWindow` 才有） */
-export function pageWindow(): Record<string, unknown> | null {
+function pageWindow(): Record<string, unknown> | null {
   const g = globalThis as Record<string, unknown>;
   const uw = g['unsafeWindow'];
   return uw !== null && typeof uw === 'object' ? (uw as Record<string, unknown>) : null;

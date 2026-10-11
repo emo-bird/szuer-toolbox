@@ -20,11 +20,11 @@ const log = scoped('uooc/takeover-utils');
 /** 内容区（video / iframe 都挂在这里面） */
 export const VIEWER_SEL = 'div.showViewer';
 /** 轮询 / 取消检查的最小间隔 */
-export const POLL_MS = 200;
+const POLL_MS = 200;
 /** 视频保底超时（与旧 autoplay 同一套） */
-export const VIDEO_SLACK_MS = 10 * 60 * 1000;
-export const VIDEO_MIN_MS = 5 * 60 * 1000;
-export const VIDEO_MAX_MS = 6 * 60 * 60 * 1000;
+const VIDEO_SLACK_MS = 10 * 60 * 1000;
+const VIDEO_MIN_MS = 5 * 60 * 1000;
+const VIDEO_MAX_MS = 6 * 60 * 60 * 1000;
 
 // ------------------------------------------------------------- 小工具
 
@@ -51,7 +51,7 @@ export function sleep(ms: number, t: { cancelled: boolean }): Promise<void> {
 }
 
 /** 等到 `pred()` 为真；超时或被停止都返回 false（靠 `t.cancelled` 区分） */
-export async function waitFor(
+async function waitFor(
   pred: () => boolean,
   timeoutMs: number,
   t: { cancelled: boolean },
@@ -66,7 +66,7 @@ export async function waitFor(
 }
 
 /** 内容区里视频 / iframe 的「身份指纹」，用来判断**换了内容**而不是旧内容还在 */
-export function viewerSignature(): string {
+function viewerSignature(): string {
   const box = document.querySelector<HTMLElement>(VIEWER_SEL);
   if (box === null) return '';
   const parts: string[] = [];
@@ -86,7 +86,7 @@ export function viewerSignature(): string {
  * 题目渲染了没有 ⇒ 网络差时答案先到、选项后到，**一道都填不上**。现在多一道
  * `quizDomReady()`（每个 `div.queContainer` 里都已经有选项控件或文本框）。
  */
-export function viewerReady(kind: 'video' | 'quiz'): boolean {
+function viewerReady(kind: 'video' | 'quiz'): boolean {
   const box = document.querySelector<HTMLElement>(VIEWER_SEL);
   if (box === null) return false;
   if (kind === 'video') return box.querySelector('video') !== null;

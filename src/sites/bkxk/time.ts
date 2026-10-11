@@ -110,7 +110,7 @@ export function cn2num(s: string): number {
 }
 
 /** 单双周是否命中某一周。`null` 恒真。 */
-export function parityMatches(week: number, parity: Parity): boolean {
+function parityMatches(week: number, parity: Parity): boolean {
   if (parity === null) return true;
   return parity === '单' ? week % 2 === 1 : week % 2 === 0;
 }
@@ -179,7 +179,7 @@ export function parsePlace(text: string | null | undefined): readonly TimeSegmen
 }
 
 /** 这一段是否落在第 `week` 周（含单双周过滤）。 */
-export function weekMatches(seg: TimeSegment, week: number): boolean {
+function weekMatches(seg: TimeSegment, week: number): boolean {
   if (!Number.isFinite(week) || week < seg.weekFrom || week > seg.weekTo) return false;
   return parityMatches(week, seg.parity);
 }
@@ -251,7 +251,7 @@ export function weekText(seg: Pick<TimeSegment, 'weekFrom' | 'weekTo' | 'parity'
 }
 
 /** 节次的短文本，例如 `3-4节` / `9节`。 */
-export function sectionText(seg: Pick<TimeSegment, 'sectionFrom' | 'sectionTo'>): string {
+function sectionText(seg: Pick<TimeSegment, 'sectionFrom' | 'sectionTo'>): string {
   return seg.sectionFrom === seg.sectionTo
     ? `${seg.sectionFrom}节`
     : `${seg.sectionFrom}-${seg.sectionTo}节`;
@@ -286,11 +286,6 @@ export function segToPlaceText(seg: PlaceTextInput): string {
   const place = seg.place.trim();
   if (place !== '') parts.push(place);
   return parts.join(' ');
-}
-
-/** 多段拼成整串 `teachingPlace`（`,` 分隔，与 `parsePlace` 的切分口径一致）。 */
-export function placeTextFor(segs: readonly PlaceTextInput[]): string {
-  return segs.map((s) => segToPlaceText(s)).join(',');
 }
 
 /** 位图 → 有课的周次数组（下标 0 视为第 1 周）。非 `'1'` 字符一律当 0。 */

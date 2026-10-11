@@ -21,7 +21,7 @@ import {
 /** 教学班详情块（嵌套会出现，归属判定靠它） */
 export const INFO_SELECTOR = '.cv-info';
 /** 课程名位置：列表页是 .cv-title-col，卡片页是 .cv-course */
-export const TITLE_CELL_SELECTOR = '.cv-title-col, .cv-course';
+const TITLE_CELL_SELECTOR = '.cv-title-col, .cv-course';
 
 // ------------------------------------------------------------ 纯 DOM 小工具
 
@@ -31,7 +31,7 @@ export function swallow(ev: Event): void {
   ev.stopPropagation();
 }
 
-export function textOf(node: Element | null): string {
+function textOf(node: Element | null): string {
   return cleanText(node === null ? '' : node.textContent);
 }
 
@@ -56,7 +56,7 @@ export function ownsBlock(unit: HTMLElement): boolean {
 }
 
 /** 属性名大小写不敏感地取一个属性值 */
-export function attr(node: Element, name: string): string {
+function attr(node: Element, name: string): string {
   const v = node.getAttribute(name);
   return v === null ? '' : v.trim();
 }
@@ -89,7 +89,7 @@ export function tcIdsIn(node: HTMLElement): string[] {
  * （方案内页的采样里躺着 7 行本班课程 + 10 行方案内课程），用激活页签会把
  * 隐藏列表里的教学班标成错的 `teachingClassType`。
  */
-export function categoryFor(node: HTMLElement): string {
+function categoryFor(node: HTMLElement): string {
   let cur: HTMLElement | null = node;
   for (let i = 0; i < 10 && cur !== null; i++) {
     if (cur.classList.contains('cv-body')) return categoryOfBodyId(cur.id);
@@ -99,13 +99,13 @@ export function categoryFor(node: HTMLElement): string {
 }
 
 /** 课程名：卡片页的行上是 `.cv-course`，列表页的行上是 `.cv-title-col` */
-export function courseNameOf(row: Element | null): string {
+function courseNameOf(row: Element | null): string {
   if (row === null) return '';
   return textOf(row.querySelector(TITLE_CELL_SELECTOR));
 }
 
 /** 上课时间地点：卡片上是带 `title` 的那个 div，列表页是 `.cv-time-col` */
-export function placeOfUnit(unit: HTMLElement): string {
+function placeOfUnit(unit: HTMLElement): string {
   const timeEl = ownDescendant(unit, 'div[title]');
   return placeFromTimeText(timeEl === null ? '' : timeEl.getAttribute('title'));
 }

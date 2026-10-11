@@ -25,9 +25,9 @@ import type { ExamQuestion } from './paper.ts';
  * 单次「请求 + 解析」失败后最多试几次 —— 用户口径「最多 3 次，含首次」。
  * **计数是本调用自己的**：同一道题的不同轮次各自从头数（「每轮独立计数」）。
  */
-export const ASK_ATTEMPTS = 3;
+const ASK_ATTEMPTS = 3;
 /** 两次尝试之间固定等这么久 —— 用户口径「间隔 2 秒」，不做指数退避 */
-export const ASK_RETRY_DELAY_MS = 2000;
+const ASK_RETRY_DELAY_MS = 2000;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
@@ -98,7 +98,7 @@ export interface AnswerOptions {
 }
 
 /** 洗一副牌（Fisher-Yates，不改动入参） */
-export function shuffledTemplates(): PromptTemplate[] {
+function shuffledTemplates(): PromptTemplate[] {
   const out = [...TEMPLATES];
   for (let i = out.length - 1; i > 0; i -= 1) {
     const j = Math.floor(Math.random() * (i + 1));
