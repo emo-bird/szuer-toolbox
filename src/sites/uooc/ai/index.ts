@@ -81,6 +81,17 @@ function lettersOf(answer: string): string[] {
 }
 
 /**
+ * 把一道题的答案包装成回填指令。
+ *
+ * 填空题走 `text`（原文，多空已用 `|` 分隔），选择题走 `letters` ——
+ * 两套字段不混用，`fill.ts` 按 `kind` 分流（用户 m00107）。
+ */
+function fillTargetFor(q: ExamQuestion, answer: string): FillTarget {
+  if (q.kind === 'blank') return { qid: q.id, kind: q.kind, letters: [], text: answer };
+  return { qid: q.id, kind: q.kind, letters: lettersOf(answer) };
+}
+
+/**
  * 从一个地址里取测验的 `tid`；取不到返回 null。
  *
  * 实测有**两种形状**，都要认（`local/uooc-flow-index.txt` 里两种都出现过）：
@@ -224,8 +235,7 @@ async function retryLowScore(
       note: o.note ?? '',
     });
     if (o.answer === '') continue;
-    const target: FillTarget = { qid: q.id, kind: q.kind, letters: lettersOf(o.answer) };
-    const r = fillAnswers([target]);
+    const r = fillAnswers([fillTargetFor(q, o.answer)]);
     if (r.filled.length > 0) {
       filled += 1;
       previous.set(q.id, o.answer);
@@ -291,7 +301,7 @@ async function runQuizAnswerBody(tid: string, host: PanelApi): Promise<AiQuizRes
 
   log.info(
     `拿到 ${all.length} 道题：页面上已有答案 ${already.length} 道（跳过），` +
-      `可自动作答 ${todo.length} 道，跳过 ${skippedKind} 道填空/主观题`,
+      `可自动作答 ${todo.length} 道，跳过 ${skippedKind} 道主观题`,
   );
 
   /** 我们实际填进去/提交的答案（重答时要拿它做排除） */
@@ -337,9 +347,7 @@ async function runQuizAnswerBody(tid: string, host: PanelApi): Promise<AiQuizRes
           });
           return;
         }
-        const report = fillAnswers([
-          { qid: question.id, kind: question.kind, letters: lettersOf(outcome.answer) },
-        ]);
+        const report = fillAnswers([fillTargetFor(question, outcome.answer)]);
         const ok = report.filled.length > 0;
         if (ok) {
           filled += 1;
@@ -386,7 +394,7 @@ async function runQuizAnswerBody(tid: string, host: PanelApi): Promise<AiQuizRes
   const bodyLines = [
     `卷面 ${all.length} 道题：页面上本来就有答案 ${already.length} 道，模型作答并填入 ${filled} 道。`,
   ];
-  if (skippedKind > 0) bodyLines.push(`跳过 ${skippedKind} 道（填空/主观题）。`);
+  if (skippedKind > 0) bodyLines.push(`跳过 ${skippedKind} 道主观题（名词解释/问答/论述）。`);
   if (filled < todo.length) bodyLines.push(`有 ${todo.length - filled} 道没填进去（见【监视】页的逐题表）。`);
   if (failure !== '') bodyLines.push(failure);
   bodyLines.push('');

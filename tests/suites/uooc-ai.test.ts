@@ -22,7 +22,8 @@ import {
   parseAnswerLines,
   parseAnswers,
 } from '../../src/sites/uooc/ai/parse.ts';
-import { isAnswerable, kindOf, type QuestionKind } from '../../src/sites/uooc/ai/paper.ts';
+import { blankCountOf, isAnswerable, kindOf, type QuestionKind } from '../../src/sites/uooc/ai/paper.ts';
+import { blankSegments } from '../../src/sites/uooc/ai/fill.ts';
 import { SHARED_INSTRUCTION, TEMPLATES, buildPrompt } from '../../src/sites/uooc/ai/prompts.ts';
 import { chatUrl, extractContent } from '../../src/sites/uooc/ai/llm.ts';
 
@@ -53,12 +54,28 @@ describe('uooc/ai · 题型判定', () => {
     assertEqual(kindOf('计算题', '50'), 'other');
   });
 
-  it('只有单选/多选/判断能自动作答（填空按用户决定搁置）', () => {
+  it('单选/多选/判断/填空能自动作答，主观题不能（填空自用户 m00107 起纳入）', () => {
     assert(isAnswerable('single'), 'single 应该可作答');
     assert(isAnswerable('multi'), 'multi 应该可作答');
     assert(isAnswerable('judge'), 'judge 应该可作答');
-    assert(!isAnswerable('blank'), 'blank 不该被算进自动作答');
-    assert(!isAnswerable('other'), 'other 不该被算进自动作答');
+    assert(isAnswerable('blank'), 'blank 现在应该可作答');
+    assert(!isAnswerable('other'), 'other（名词解释/问答/论述）不该被算进自动作答');
+  });
+
+  it('空数：接口给对象、页面给数组，两种都数得对', () => {
+    assertEqual(blankCountOf({ 第1空: '' }, 'blank'), 1);
+    assertEqual(blankCountOf({ 第1空: '', 第2空: '' }, 'blank'), 2);
+    // 页面 scope 里的形状（活页实测）：一个空一项的数组
+    assertEqual(blankCountOf([{ text: '', key: '第1空' }], 'blank'), 1);
+    assertEqual(blankCountOf([{ text: '', key: '第1空' }, { text: '', key: '第2空' }], 'blank'), 2);
+  });
+
+  it('空数只对填空题有意义，别的题型恒 0（避免选择题的 4 个选项被当成 4 个空）', () => {
+    assertEqual(blankCountOf({ A: '经济', B: '外交', C: '科技', D: '教育' }, 'single'), 0);
+    assertEqual(blankCountOf({ A: '甲', B: '乙' }, 'multi'), 0);
+    assertEqual(blankCountOf(null, 'blank'), 0);
+    assertEqual(blankCountOf(undefined, 'blank'), 0);
+    assertEqual(blankCountOf('第1空', 'blank'), 0);
   });
 });
 
@@ -279,6 +296,43 @@ describe('uooc/ai · 提示词', () => {
     const p = buildPrompt([blankish], TEMPLATES[0]!);
     assert(p.includes('1. [填空题]'), '填空题该有题型标记');
     assert(!p.includes('   A.'), '没有选项就不该有选项行');
+  });
+
+  it('多空的填空题要告诉模型「几个空」（少一段答案站点就判没填完）', () => {
+    const two: ExamQuestion = { ...q, kind: 'blank', typeText: '填空题', options: [], blankCount: 2 };
+    const p = buildPrompt([two], TEMPLATES[0]!);
+    assert(p.includes('本题共 2 个空'), `多空提示没写进去：\n${p}`);
+    assert(p.includes('| 分隔'), `切段口径没写进去：\n${p}`);
+  });
+
+  it('单空填空不加多余提示（提示词越短越稳）', () => {
+    const one: ExamQuestion = { ...q, kind: 'blank', typeText: '填空题', options: [], blankCount: 1 };
+    const p = buildPrompt([one], TEMPLATES[0]!);
+    assert(!p.includes('（本题共'), `单空不该有多空提示：\n${p}`);
+  });
+});
+
+describe('uooc/ai · 填空题切段', () => {
+  it('没竖线的就是一段（绝大多数填空题只有一个空）', () => {
+    assertDeepEqual(blankSegments('钢少气多'), ['钢少气多']);
+    assertDeepEqual(blankSegments('  钢少气多  '), ['钢少气多']);
+  });
+
+  it('多个空按空序切开，全角竖线也认', () => {
+    assertDeepEqual(blankSegments('甲|乙'), ['甲', '乙']);
+    assertDeepEqual(blankSegments('甲｜乙'), ['甲', '乙']);
+    assertDeepEqual(blankSegments('甲 | 乙 | 丙'), ['甲', '乙', '丙']);
+  });
+
+  it('尾部多写的竖线不算一个空（否则第 2 空会被写成空串）', () => {
+    assertDeepEqual(blankSegments('甲|'), ['甲']);
+    assertDeepEqual(blankSegments('甲||'), ['甲']);
+  });
+
+  it('全空/只有竖线 ⇒ 没有段（调用方当「没答出来」）', () => {
+    assertDeepEqual(blankSegments(''), []);
+    assertDeepEqual(blankSegments('   '), []);
+    assertDeepEqual(blankSegments('|'), []);
   });
 });
 

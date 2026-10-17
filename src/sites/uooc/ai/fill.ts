@@ -22,7 +22,15 @@
  */
 
 import type { QuestionKind } from './paper.ts';
-import { asElement, clickOption, collectRoots, inputsFor, isVisible } from './fill-dom.ts';
+import {
+  asElement,
+  clickOption,
+  collectRoots,
+
+  inputsFor,
+  isVisible,
+  textControlsFor,
+} from './fill-dom.ts';
 
 export * from './fill-dom.ts';
 export * from './quiz-ready.ts';
@@ -30,8 +38,14 @@ export * from './quiz-ready.ts';
 export interface FillTarget {
   readonly qid: string;
   readonly kind: QuestionKind;
-  /** 要选中的选项字母，已升序（`['A','C']`） */
+  /** 要选中的选项字母，已升序（`['A','C']`）；填空题为空数组 */
   readonly letters: readonly string[];
+  /**
+   * 填空题的答案原文（多个空用 `|` 分隔，见 `blankSegments`）。
+   *
+   * 选择题不传；填空题**只认它**，不看 `letters`。
+   */
+  readonly text?: string;
 }
 
 export interface FillReport {
@@ -41,6 +55,133 @@ export interface FillReport {
   readonly missing: readonly string[];
   /** 找到了元素但点不动（新版多选题的 radio 实测不可见，见下） */
   readonly failed: readonly string[];
+}
+
+// ============================================================ 填空题（用户 m00107）
+
+/**
+ * 填空题答案切成「每个空一段」。
+ *
+ * 站点与提示词约定的格式就是「多个空按空序用竖线 `|` 分隔」（见 `prompts.ts` 第 5 条），
+ * 这里再认一下全角 `｜`（模型偶尔把中文标点混进来）。
+ *
+ * **尾部空段丢掉**：模型多写一个竖线（`答案|`）时不该把第 2 个空写成空串，
+ * 否则这道题会被判成「没填完」。
+ */
+export function blankSegments(text: string): string[] {
+  const parts = text.split(/[|｜]/).map((s) => s.trim());
+  while (parts.length > 0 && parts[parts.length - 1] === '') parts.pop();
+  return parts;
+}
+
+/** 跨 realm 派发事件：构造函数必须取**元素自己所在文档**的（iframe 有自己的 realm） */
+function dispatch(el: HTMLElement, type: string): void {
+  const view = el.ownerDocument?.defaultView as (Window & typeof globalThis) | null;
+  const Ctor = (view?.Event ?? Event) as typeof Event;
+  for (const make of [() => new Ctor(type, { bubbles: true }), () => new Event(type, { bubbles: true })]) {
+    try {
+      el.dispatchEvent(make());
+      return;
+    } catch {
+      // 换个 realm 的构造函数再试
+    }
+  }
+}
+
+/** 读文本框当前值（`textarea`/`input` 认 `value`，富文本认 `textContent`） */
+function controlValue(el: HTMLElement): string {
+  const v = (el as unknown as { value?: unknown }).value;
+  if (typeof v === 'string') return v;
+  return el.textContent ?? '';
+}
+
+/** 把答案写进一个文本框；值没变就不写、也不重复派发事件（幂等，重答不会打架） */
+function setControlValue(el: HTMLElement, value: string): boolean {
+  if (controlValue(el) === value) return true;
+  try {
+    if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') {
+      (el as unknown as { value: string }).value = value;
+    } else {
+      el.textContent = value;
+    }
+  } catch {
+    return false;
+  }
+  dispatch(el, 'input');
+  dispatch(el, 'change');
+  return true;
+}
+
+/** 元素身上的 Angular scope（跨 realm：用元素自己所在窗口的 `angular`） */
+function angularScopeOf(el: HTMLElement): Record<string, unknown> | null {
+  const win = el.ownerDocument?.defaultView as (Window & { angular?: unknown }) | null;
+  const angular = (win?.angular ?? null) as {
+    element?: (e: Element) => { scope?: () => unknown };
+  } | null;
+  if (angular === null || typeof angular.element !== 'function') return null;
+  try {
+    return (angular.element(el).scope?.() ?? null) as Record<string, unknown> | null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 让站点把文本框里的字**读进 Angular scope**（不读走，交卷报文里就是空的）。
+ *
+ * 实测（tid=1901349073，`vm.addAnswer` 的函数体是从页面自己身上读出来的）：
+ * 填空题分支只做一件事 —— `_.each(question.options, (o, n) => answer.push($('#u' + question.id + n).val()))`
+ * ⇒ 它读的是 **DOM value**，写进 `question.student_answer` 并重算 `question.checked`。
+ *
+ * 两条路，都留着（理由都是实测出来的，别顺手删）：
+ *  1. 派发 `mouseleave` —— 站点把它挂在 `ng-mouseleave` 上。**实测在 jQuery 1.12.2 上不触发**：
+ *     jQuery 的 `mouseleave` 是「特殊事件」，内部监听的是 `mouseover`/`mouseout`，
+ *     手搓一个 `mouseleave` 事件派过去没有监听器接。纯 jqLite 页面上这条才是真路径，故保留。
+ *  2. 直接调 `scope.vm.addAnswer(null, scope.question)` —— 填空题分支根本不看 `event`，
+ *     实测这一下就把 `student_answer` 从 `[""]` 变成 `["绿水青山"]`、`checked` 变 `true`（还原后也如实回退）。
+ *     ⇒ **真正靠得住的是这条**。
+ *
+ * @returns 第 2 条有没有走通（`false` = 只能靠事件，或页面没有 Angular）
+ */
+function commitBlank(el: HTMLElement): boolean {
+  dispatch(el, 'mouseleave');
+  const scope = angularScopeOf(el);
+  const vm = (scope?.['vm'] ?? null) as { addAnswer?: (ev: unknown, q: unknown) => void } | null;
+  const question = scope?.['question'] ?? null;
+  if (vm === null || typeof vm.addAnswer !== 'function' || question === null) return false;
+  try {
+    vm.addAnswer(null, question);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 填一道填空题：第 i 段答案 → 第 i 个文本框（站点按空序渲染，见 `fill-dom.ts`）。
+ *
+ * 判「填好了」的口径 = **每个空都有字**：站点 `isComplete()` 就是这么判的，
+ * 少填一个空这道题在站点眼里仍是未作答（白填）。
+ */
+function fillBlank(qid: string, text: string): 'filled' | 'missing' | 'failed' {
+  const controls = textControlsFor(collectRoots(), qid);
+  if (controls.length === 0) return 'missing';
+  const segments = blankSegments(text);
+  if (segments.length === 0) return 'missing';
+
+  let ok = false;
+  controls.forEach((el, i) => {
+    const seg = segments[i] ?? '';
+    if (seg === '') return;
+    if (setControlValue(el, seg)) ok = true;
+  });
+  if (!ok) return 'failed';
+
+  const first = controls[0];
+  if (first !== undefined) commitBlank(first);
+
+  // 复查：读完还得有字（被站点自己的监听器回滚过就白填了）
+  return controls.every((el) => controlValue(el).trim() !== '') ? 'filled' : 'failed';
 }
 
 /**
@@ -63,6 +204,7 @@ export interface FillReport {
  *
  * 幂等：已经勾上的不再点（多选题里重复点会把已选项**取消**，这是最危险的一种错）。
  * 单选/判断题：要换选项时直接点目标那个即可，radio 同 name 会自动互斥。
+ * 填空题：走 `fillBlank`（文本框没有 name，得靠题目容器反查）。
  */
 export function fillAnswers(targets: readonly FillTarget[]): FillReport {
   const filled: string[] = [];
@@ -71,6 +213,13 @@ export function fillAnswers(targets: readonly FillTarget[]): FillReport {
 
   const roots = collectRoots();
   for (const t of targets) {
+    if (t.kind === 'blank') {
+      const how = fillBlank(t.qid, t.text ?? '');
+      if (how === 'filled') filled.push(t.qid);
+      else if (how === 'missing') missing.push(t.qid);
+      else failed.push(t.qid);
+      continue;
+    }
     if (t.letters.length === 0) {
       missing.push(t.qid);
       continue;
@@ -138,10 +287,15 @@ export function findSubmitButton(top: Document = document): HTMLElement | null {
 
 // ================================================================== 已答 / 清除（m04879）
 
-/** 这道题在 DOM 上已经勾了答案吗（`student_answer` 之外的第二道判据） */
+/** 这道题在 DOM 上已经勾了/填了答案吗（`student_answer` 之外的第二道判据） */
 export function isAnsweredInDom(qid: string, top: Document = document): boolean {
-  for (const el of inputsFor(collectRoots(top), qid)) {
+  const roots = collectRoots(top);
+  for (const el of inputsFor(roots, qid)) {
     if (el.checked) return true;
+  }
+  // 填空题没有任何 input：文本框里有字就算已答（否则会把用户自己填的答案再问一遍）
+  for (const el of textControlsFor(roots, qid)) {
+    if (controlValue(el).trim() !== '') return true;
   }
   return false;
 }
@@ -200,7 +354,19 @@ export function clearQuestion(
   kind: QuestionKind,
   top: Document = document,
 ): 'ngModel' | 'dom' | 'missing' {
-  const inputs = inputsFor(collectRoots(top), qid);
+  const roots = collectRoots(top);
+
+  // 填空题先走文本框：它没有 input，走下面的路只会拿到 'missing'
+  if (kind === 'blank') {
+    const controls = textControlsFor(roots, qid);
+    if (controls.length === 0) return 'missing';
+    for (const el of controls) setControlValue(el, '');
+    const first = controls[0];
+    const viaModel = first !== undefined && commitBlank(first);
+    return viaModel ? 'ngModel' : 'dom';
+  }
+
+  const inputs = inputsFor(roots, qid);
   if (inputs.length === 0) return 'missing';
 
   const empty = emptyValueFor(kind);
@@ -237,7 +403,7 @@ export interface QuestionAnchor {
   readonly indexEl: HTMLElement;
   /** 题目容器（`div.queContainer`） */
   readonly container: HTMLElement;
-  /** 题目 id（从容器里的 `input[name]` 反查；已交卷的卷子上可能是 null） */
+  /** 题目 id（`input[name]` 或题号元素的 `anchor<qid>` 反查；已交卷的卷子上可能是 null） */
   readonly qid: string | null;
 }
 
@@ -247,8 +413,9 @@ export interface QuestionAnchor {
  * 实测结构（`local/capture/dom-uooc-exam-旧-未完成-单选-多选-验证码.txt`
  * 的路径签名聚合）：
  * ```
- * div.queContainer > div.index            （题号，样例文本 "1."）
- * div.queContainer > div.queBox > div.smallTest > input[name="<qid>"]
+ * div.queContainer > div.index            （题号，样例文本 "1."，id = "anchor<qid>"）
+ * div.queContainer > div.queBox > div.smallTest > input[name="<qid>"]   （选择题）
+ * div.queContainer > … > textarea.ue-container1                        （填空题）
  * div.queContainer > div.scores > label.ng-binding  （"( 4.00 分 )"）
  * ```
  * 不用位置选择器（第几个 `queContainer`）—— 题号分组顺序会变。
@@ -267,16 +434,29 @@ function findQuestionAnchors(top: Document = document): QuestionAnchor[] {
       if (container === null) continue;
       const indexEl = asElement(container.querySelector('div.index'));
       if (indexEl === null) continue;
-      const input = container.querySelector('input[name]');
       out.push({
         label: (indexEl.textContent ?? '').trim(),
         indexEl,
         container,
-        qid: input?.getAttribute('name') ?? null,
+        qid: qidOf(container, indexEl),
       });
     }
   }
   return out;
+}
+
+/**
+ * 从题目容器上反查题目 id：**两处都可能给**。
+ *
+ *  - 选择题：`input[name="<qid>"]`；
+ *  - 填空题：一个 `input` 都没有，只能读题号元素的 `id="anchor<qid>"`（实测见 `fill-dom.ts`）。
+ */
+function qidOf(container: HTMLElement, indexEl: HTMLElement): string | null {
+  const input = container.querySelector('input[name]');
+  const named = input?.getAttribute('name') ?? '';
+  if (named !== '') return named;
+  const m = /^anchor(\d+)$/.exec(indexEl.getAttribute('id') ?? '');
+  return m !== null && m[1] !== undefined ? m[1] : null;
 }
 
 /**

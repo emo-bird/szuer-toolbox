@@ -18,11 +18,16 @@
 | `dom-uooc-exam-旧-已完成-单选-填空.txt` | `https://www.uooc.net.cn/home/learn/index#/2042342697/57920722/1629578551/1107224086/section` | `top > frame[0] → /exam/paper?cid=2042342697&tid=736720049` | 旧版学习页里**用 iframe 嵌**只读试卷 |
 | `dom-uooc-exam-新-未完成-单选.txt` | `https://www.uooc.net.cn/exam/1870897911` | `top > frame[0] → about:blank`（无关，空帧） | 新版**答题界面** |
 | `dom-uooc-exam-新-未完成-单选-多选-验证码.txt` | `https://www.uooc.net.cn/exam/983779533##anchor942674265` | 同上 | 新版答题界面（含人脸识别关卡） |
+| （无采样文件，2026-10-18 活页实测） | `https://www.uooc.net.cn/home/learn/index#/2042342697/168063548/2095339664/1830195947/section` | `top > frame[0] → /exam/1901349073` | 新版学习页外壳 + 旧版试卷 iframe，**含未作答填空题**（见 §2.4） |
 
 **结论**
 - **新版答题页 = 顶层 `/exam/{tid}`，tid 直接写在 URL 里** ⇒ 新方案**完全不需要枚举 tid**。
 - **旧版**是在 `/home/learn/index#/…` 里开 iframe 指向 `/exam/paper?cid=&tid=` ⇒ tid 从 iframe 的 `src` 读。
 - 新版那个 `about:blank` iframe 是空帧，与试卷无关。
+- ⭐ **题号元素自带题 id**：`div.index` 的 `id = "anchor" + question.id`（`#anchor832695642`），
+  **所有题型都有**。所以「题 id → 题容器」统一用
+  `querySelector('div.index[id="anchor'+qid+'"]').closest('div.queContainer')`，
+  不必再靠 `input[name="<qid>"]`（填空没有 name，靠它找不到）。
 
 ---
 
@@ -69,10 +74,82 @@ h2.queItems-type                                   ← 大题标题，文本 = "
 ⇒ **填答案的做法**：找到 `input[name="<题id>"][value="<字母>"]`，`el.click()`。
    点击会触发 Angular 的 `ng-click="vm.addAnswer($event,question)"`，是站点自己的写入路径。
 
-### 2.4 填空题
-- `textarea` 全页只有 1 个，是**评论区**（`id="content"`、`placeholder="课程是否给力？快分享你的学习心得吧~"`），与试卷无关。
-- `[contenteditable]` 计数为 **0**，`div.answerBox > div.ng-scope ×4` + `input ×4`
-  （旧版只读样本）⇒ 填空大概率是 `<input>`，**但尚无「未完成 + 含填空」的采样佐证**（见 §5 数据缺口）。
+### 2.4 填空题（2026-10-18 实测补全，不再是猜测）
+
+> 旧版笔记这里写的是「填空大概率是 `<input>`，尚无未完成采样佐证」——**已作废**。
+> 下面这份是活的未完成试卷（`tid=1901349073`）上抓到的原文，含改动前后的 scope 状态。
+
+**入口是两层**：用户给的链接是**新版学习页外壳**
+`/home/learn/index#/…/section`，顶层文档里 `div.queContainer` 计数 **0**、
+`textarea` 计数 **0**；真正的试卷在**同源 iframe** `/exam/{tid}` 里（旧版 Angular 页）。
+⇒ 读数、回填都必须先 `collectRoots()` 进 iframe（`fill-dom.ts` 已经这么做）。
+
+**一道填空题的 DOM（实测原文）**：
+
+```html
+<div class="queContainer" ng-repeat="question in group.items"
+     ng-mouseenter="vm.activeQuestion(question)">
+  <div class="index" id="anchor832695642">1.</div>     ← id = "anchor" + 题 id，**所有题型都有**
+  <div class="queBox"><div class="smallTest"><div class="smallTest-view"><div class="ti">
+    <div class="ti-q"><div class="ti-q-c"><p>＿＿就是金山银山</p></div></div>   ← 题干（全角下划线）
+    <div class="ti-alist">
+      <label class="ti-a" ng-repeat="item in question.options track by $index">  ← **一个空一个 label**
+        <span class="ti-a-i">第1空: </span>
+        <div class="ti-a-c">
+          <textarea class="ue-container1 ng-binding" id="u8326956420"  ← id = "u" + 题 id + 空序
+                    ng-mouseleave="vm.addAnswer($event,question)"></textarea>
+        </div>
+      </label>
+    </div>
+  </div></div></div></div>
+  <div class="scores"><label>( 50.00 分 )</label></div>
+</div>
+```
+
+实测属性（原文照抄，别再猜）：
+- 控件是 **`textarea.ue-container1`**，**没有 `name`、没有 `ng-model`** —— 所以
+  `input[name="<qid>"]` 那条路对填空**完全无效**（这也是旧实现只会「跳过填空」的原因）。
+- `id = "u" + question.id + 空序`（`u8326956420` = 题 `832695642` 的第 0 个空）；`readOnly=false`、`disabled=false`、可见 `1387x50`。
+- 空数 = 容器内 `textarea.ue-container1` 的个数；题干里的空用**全角下划线** `＿＿` 占位。
+- scope 里 `question.options` 是**数组**（`[{"text":"","key":"第1空"}]`，一个空一项），
+  而 `/exam/getTaskPaper` 返回的是**对象** `{第1空:""}` —— 同一件事两种形状，`paper.ts` 两种都吃（`blankCountOf`）。
+- 未作答时 `question.student_answer` = `[""]`（有几个空就几个空串），`question.checked` = `false`。
+
+**站点怎么把字读进去（从页面自己的函数体读出来的）**：
+
+```js
+// vm.addAnswer 的 type == 30 分支
+} else if (type == 30) {
+  _.each(question.options, function (option, n) {
+    var ueditorId = 'u' + question.id + n;
+    answer.push($('#' + ueditorId).val());          // ← 读的是 DOM value，不是 scope
+  });
+  question.student_answer = answer;
+  question.checked = isComplete(question);
+}
+```
+
+⇒ 回填只要「把字写进 textarea.value」+「让这个函数跑一次」。
+`ng-mouseleave` 是站点自己给「打完字离开输入框」准备的入口。
+
+⚠️ **但实测派发 `mouseleave` 事件不触发**：页面用的是 **jQuery 1.12.2**，
+jQuery 把 `mouseleave` 做成了**特殊事件**（内部监听 `mouseover`/`mouseout`），
+手搓 `new Event('mouseleave')` 派过去没有监听器接（实测派发后 `student_answer` 仍是 `[""]`、`checked` 仍 `false`）。
+
+✅ **直接调 scope 函数才可靠**（实测一次就成）：
+
+```js
+const s = angular.element(ta).scope();
+ta.value = '绿水青山';
+s.vm.addAnswer(null, s.question);      // 填空题分支根本不看 $event
+// ⇒ s.question.student_answer = ["绿水青山"]，s.question.checked = true
+```
+
+还原也一样（`ta.value=''` 再调一次 ⇒ `[""]` / `checked=false`），所以这条路径**没有副作用残留**。
+实现见 `src/sites/uooc/ai/fill.ts` 的 `commitBlank()`（两条路都留着：事件给纯 jqLite 页面，scope 调用是主力）。
+
+**其他实测**：`vm.autoSaveInterval` = 120（秒），`vm.saveTask()` = `autoSaveTask()` + 无新内容时
+`layer.msg('没有新的内容需要保存')`；`vm.task.type` = 10（考试）；每次 `addAnswer` 末尾都会 `recordAvatar()`。
 
 ### 2.5 按钮（实测原文）
 
@@ -262,6 +339,10 @@ D12 `www.uooc.net.cn` 抓包。
 `dom-uooc-exam-{新,旧}-未完成-单选-多选-验证码.txt`、
 `dom-uooc-quiz-新-提交{通过,未通过}.txt`、`dom-uooc-quiz-新-点击确定通过按钮.txt`。
 人脸识别一项按用户口径**忽略**（实测 `require_face: "False"`，且从未遇到过）。
+
+**D8（填空 DOM）本轮已彻底闭环**：旧采样都是「已完成 / 只读」视图，看不到可编辑控件；
+2026-10-18 在活的未完成试卷上实测把结构、`id` 规则、空数、回填入口都写进了 §2.4
+（`textarea.ue-container1` + `#u<qid><n>` + `vm.addAnswer` 读 DOM value + jQuery 1.12 的 `mouseleave` 陷阱）。
 
 **仍然缺的**：
 

@@ -113,6 +113,11 @@ export function buildPrompt(
     lines.push(`${i + 1}. ${tag}${q.stem}`);
     const opts = renderOptions(q);
     if (opts !== '') lines.push(`   ${opts}`);
+    // 多空的填空题**必须告诉模型几个空**：少给一段答案，站点就判这道题没填完
+    const blanks = q.blankCount ?? 0;
+    if (q.kind === 'blank' && blanks > 1) {
+      lines.push(`   （本题共 ${blanks} 个空，按空序给出 ${blanks} 段答案，用 | 分隔）`);
+    }
   });
   return lines.join('\n');
 }

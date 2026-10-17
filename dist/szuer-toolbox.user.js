@@ -52,7 +52,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-11T09:49:33.563Z（构建号 114） */
+/* 构建信息：2026-10-17T16:56:04.746Z（构建号 117） */
 
 "use strict";
 (() => {
@@ -2450,6 +2450,66 @@ ${options.desc ?? ""}
     }
     return roots;
   }
+  function esc(qid) {
+    try {
+      return CSS.escape(qid);
+    } catch {
+      return qid.replace(/["\\]/g, "");
+    }
+  }
+  function containerFor(roots, qid) {
+    for (const doc of roots) {
+      let el2 = null;
+      try {
+        el2 = doc.querySelector(`div.index[id="anchor${esc(qid)}"]`);
+      } catch {
+        el2 = null;
+      }
+      if (el2 === null) continue;
+      const container = asElement(el2.closest("div.queContainer"));
+      if (container !== null) return container;
+    }
+    return null;
+  }
+  function usable(list2) {
+    const enabled = list2.filter((el2) => el2.disabled !== true);
+    const visible = enabled.filter((el2) => isVisible(el2));
+    return visible.length > 0 ? visible : enabled;
+  }
+  function pickAll(root, selector) {
+    const out = [];
+    let list2;
+    try {
+      list2 = Array.from(root.querySelectorAll(selector));
+    } catch {
+      return out;
+    }
+    for (const el2 of list2) {
+      const he = asElement(el2);
+      if (he !== null) out.push(he);
+    }
+    return out;
+  }
+  function textControlsFor(roots, qid) {
+    const out = [];
+    for (const doc of roots) {
+      const container = containerFor([doc], qid);
+      if (container !== null) {
+        let local = pickAll(container, "textarea.ue-container1");
+        if (local.length === 0) local = pickAll(container, "textarea");
+        if (local.length === 0) local = pickAll(container, '[contenteditable="true"]');
+        out.push(...usable(local));
+        continue;
+      }
+      const named = [
+        ...pickAll(doc, `textarea[name="${esc(qid)}"]`),
+        ...pickAll(doc, `input[type="text"][name="${esc(qid)}"]`),
+        ...pickAll(doc, `input[type="search"][name="${esc(qid)}"]`)
+      ];
+      out.push(...usable(named));
+    }
+    return out;
+  }
   function inputsFor(roots, qid) {
     const out = [];
     for (const doc of roots) {
@@ -2483,12 +2543,94 @@ ${options.desc ?? ""}
   }
 
   // src/sites/uooc/ai/fill.ts
+  function blankSegments(text2) {
+    const parts = text2.split(/[|｜]/).map((s) => s.trim());
+    while (parts.length > 0 && parts[parts.length - 1] === "") parts.pop();
+    return parts;
+  }
+  function dispatch2(el2, type) {
+    const view = el2.ownerDocument?.defaultView;
+    const Ctor = view?.Event ?? Event;
+    for (const make of [() => new Ctor(type, { bubbles: true }), () => new Event(type, { bubbles: true })]) {
+      try {
+        el2.dispatchEvent(make());
+        return;
+      } catch {
+      }
+    }
+  }
+  function controlValue(el2) {
+    const v = el2.value;
+    if (typeof v === "string") return v;
+    return el2.textContent ?? "";
+  }
+  function setControlValue(el2, value) {
+    if (controlValue(el2) === value) return true;
+    try {
+      if (el2.tagName === "TEXTAREA" || el2.tagName === "INPUT") {
+        el2.value = value;
+      } else {
+        el2.textContent = value;
+      }
+    } catch {
+      return false;
+    }
+    dispatch2(el2, "input");
+    dispatch2(el2, "change");
+    return true;
+  }
+  function angularScopeOf(el2) {
+    const win = el2.ownerDocument?.defaultView;
+    const angular = win?.angular ?? null;
+    if (angular === null || typeof angular.element !== "function") return null;
+    try {
+      return angular.element(el2).scope?.() ?? null;
+    } catch {
+      return null;
+    }
+  }
+  function commitBlank(el2) {
+    dispatch2(el2, "mouseleave");
+    const scope = angularScopeOf(el2);
+    const vm = scope?.["vm"] ?? null;
+    const question = scope?.["question"] ?? null;
+    if (vm === null || typeof vm.addAnswer !== "function" || question === null) return false;
+    try {
+      vm.addAnswer(null, question);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  function fillBlank(qid, text2) {
+    const controls = textControlsFor(collectRoots(), qid);
+    if (controls.length === 0) return "missing";
+    const segments = blankSegments(text2);
+    if (segments.length === 0) return "missing";
+    let ok = false;
+    controls.forEach((el2, i) => {
+      const seg = segments[i] ?? "";
+      if (seg === "") return;
+      if (setControlValue(el2, seg)) ok = true;
+    });
+    if (!ok) return "failed";
+    const first = controls[0];
+    if (first !== void 0) commitBlank(first);
+    return controls.every((el2) => controlValue(el2).trim() !== "") ? "filled" : "failed";
+  }
   function fillAnswers(targets) {
     const filled = [];
     const missing = [];
     const failed = [];
     const roots = collectRoots();
     for (const t of targets) {
+      if (t.kind === "blank") {
+        const how = fillBlank(t.qid, t.text ?? "");
+        if (how === "filled") filled.push(t.qid);
+        else if (how === "missing") missing.push(t.qid);
+        else failed.push(t.qid);
+        continue;
+      }
       if (t.letters.length === 0) {
         missing.push(t.qid);
         continue;
@@ -2530,8 +2672,12 @@ ${options.desc ?? ""}
     return null;
   }
   function isAnsweredInDom(qid, top = document) {
-    for (const el2 of inputsFor(collectRoots(top), qid)) {
+    const roots = collectRoots(top);
+    for (const el2 of inputsFor(roots, qid)) {
       if (el2.checked) return true;
+    }
+    for (const el2 of textControlsFor(roots, qid)) {
+      if (controlValue(el2).trim() !== "") return true;
     }
     return false;
   }
@@ -2552,7 +2698,16 @@ ${options.desc ?? ""}
     return void 0;
   }
   function clearQuestion(qid, kind, top = document) {
-    const inputs = inputsFor(collectRoots(top), qid);
+    const roots = collectRoots(top);
+    if (kind === "blank") {
+      const controls = textControlsFor(roots, qid);
+      if (controls.length === 0) return "missing";
+      for (const el2 of controls) setControlValue(el2, "");
+      const first = controls[0];
+      const viaModel2 = first !== void 0 && commitBlank(first);
+      return viaModel2 ? "ngModel" : "dom";
+    }
+    const inputs = inputsFor(roots, qid);
     if (inputs.length === 0) return "missing";
     const empty = emptyValueFor(kind);
     let viaModel = false;
@@ -2590,16 +2745,22 @@ ${options.desc ?? ""}
         if (container === null) continue;
         const indexEl = asElement(container.querySelector("div.index"));
         if (indexEl === null) continue;
-        const input = container.querySelector("input[name]");
         out.push({
           label: (indexEl.textContent ?? "").trim(),
           indexEl,
           container,
-          qid: input?.getAttribute("name") ?? null
+          qid: qidOf(container, indexEl)
         });
       }
     }
     return out;
+  }
+  function qidOf(container, indexEl) {
+    const input = container.querySelector("input[name]");
+    const named = input?.getAttribute("name") ?? "";
+    if (named !== "") return named;
+    const m = /^anchor(\d+)$/.exec(indexEl.getAttribute("id") ?? "");
+    return m !== null && m[1] !== void 0 ? m[1] : null;
   }
   var PAPER_TITLE_SELECTORS = [
     "div.paperTitle",
@@ -2749,7 +2910,7 @@ ${options.desc ?? ""}
 
   // src/sites/uooc/ai/paper.ts
   function isAnswerable(kind) {
-    return kind === "single" || kind === "multi" || kind === "judge";
+    return kind === "single" || kind === "multi" || kind === "judge" || kind === "blank";
   }
   function kindOf(typeText, type) {
     const t = typeText.trim();
@@ -2793,20 +2954,28 @@ ${options.desc ?? ""}
     const s = asString(raw).trim();
     return s === "" ? [] : [s];
   }
+  function blankCountOf(raw, kind) {
+    if (kind !== "blank") return 0;
+    if (Array.isArray(raw)) return raw.length;
+    if (raw !== null && typeof raw === "object") return Object.keys(raw).length;
+    return 0;
+  }
   function toExamQuestion(raw) {
     if (raw === null || typeof raw !== "object") return null;
     const o = raw;
     const id = asString(o["id"]).trim();
     if (id === "") return null;
     const typeText = asString(o["type_text"]);
+    const kind = kindOf(typeText, asString(o["type"]));
     return {
       id,
-      kind: kindOf(typeText, asString(o["type"])),
+      kind,
       typeText,
       stem: stripHtml(asString(o["question"])),
       options: toOptions(o["options"]),
       score: asString(o["score"]),
-      studentAnswer: toStudentAnswer(o["student_answer"])
+      studentAnswer: toStudentAnswer(o["student_answer"]),
+      blankCount: blankCountOf(o["options"], kind)
     };
   }
   async function fetchPaper(tid) {
@@ -2978,6 +3147,10 @@ ${options.desc ?? ""}
       lines.push(`${i + 1}. ${tag}${q.stem}`);
       const opts = renderOptions(q);
       if (opts !== "") lines.push(`   ${opts}`);
+      const blanks = q.blankCount ?? 0;
+      if (q.kind === "blank" && blanks > 1) {
+        lines.push(`   （本题共 ${blanks} 个空，按空序给出 ${blanks} 段答案，用 | 分隔）`);
+      }
     });
     return lines.join("\n");
   }
@@ -3441,6 +3614,10 @@ ${options.desc ?? ""}
   function lettersOf(answer) {
     return answer.split(",").map((s) => s.trim().toUpperCase()).filter((s) => s !== "");
   }
+  function fillTargetFor(q, answer) {
+    if (q.kind === "blank") return { qid: q.id, kind: q.kind, letters: [], text: answer };
+    return { qid: q.id, kind: q.kind, letters: lettersOf(answer) };
+  }
   function tidFromLocation(href = location.href) {
     let u;
     try {
@@ -3533,8 +3710,7 @@ ${options.desc ?? ""}
         note: o.note ?? ""
       });
       if (o.answer === "") continue;
-      const target = { qid: q.id, kind: q.kind, letters: lettersOf(o.answer) };
-      const r = fillAnswers([target]);
+      const r = fillAnswers([fillTargetFor(q, o.answer)]);
       if (r.filled.length > 0) {
         filled += 1;
         previous.set(q.id, o.answer);
@@ -3583,7 +3759,7 @@ ${options.desc ?? ""}
     for (const q of already) quizPatch(q.id, { status: "skipped", note: "页面上已有答案，不重复请求" });
     quizOverlayOpen(quizFrameOnPage(), tid);
     log9.info(
-      `拿到 ${all.length} 道题：页面上已有答案 ${already.length} 道（跳过），可自动作答 ${todo.length} 道，跳过 ${skippedKind} 道填空/主观题`
+      `拿到 ${all.length} 道题：页面上已有答案 ${already.length} 道（跳过），可自动作答 ${todo.length} 道，跳过 ${skippedKind} 道主观题`
     );
     const answers = /* @__PURE__ */ new Map();
     const priorVotes = /* @__PURE__ */ new Map();
@@ -3620,9 +3796,7 @@ ${options.desc ?? ""}
             });
             return;
           }
-          const report = fillAnswers([
-            { qid: question.id, kind: question.kind, letters: lettersOf(outcome.answer) }
-          ]);
+          const report = fillAnswers([fillTargetFor(question, outcome.answer)]);
           const ok = report.filled.length > 0;
           if (ok) {
             filled += 1;
@@ -3666,7 +3840,7 @@ ${options.desc ?? ""}
     const bodyLines = [
       `卷面 ${all.length} 道题：页面上本来就有答案 ${already.length} 道，模型作答并填入 ${filled} 道。`
     ];
-    if (skippedKind > 0) bodyLines.push(`跳过 ${skippedKind} 道（填空/主观题）。`);
+    if (skippedKind > 0) bodyLines.push(`跳过 ${skippedKind} 道主观题（名词解释/问答/论述）。`);
     if (filled < todo.length) bodyLines.push(`有 ${todo.length - filled} 道没填进去（见【监视】页的逐题表）。`);
     if (failure !== "") bodyLines.push(failure);
     bodyLines.push("");
@@ -10067,8 +10241,8 @@ ${text2}
   // src/main.ts
   var log32 = scoped("main");
   var VERSION = true ? "1.0.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-11T09:49:33.563Z" : null;
-  var BUILD_NO = true ? 114 : null;
+  var BUILD_TIME = true ? "2026-10-17T16:56:04.746Z" : null;
+  var BUILD_NO = true ? 117 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();

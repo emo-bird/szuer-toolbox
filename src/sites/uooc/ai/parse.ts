@@ -62,8 +62,8 @@ export function judgeToLetter(s: string): 'A' | 'B' | null {
 /**
  * 按题型归一化一条答案。归一不出来返回 `null`（调用方会把它当成「这次回答作废」）。
  *
- * ⚠️ 填空题目前**不参与自动作答**（用户 m04071），但归一化先留着：
- * 将来接填空时只需要放开 `isAnswerable`，不必回来改解析层。
+ * ⚠️ 填空题（用户 m00107 起参与自动作答）走的是「原文」口径，**不做字母归一** ——
+ * 多个空按空序用竖线 `|` 原样保留，切段由 `fill.ts` 的 `blankSegments` 负责。
  */
 export function normalizeAnswer(raw: string, kind: 'single' | 'multi' | 'judge' | 'blank' | 'other'): string | null {
   if (kind === 'blank' || kind === 'other') {

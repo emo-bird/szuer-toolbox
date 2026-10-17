@@ -11,11 +11,14 @@
  *     字母→文本的对象，填空题的 `options` 是 `{第1空: ''}`（**键不是字母**）。
  *  3. **未提交时没有 `answer` 字段**（用户 m01816 实测）⇒ 答案只能来自 LLM，
  *     不要回头去调 `/exam/view` 抄标准答案。
+ *  4. 填空题的 `options` 键不是字母（`第1空`），作答走**另一条路**：DOM 里是
+ *     `textarea.ue-container1`（没有 name），答案按空序用 `|` 分隔 ——
+ *     见 `fill.ts` / `fill-dom.ts`；这里只负责把「几个空」算出来（`blankCount`）。
  */
 
 import { PRIORITY, qs, request } from '../../../common/core/http.ts';
 
-/** 题型。`blank` 与 `other` 目前**不参与自动作答**（用户 m04071：填空暂时搁置）。 */
+/** 题型。`blank` = 填空题（用户 m00107 起参与自动作答）；`other` = 主观题，**仍不参与**。 */
 export type QuestionKind = 'single' | 'multi' | 'judge' | 'blank' | 'other';
 
 export interface ExamOption {
@@ -40,11 +43,23 @@ export interface ExamQuestion {
    * 非空 ⇒ 这道题**不请求 LLM**，直接算「已答」（需求细则 §C.2 / §C.4.1）。
    */
   readonly studentAnswer: readonly string[];
+  /**
+   * 填空题**有几个空**（`options` 的键「第1空」「第2空」…的个数）；其余题型恒为 0。
+   *
+   * 为什么要单独留一个字段：`toOptions` 只留字母键，填空的键全被丢掉 ——
+   * 空数在「答案怎么切段」（`fill.ts` 的 `blankSegments`）和提示词里都要用。
+   */
+  readonly blankCount?: number;
 }
 
-/** 能自动作答的题型（其余题型跳过，不会让整份卷子失败） */
+/**
+ * 能自动作答的题型（其余题型跳过，不会让整份卷子失败）。
+ *
+ * 填空题从用户 m00107 起纳入：DOM 侧实测控件是 `textarea.ue-container1`
+ * （没有 name），答案按空序用 `|` 分隔，详见 `fill-dom.ts` / `fill.ts`。
+ */
 export function isAnswerable(kind: QuestionKind): boolean {
-  return kind === 'single' || kind === 'multi' || kind === 'judge';
+  return kind === 'single' || kind === 'multi' || kind === 'judge' || kind === 'blank';
 }
 
 /**
@@ -112,6 +127,22 @@ function toStudentAnswer(raw: unknown): string[] {
   return s === '' ? [] : [s];
 }
 
+/**
+ * 填空题有几个空。
+ *
+ * 接口给的是**对象** `{第1空: '', 第2空: ''}`（`local/paper-shape3.txt`），
+ * 但页面 scope 里同一个字段是**数组** `[{text:'',key:'第1空'}]` —— 两种都认，
+ * 免得哪天接口换了形状就把空数算成 1。
+ *
+ * 导出只为可测：真正调用它的只有下面的 `toExamQuestion`。
+ */
+export function blankCountOf(raw: unknown, kind: QuestionKind): number {
+  if (kind !== 'blank') return 0;
+  if (Array.isArray(raw)) return raw.length;
+  if (raw !== null && typeof raw === 'object') return Object.keys(raw as Record<string, unknown>).length;
+  return 0;
+}
+
 /** 把 `getTaskPaper` 的一条 question 转成我们的模型；字段缺失时返回 null 而不是抛异常 */
 function toExamQuestion(raw: unknown): ExamQuestion | null {
   if (raw === null || typeof raw !== 'object') return null;
@@ -119,14 +150,16 @@ function toExamQuestion(raw: unknown): ExamQuestion | null {
   const id = asString(o['id']).trim();
   if (id === '') return null;
   const typeText = asString(o['type_text']);
+  const kind = kindOf(typeText, asString(o['type']));
   return {
     id,
-    kind: kindOf(typeText, asString(o['type'])),
+    kind,
     typeText,
     stem: stripHtml(asString(o['question'])),
     options: toOptions(o['options']),
     score: asString(o['score']),
     studentAnswer: toStudentAnswer(o['student_answer']),
+    blankCount: blankCountOf(o['options'], kind),
   };
 }
 
