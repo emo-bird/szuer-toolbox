@@ -2,7 +2,7 @@
 // @name         深大人工具箱
 // @name:en      SZUer Toolbox
 // @namespace    https://github.com/emo-bird/szuer-toolbox
-// @version      1.0.0
+// @version      1.1.0
 // @description  深大校园站工具箱：UOOC 课程助手 + 本科选课助手。完全自研 UI，无外部运行时依赖。
 // @description:en  Toolbox for SZU campus sites: UOOC course helper + undergraduate course-selection helper.
 // @author       一门鸽鸽 (emo_bird) & DeepSeek
@@ -52,7 +52,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-10-17T16:56:04.746Z（构建号 117） */
+/* 构建信息：2026-10-17T17:07:40.644Z（构建号 119） */
 
 "use strict";
 (() => {
@@ -10240,9 +10240,9 @@ ${text2}
 
   // src/main.ts
   var log32 = scoped("main");
-  var VERSION = true ? "1.0.0" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-10-17T16:56:04.746Z" : null;
-  var BUILD_NO = true ? 117 : null;
+  var VERSION = true ? "1.1.0" : "0.0.0-dev";
+  var BUILD_TIME = true ? "2026-10-17T17:07:40.644Z" : null;
+  var BUILD_NO = true ? 119 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();

@@ -5,11 +5,16 @@ const file = 'dist/szuer-toolbox.user.js';
 const text = readFileSync(file, 'utf8');
 const lines = text.split('\n');
 
+// 版本号只从 package.json 取：写死的话每次升版本都得回来改这里，
+// 忘了改就是「升了版本、自检却还认旧版」的假绿灯。
+const { version } = JSON.parse(readFileSync('package.json', 'utf8'));
+const versionPattern = new RegExp(`^// @version\\s+${version.replaceAll('.', '\\.')}$`, 'm');
+
 const checks = [
   ['文件非空', text.length > 1000],
   ['首行是 ==UserScript==', lines[0] === '// ==UserScript=='],
   ['@name 深大人工具箱', /^\/\/ @name\s+深大人工具箱$/m.test(text)],
-  ['@version 1.0.0', /^\/\/ @version\s+1\.0\.0$/m.test(text)],
+  [`@version ${version}`, versionPattern.test(text)],
   ['@match szu.edu.cn', /^\/\/ @match\s+\*:\/\/\*\.szu\.edu\.cn\/\*$/m.test(text)],
   ['@match uooc.net.cn', /^\/\/ @match\s+\*:\/\/\*\.uooc\.net\.cn\/\*$/m.test(text)],
   // 请求出口分两个（需求文档 Q-AE 的后续演进）：
