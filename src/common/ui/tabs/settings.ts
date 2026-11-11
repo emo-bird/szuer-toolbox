@@ -14,6 +14,7 @@
  */
 
 import { clear } from '../../utils/dom.ts';
+import { renderDisplayPreferences } from '../display.ts';
 import { registeredSiteIds } from '../../core/settings.ts';
 import {
   renderSiteSettings,
@@ -39,6 +40,7 @@ export function setOwnSettingsTabResolver(fn: (siteId: string) => boolean): void
 
 function renderTab(root: HTMLElement, ctx: TabContext): void {
   clear(root);
+  root.appendChild(renderDisplayPreferences(root));
 
   const sites = registeredSiteIds().filter((id) => siteHasSettings(id));
   if (sites.length === 0) {

@@ -57,8 +57,9 @@ describe('common/core/http —— 纯函数', () => {
     resetQueueForTest();
   });
 
-  it('safePath 剥掉 query（query 里可能有 token）', () => {
-    assertEqual(safePath('https://a.cn/x/y?token=secret#frag'), '/x/y#frag');
+  it('safePath 剥掉凭证、query 和 hash', () => {
+    assertEqual(safePath('https://user:secret@a.cn/x/y?token=secret#frag'), '/x/y');
+    assertEqual(safePath('/x/y#token=secret'), '/x/y');
   });
 
   it('safePath 对非法 URL 不抛错', () => {
@@ -94,6 +95,112 @@ describe('common/core/http —— 纯函数', () => {
     setIntervalMs(999999);
     assertEqual(getIntervalMs(), 60000, '超大值钳到上限 60000');
     resetQueueForTest();
+  });
+});
+
+describe('common/core/http —— 取消与独立模型队列', () => {
+  it('响应正文超时后中止页面请求，后续队列继续发送', async () => {
+    resetQueueForTest();
+    setIntervalMs(0);
+    const previous = globalThis.fetch;
+    const captured: { signal?: AbortSignal | null } = {};
+    try {
+      globalThis.fetch = async (url, init) => {
+        if (url !== 'https://a.cn/hang') return new Response('ok');
+        captured.signal = init?.signal;
+        return { status: 200, text: () => new Promise(() => {}) } as Response;
+      };
+      const [first, next] = await Promise.allSettled([
+        request({ url: 'https://a.cn/hang', timeoutMs: 15 }),
+        request({ url: 'https://a.cn/next' }),
+      ]);
+      assert(first.status === 'rejected', '超时请求必须结束');
+      assertEqual(first.reason?.name, 'TimeoutError');
+      assertEqual(captured.signal?.aborted, true);
+      assert(next.status === 'fulfilled', '后续请求不应堵在队列中');
+      assertEqual(next.value.text, 'ok');
+    } finally {
+      globalThis.fetch = previous;
+    }
+  });
+
+  it('排队期间取消不会发送请求并立即释放队列名额', async () => {
+    resetQueueForTest();
+    setIntervalMs(0);
+    const previous = globalThis.fetch;
+    installFakeFetch();
+    const controller = new AbortController();
+    try {
+      const queued = request({ url: 'https://a.cn/cancel', signal: controller.signal });
+      assertEqual(queueDepth(), 1);
+      controller.abort();
+      assertEqual(queueDepth(), 0);
+      const [result] = await Promise.allSettled([queued]);
+      assert(result?.status === 'rejected', '取消的请求应拒绝');
+      assertEqual(result.reason, controller.signal.reason);
+      await request({ url: 'https://a.cn/keep' });
+      assertEqual(calls.map(({ url }) => url).join(','), 'https://a.cn/keep');
+    } finally {
+      globalThis.fetch = previous;
+    }
+  });
+
+  it('模型请求匿名、并发数封顶且不阻塞页面请求', async () => {
+    resetQueueForTest();
+    const globals = globalThis as Record<string, unknown>;
+    const previous = globals['GM_xmlhttpRequest'];
+    const previousFetch = globalThis.fetch;
+    const controller = new AbortController();
+    let started = 0;
+    let anonymous = true;
+    try {
+      globals['GM_xmlhttpRequest'] = (opts: { anonymous: boolean }) => {
+        anonymous &&= opts.anonymous === true;
+        started += 1;
+        return { abort() {} };
+      };
+      installFakeFetch();
+      const results = Promise.allSettled(
+        Array.from({ length: 9 }, () => request({
+          url: 'https://model.invalid/answer',
+          channel: 'gm',
+          timeoutMs: 200,
+          signal: controller.signal,
+        })),
+      );
+      const page = await request({ url: 'https://a.cn/page', timeoutMs: 200 });
+      controller.abort();
+      assertEqual(page.status, 200);
+      assertEqual(started, 8);
+      assertEqual(anonymous, true);
+      for (const result of await results) {
+        assert(result.status === 'rejected', '取消应同时终止运行中和排队中的请求');
+        assertEqual(result.reason, controller.signal.reason);
+      }
+      assertEqual(queueDepth(), 0);
+    } finally {
+      controller.abort();
+      globals['GM_xmlhttpRequest'] = previous;
+      globalThis.fetch = previousFetch;
+    }
+  });
+
+  it('GM 超时不依赖管理器回调，仍尝试中止传输', async () => {
+    resetQueueForTest();
+    const globals = globalThis as Record<string, unknown>;
+    const previous = globals['GM_xmlhttpRequest'];
+    let aborted = 0;
+    try {
+      globals['GM_xmlhttpRequest'] = () => ({ abort() { aborted += 1; } });
+      const [result] = await Promise.allSettled([
+        request({ url: 'https://model.invalid/hang', channel: 'gm', timeoutMs: 15 }),
+      ]);
+      assert(result?.status === 'rejected', 'GM 没回调也应超时');
+      assertEqual(result.reason?.name, 'TimeoutError');
+      assertEqual(aborted, 1);
+    } finally {
+      globals['GM_xmlhttpRequest'] = previous;
+    }
   });
 });
 

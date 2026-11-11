@@ -2,7 +2,8 @@
  * HTTP 出口：全站唯一的请求通道。
  *
  * 四条硬约束：
- *   1. **串行队列**：同一时刻只有 1 条在飞；相邻两条的**开始时刻**至少间隔 `intervalMs`。
+ *   1. **校园站串行队列**：相邻请求的开始时刻至少间隔 `intervalMs`。
+ *      模型请求使用独立的有限并发队列，不占校园站请求的名额。
  *   2. **限流只有软提示**（见 `limits.ts`）：低于建议下限（200ms）会 warn，但**不改用户的值**。
  *      校园站对高频请求零容忍（实测会被直接终止会话），所以默认值保守、提示醒目，
  *      但「要不要冒险」这个决定权归用户。红线 R2 的这一处放松由用户显式拍板（需求文档 Q-AF）。
@@ -20,7 +21,7 @@
  * 并以 `@run-at document-start` 启动。
  *
  * 代价（已知并接受）：我们的请求受页面 CSP 约束，且会被页面上的其它脚本看见。
- * 将来若要做跨域（例如 UOOC 的 LLM 调用），需要另开出口，不要在调用方偷偷绕。
+ * 跨域模型调用由本模块的 GM 通道处理。
  */
 
 import { scoped } from './log.ts';
@@ -36,6 +37,9 @@ export const DEFAULT_INTERVAL_MS = LIMITS.intervalMs.def;
 
 /** 队列长度上限：积压过多说明调用方在失控，早点拒绝比雪崩好 */
 const MAX_QUEUE_SIZE = 10;
+const MAX_GM_CONCURRENCY = 8;
+const DEFAULT_TIMEOUT_MS = 60000;
+const MAX_TIMER_DELAY_MS = 2147483647;
 
 /** 优先级：数字越小越先出队（沿用旧仓库 szu_bkxk 的语义） */
 export const PRIORITY = {
@@ -51,7 +55,10 @@ export interface HttpRequest {
   headers?: Record<string, string>;
   /** 字符串或 URLSearchParams；对象会被 JSON 序列化并由调用方自行设置 Content-Type */
   data?: string | URLSearchParams | Record<string, unknown>;
+  /** 从出队起计时，覆盖读取响应正文。默认 60 秒。 */
   timeoutMs?: number;
+  /** 可取消排队中或执行中的请求。 */
+  signal?: AbortSignal;
   /** 响应解析方式，默认 'text'；'json' 会在解析失败时抛错 */
   responseType?: 'text' | 'json';
   /** 出队优先级，默认 PRIORITY.NORMAL */
@@ -79,6 +86,8 @@ export interface HttpResponse {
   readonly json: unknown;
   /** 重定向后的最终 URL（可用时） */
   readonly finalUrl: string;
+  /** 等待后重试的建议值（响应头 Retry-After，接口未提供时为空）。 */
+  readonly retryAfter?: string;
   /** 耗时（毫秒，从入队算到响应返回，含排队等待） */
   readonly elapsedMs: number;
 }
@@ -97,22 +106,31 @@ export class HttpError extends Error {
   }
 }
 
-// -------------------------------------------------------------- 串行队列
+// -------------------------------------------------------------- 请求队列
 
 interface QueueItem {
   readonly task: () => Promise<unknown>;
   readonly priority: number;
-  readonly seq: number;
   readonly resolve: (value: unknown) => void;
   readonly reject: (reason: unknown) => void;
+  readonly detach: () => void;
 }
 
+interface Queue {
+  readonly items: QueueItem[];
+  readonly concurrency: number;
+  inflight: number;
+  timer: ReturnType<typeof setTimeout> | null;
+  nextAt: number;
+}
+
+function makeQueue(concurrency: number): Queue {
+  return { items: [], concurrency, inflight: 0, timer: null, nextAt: 0 };
+}
+
+let pageQueue = makeQueue(1);
+let gmQueue = makeQueue(MAX_GM_CONCURRENCY);
 let intervalMs: number = DEFAULT_INTERVAL_MS;
-let items: QueueItem[] = [];
-let seq = 0;
-let inflight = false;
-let timer: ReturnType<typeof setTimeout> | null = null;
-let nextAt = 0;
 
 /**
  * 调整请求间隔。
@@ -138,63 +156,74 @@ export function getIntervalMs(): number {
 
 /** 队列中排队中的请求数（不含正在执行的） */
 export function queueDepth(): number {
-  return items.length;
+  return pageQueue.items.length + gmQueue.items.length;
 }
 
-function schedule(): void {
-  if (timer !== null || inflight) return;
-  if (items.length === 0) return;
-  const delay = Math.max(0, nextAt - Date.now());
-  timer = setTimeout(() => {
-    timer = null;
-    runOne();
+function schedule(queue: Queue): void {
+  if (queue.timer !== null || queue.inflight >= queue.concurrency || queue.items.length === 0) return;
+  const delay = Math.max(0, queue.nextAt - Date.now());
+  queue.timer = setTimeout(() => {
+    queue.timer = null;
+    while (queue.inflight < queue.concurrency && queue.items.length > 0) runOne(queue);
   }, delay);
 }
 
-function runOne(): void {
-  if (inflight || items.length === 0) return;
-
+function runOne(queue: Queue): void {
   // 取优先级最高者；同级按入队先后
   let idx = 0;
-  for (let i = 1; i < items.length; i += 1) {
-    const a = items[i]!;
-    const b = items[idx]!;
-    if (a.priority < b.priority || (a.priority === b.priority && a.seq < b.seq)) idx = i;
+  for (let i = 1; i < queue.items.length; i += 1) {
+    if (queue.items[i]!.priority < queue.items[idx]!.priority) idx = i;
   }
-  const item = items.splice(idx, 1)[0]!;
+  const item = queue.items.splice(idx, 1)[0]!;
+  item.detach();
 
-  inflight = true;
-  nextAt = Date.now() + intervalMs;
+  queue.inflight += 1;
+  if (queue === pageQueue) queue.nextAt = Date.now() + intervalMs;
 
-  Promise.resolve()
+  void Promise.resolve()
     .then(() => item.task())
     .then(
       (value) => item.resolve(value),
       (err: unknown) => item.reject(err),
     )
     .then(() => {
-      inflight = false;
-      schedule();
+      queue.inflight -= 1;
+      schedule(queue);
     });
 }
 
 /**
- * 把任务排进全局串行队列。
+ * 排队期间取消会立即移除对应任务，不占用队列名额。
  * 队列满时立即 reject（不排队、不静默丢弃）。
  */
-function enqueue<T>(task: () => Promise<T>, priority?: number): Promise<T> {
-  if (items.length >= MAX_QUEUE_SIZE) {
+function enqueue<T>(queue: Queue, task: () => Promise<T>, req: HttpRequest): Promise<T> {
+  const { signal, priority } = req;
+  if (signal?.aborted) return Promise.reject(signal.reason);
+  if (queue.items.length >= MAX_QUEUE_SIZE) {
     return Promise.reject(new Error(`请求队列已满（上限 ${MAX_QUEUE_SIZE}），本条已丢弃`));
   }
   return new Promise<T>((resolve, reject) => {
-    items.push({
+    const cancel = (): void => {
+      const index = queue.items.indexOf(item);
+      if (index < 0) return;
+      queue.items.splice(index, 1);
+      item.detach();
+      if (queue.items.length === 0 && queue.timer !== null) {
+        clearTimeout(queue.timer);
+        queue.timer = null;
+      }
+      reject(signal?.reason);
+    };
+    const item: QueueItem = {
       task: task as () => Promise<unknown>,
       priority: typeof priority === 'number' && Number.isFinite(priority) ? priority : PRIORITY.NORMAL,
-      seq: seq++,
       resolve: resolve as (value: unknown) => void,
       reject,
-    });
-    schedule();
+      detach: () => signal?.removeEventListener('abort', cancel),
+    };
+    queue.items.push(item);
+    signal?.addEventListener('abort', cancel, { once: true });
+    schedule(queue);
   });
 }
 
@@ -234,9 +263,10 @@ interface RawResult {
   statusText: string;
   text: string;
   finalUrl: string;
+  retryAfter?: string;
 }
 
-async function viaFetch(req: HttpRequest, body: string | undefined): Promise<RawResult> {
+async function viaFetch(req: HttpRequest, body: string | undefined, signal: AbortSignal): Promise<RawResult> {
   const target = resolveFetch();
   if (target === null) throw new Error('当前环境没有可用的 fetch');
 
@@ -245,6 +275,7 @@ async function viaFetch(req: HttpRequest, body: string | undefined): Promise<Raw
     // 页面 fetch 的默认 credentials 是 same-origin，这里显式写出来，
     // 免得将来有人把出口挪到别的上下文时 cookie 静默丢失。
     credentials: 'include',
+    signal,
     ...(req.headers !== undefined ? { headers: req.headers } : {}),
     ...(body !== undefined ? { body } : {}),
     // 标记「本脚本发出」：响应接管（sites/bkxk/hijack）据此跳过我们自己的请求，
@@ -254,7 +285,13 @@ async function viaFetch(req: HttpRequest, body: string | undefined): Promise<Raw
 
   const res = await target.fn.call(target.owner, req.url, init);
   const text = await res.text();
-  return { status: res.status, statusText: res.statusText, text, finalUrl: res.url };
+  return {
+    status: res.status,
+    statusText: res.statusText,
+    text,
+    finalUrl: res.url,
+    retryAfter: res.headers?.get('Retry-After') ?? undefined,
+  };
 }
 
 // -------------------------------------------------------------- GM 出口
@@ -264,17 +301,18 @@ interface GmResponse {
   statusText: string;
   responseText: string;
   finalUrl?: string;
+  responseHeaders?: string;
 }
 
 interface GmDetails {
   method: string;
   url: string;
+  anonymous: boolean;
   headers?: Record<string, string>;
   data?: string;
-  timeout?: number;
   onload?: (r: GmResponse) => void;
   onerror?: (e: unknown) => void;
-  ontimeout?: () => void;
+  onabort?: () => void;
 }
 
 type GmXhr = (details: GmDetails) => { abort(): void } | undefined;
@@ -294,45 +332,96 @@ function resolveGm(): GmXhr | null {
   return typeof fn === 'function' ? (fn as GmXhr) : null;
 }
 
-function viaGm(req: HttpRequest, body: string | undefined): Promise<RawResult> {
+async function viaGm(req: HttpRequest, body: string | undefined, signal: AbortSignal): Promise<RawResult> {
   const gm = resolveGm();
   if (gm === null) {
-    return Promise.reject(new Error('GM_xmlhttpRequest 不可用：油猴清单里缺少 @grant GM_xmlhttpRequest'));
+    throw new Error('GM_xmlhttpRequest 不可用：油猴清单里缺少 @grant GM_xmlhttpRequest');
   }
-  return new Promise<RawResult>((resolve, reject) => {
-    const handle = gm({
+  let handle: ReturnType<GmXhr>;
+  const abortTransport = (): void => {
+    try {
+      handle?.abort();
+    } catch {
+      // 部分管理器可能没有可用的 abort；外层仍会结束等待。
+    }
+  };
+  let cancel: (() => void) | undefined;
+  const result = new Promise<RawResult>((resolve, reject) => {
+    cancel = () => {
+      reject(signal.reason);
+      abortTransport();
+    };
+    signal.addEventListener('abort', cancel, { once: true });
+    handle = gm({
       method: req.method ?? 'GET',
       url: req.url,
+      anonymous: true,
       ...(req.headers !== undefined ? { headers: req.headers } : {}),
       ...(body !== undefined ? { data: body } : {}),
-      ...(req.timeoutMs !== undefined ? { timeout: req.timeoutMs } : {}),
       onload: (r) => {
         resolve({
           status: r.status,
           statusText: r.statusText,
           text: r.responseText ?? '',
           finalUrl: r.finalUrl ?? req.url,
+          retryAfter: /^retry-after:[ \t]*([^\r\n]+)/im.exec(r.responseHeaders ?? '')?.[1]?.trim(),
         });
       },
       onerror: () => reject(new Error('GM_xmlhttpRequest 网络错误')),
-      ontimeout: () => reject(new Error('GM_xmlhttpRequest 超时')),
+      onabort: () => reject(signal.reason ?? new DOMException('请求已取消', 'AbortError')),
     });
-    // gm() 可能返回 undefined（部分实现），此时没法主动 abort —— 靠 timeout 兜底
-    if (handle === undefined) log.debug('GM_xmlhttpRequest 未返回句柄，abort 不可用');
+    if (signal.aborted) abortTransport();
   });
+  try {
+    return await result;
+  } finally {
+    if (cancel !== undefined) signal.removeEventListener('abort', cancel);
+  }
+}
+
+/** 统一计时与取消。GM 管理器可能忽略超时，也可能不触发取消回调。 */
+async function sendWithDeadline(req: HttpRequest, body: string | undefined): Promise<RawResult> {
+  const caller = req.signal;
+  if (caller?.aborted) throw caller.reason;
+
+  const controller = new AbortController();
+  const forwardAbort = (): void => controller.abort(caller?.reason);
+  caller?.addEventListener('abort', forwardAbort, { once: true });
+  const configured = req.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const ms = Number.isFinite(configured) && configured > 0
+    ? Math.min(MAX_TIMER_DELAY_MS, configured)
+    : DEFAULT_TIMEOUT_MS;
+  const timeout = setTimeout(() => {
+    controller.abort(new DOMException('请求超时', 'TimeoutError'));
+  }, ms);
+
+  const { signal } = controller;
+  let rejectAbort: (() => void) | undefined;
+  const aborted = new Promise<never>((_, reject) => {
+    rejectAbort = () => reject(signal.reason);
+    signal.addEventListener('abort', rejectAbort, { once: true });
+  });
+  try {
+    const sent = req.channel === 'gm' ? viaGm(req, body, signal) : viaFetch(req, body, signal);
+    return await Promise.race([sent, aborted]);
+  } finally {
+    clearTimeout(timeout);
+    if (rejectAbort !== undefined) signal.removeEventListener('abort', rejectAbort);
+    caller?.removeEventListener('abort', forwardAbort);
+  }
 }
 
 // -------------------------------------------------------------- 公开 API
 
 /**
- * 发一个请求。**必须**通过本函数，不要自己 fetch / XHR —— 否则绕过串行队列。
+ * 发一个请求。统一由本模块控制排队、并发和超时。
  */
 export async function request(req: HttpRequest): Promise<HttpResponse> {
   const body = toBody(req.data);
   const started = Date.now();
 
-  const send = req.channel === 'gm' ? () => viaGm(req, body) : () => viaFetch(req, body);
-  const raw = await enqueue<RawResult>(send, req.priority);
+  const queue = req.channel === 'gm' ? gmQueue : pageQueue;
+  const raw = await enqueue(queue, () => sendWithDeadline(req, body), req);
 
   const elapsedMs = Date.now() - started;
   let json: unknown = null;
@@ -354,13 +443,13 @@ export async function request(req: HttpRequest): Promise<HttpResponse> {
   return { ...raw, elapsedMs, json };
 }
 
-/** 从 URL 里剥掉 query 与 hash，只留 origin + pathname，避免把 token 写进日志 */
+/** 只记录路径，去掉凭证、查询参数与片段。 */
 export function safePath(url: string): string {
   try {
-    const u = new URL(url);
-    return `${u.pathname}${u.hash}`;
+    const u = new URL(url, 'https://example.invalid');
+    return u.protocol === 'https:' || u.protocol === 'http:' ? u.pathname : '[未知地址]';
   } catch {
-    return url.split('?')[0] ?? url;
+    return '[无效地址]';
   }
 }
 
@@ -376,11 +465,14 @@ export function qs(params: Record<string, string | number | boolean | undefined 
 
 /** 测试用：把队列与限流状态复位 */
 export function resetQueueForTest(): void {
-  items = [];
-  seq = 0;
-  inflight = false;
-  if (timer !== null) clearTimeout(timer);
-  timer = null;
-  nextAt = 0;
+  for (const queue of [pageQueue, gmQueue]) {
+    if (queue.timer !== null) clearTimeout(queue.timer);
+    for (const item of queue.items.splice(0)) {
+      item.detach();
+      item.reject(new DOMException('请求队列已重置', 'AbortError'));
+    }
+  }
+  pageQueue = makeQueue(1);
+  gmQueue = makeQueue(MAX_GM_CONCURRENCY);
   intervalMs = DEFAULT_INTERVAL_MS;
 }

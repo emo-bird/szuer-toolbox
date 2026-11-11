@@ -14,6 +14,12 @@
 import { el } from '../../utils/dom.ts';
 
 const ESC_KEY = 'Escape';
+let dialogId = 0;
+const openDialogs = new WeakMap<ShadowRoot, Set<() => void>>();
+
+export function closeModalAlerts(shadowRoot: ShadowRoot): void {
+  for (const close of [...(openDialogs.get(shadowRoot) ?? [])]) close();
+}
 
 /** 按钮配色：`primary` 蓝、`danger` 红、不给则中性灰 */
 export type ModalActionVariant = 'primary' | 'danger';
@@ -26,6 +32,7 @@ export interface ModalAction {
 }
 
 export interface ModalOptions {
+  signal?: AbortSignal;
   title: string;
   body: string;
   /**
@@ -57,11 +64,15 @@ export function showModalAlert(
   shadowRoot: ShadowRoot,
   options: ModalOptions,
 ): Promise<string | null> {
+  const signal = options.signal;
+  if (signal?.aborted) return Promise.resolve(null);
   return new Promise<string | null>((resolve) => {
     const danger = options.danger === true;
     const cancelKey = options.cancelKey;
     const dedupeClass = options.dedupeClass ?? '';
     const boxClass = options.boxClass ?? '';
+    const priorFocus = (shadowRoot.activeElement ?? document.activeElement) as HTMLElement | null;
+    const titleId = `sztb-dialog-${++dialogId}`;
 
     // 判重：同一种提示同时只允许存在一个（否则遮罩会一层层叠上去）
     if (dedupeClass !== '' && shadowRoot.querySelector(`.${dedupeClass}`) !== null) {
@@ -70,19 +81,42 @@ export function showModalAlert(
     }
 
     let settled = false;
+    let dialogs = openDialogs.get(shadowRoot);
+    if (dialogs === undefined) {
+      dialogs = new Set();
+      openDialogs.set(shadowRoot, dialogs);
+    }
 
     const finish = (key: string | null): void => {
       if (settled) return;
       settled = true;
+      dialogs.delete(onAbort);
+      signal?.removeEventListener('abort', onAbort);
       document.removeEventListener('keydown', onKeyDown, true);
       mask.remove();
+      if (priorFocus?.isConnected) priorFocus.focus({ preventScroll: true });
       resolve(key);
     };
 
+    const onAbort = (): void => finish(null);
+
     const onKeyDown = (ev: KeyboardEvent): void => {
-      if (cancelKey === undefined || ev.key !== ESC_KEY) return;
+      if (Array.from(shadowRoot.querySelectorAll('.sztb-modal-mask')).at(-1) !== mask) return;
+      if (ev.key === ESC_KEY && cancelKey !== undefined) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        finish(cancelKey);
+        return;
+      }
+      if (ev.key !== 'Tab') return;
+      const focused = shadowRoot.activeElement;
+      const index = buttons.findIndex((button) => button === focused);
+      const next = ev.shiftKey ? index - 1 : index + 1;
+      if (index >= 0 && next >= 0 && next < buttons.length) return;
+      ev.preventDefault();
       ev.stopPropagation();
-      finish(cancelKey);
+      const target = ev.shiftKey ? buttons.at(-1) : buttons[0];
+      (target ?? modal).focus();
     };
 
     const buttons = options.actions.map((action) =>
@@ -96,13 +130,16 @@ export function showModalAlert(
 
     const modal = el(
       'div',
-      { class: boxClass === '' ? 'sztb-modal' : `sztb-modal ${boxClass}` },
+      { class: boxClass === '' ? 'sztb-modal' : `sztb-modal ${boxClass}`,
+        attrs: { role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': titleId,
+          'aria-describedby': `${titleId}-body`, tabindex: -1 } },
       el('div', {
         class: 'sztb-modal-title',
         text: options.title,
+        attrs: { id: titleId },
         data: { danger: String(danger) },
       }),
-      el('div', { class: 'sztb-modal-body', text: options.body }),
+      el('div', { class: 'sztb-modal-body', text: options.body, attrs: { id: `${titleId}-body` } }),
       el('div', { class: 'sztb-modal-foot' }, ...buttons),
     );
 
@@ -122,7 +159,12 @@ export function showModalAlert(
     );
 
     shadowRoot.appendChild(mask);
-    if (cancelKey !== undefined) document.addEventListener('keydown', onKeyDown, true);
-    buttons[buttons.length - 1]?.focus();
+    dialogs.add(onAbort);
+    signal?.addEventListener('abort', onAbort, { once: true });
+    document.addEventListener('keydown', onKeyDown, true);
+    const initial = danger && cancelKey !== undefined
+      ? buttons[options.actions.findIndex((action) => action.key === cancelKey)]
+      : buttons.at(-1);
+    (initial ?? modal).focus();
   });
 }

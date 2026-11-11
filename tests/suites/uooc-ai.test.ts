@@ -1,9 +1,9 @@
 /**
- * 档 1 冒烟：AI 作答的纯函数（解析、投票、题型判定、提示词、交接条）。
+ * AI 作答的纯函数与 DOM 回填回归检查。
  *
  * 这里只测「不碰网络、不碰 DOM」的部分 —— 它们是最容易悄悄坏掉的地方：
  * 模型的回答格式一变，坏的就是解析器；而解析器坏了整份卷子的答案都会作废。
- * 拉题/回填/交卷属于档 2、档 3，不在这里测。
+ * 回填测试使用最小 DOM 替身，不调用真实站点。
  */
 import {
   describe,
@@ -21,9 +21,11 @@ import {
   normalizeChoice,
   parseAnswerLines,
   parseAnswers,
+  parseModelAnswer,
+  parseQuestionAnswer,
 } from '../../src/sites/uooc/ai/parse.ts';
-import { blankCountOf, isAnswerable, kindOf, type QuestionKind } from '../../src/sites/uooc/ai/paper.ts';
-import { blankSegments } from '../../src/sites/uooc/ai/fill.ts';
+import { blankCountOf, isAnswerable, kindOf, questionInputIssue, toExamQuestion, type QuestionKind } from '../../src/sites/uooc/ai/paper.ts';
+import { blankSegments, fillAnswers, findSubmitButton, readQuestionAnswer, restoreQuestionAnswer } from '../../src/sites/uooc/ai/fill.ts';
 import { SHARED_INSTRUCTION, TEMPLATES, buildPrompt } from '../../src/sites/uooc/ai/prompts.ts';
 import { chatUrl, extractContent } from '../../src/sites/uooc/ai/llm.ts';
 
@@ -76,6 +78,182 @@ describe('uooc/ai · 题型判定', () => {
     assertEqual(blankCountOf(null, 'blank'), 0);
     assertEqual(blankCountOf(undefined, 'blank'), 0);
     assertEqual(blankCountOf('第1空', 'blank'), 0);
+  });
+});
+
+describe('uooc/ai · 题目约束', () => {
+  const choice: ExamQuestion = {
+    id: '123',
+    kind: 'single',
+    typeText: '单选题',
+    stem: '示例',
+    options: [{ key: 'A', text: '甲' }, { key: 'C', text: '丙' }, { key: 'F', text: '己' }],
+    score: '1',
+    studentAnswer: [],
+  };
+
+  it('拒绝单选多答、无效选项和非法判断值', () => {
+    assertEqual(parseQuestionAnswer('1. A,C', choice), null);
+    assertEqual(parseQuestionAnswer('1. A,B', { ...choice, kind: 'multi' }), null);
+    assertEqual(parseQuestionAnswer('1. C,A', { ...choice, kind: 'multi' }), 'A,C');
+    assertEqual(parseQuestionAnswer('1. F', choice), 'F');
+    assertEqual(parseQuestionAnswer('1. C', { ...choice, kind: 'judge' }), null);
+  });
+
+  it('只接受空数正确且没有遗漏的填空答案', () => {
+    const blank = { ...choice, kind: 'blank' as const, blankCount: 2 };
+    assertEqual(parseQuestionAnswer('1. 甲', blank), null);
+    assertEqual(parseQuestionAnswer('1. 甲|乙|丙', blank), null);
+    assertEqual(parseQuestionAnswer('1. |乙', blank), null);
+    assertEqual(parseQuestionAnswer('1. 甲 ｜ 乙', blank), '甲|乙');
+  });
+
+  it('验证结构化答案和题号，保留可选解释及旧格式', () => {
+    assertDeepEqual(parseModelAnswer('{"question":1,"answer":["A"],"explanation":"依据选项。"}', choice),
+      { answer: 'A', explanation: '依据选项。' });
+    assertDeepEqual(parseModelAnswer('1. A\n解释：依据选项。', choice),
+      { answer: 'A', explanation: '依据选项。' });
+    assertEqual(parseQuestionAnswer('{"question":2,"answer":["A"]}', choice), null);
+    assertEqual(parseQuestionAnswer('{"question":1,"answer":"A"}', choice), null);
+    assertEqual(parseQuestionAnswer('{"question":1,"answer":["B"]}', choice), null);
+    assertEqual(parseQuestionAnswer('{"question":1,"answer":["A","C"]}', choice), null);
+    assertEqual(parseQuestionAnswer('{\n1. A\n}', choice), null);
+  });
+
+  it('结构化填空要求准确空数和逐项文本', () => {
+    const blank = { ...choice, kind: 'blank' as const, blankCount: 2 };
+    assertEqual(parseQuestionAnswer('{"question":1,"answer":["甲","乙"]}', blank), '甲|乙');
+    assertEqual(parseQuestionAnswer('{"question":1,"answer":["甲"]}', blank), null);
+    assertEqual(parseQuestionAnswer('{"question":1,"answer":["甲",1]}', blank), null);
+    assertEqual(parseQuestionAnswer('{"question":1,"answer":["甲",""]}', blank), null);
+  });
+});
+
+describe('uooc/ai · 题干与选项内容', () => {
+  it('保留公式、表格列和行，并移除不可见代码', () => {
+    const q = toExamQuestion({
+      id: '1', type: '10',
+      question: '<p>x<sub>1</sub> &lt; x<sup>2</sup></p>' +
+        '<math><mfrac> <mn>1</mn> <msup><mi>x</mi><mn>2</mn></msup> </mfrac></math>' +
+        '<table><tr><th>量</th><th>值</th></tr><tr><td>甲</td><td>3 &times; 4</td></tr></table>' +
+        '<script>privateToken()</script>',
+      options: { A: 'H<sub>2</sub>O', B: '其它' },
+    })!;
+    assert(q.stem.includes('x_(1) < x^(2)'), q.stem);
+    assert(q.stem.includes('(1)/(x^(2))'), q.stem);
+    assert(q.stem.includes('量 | 值') && q.stem.includes('甲 | 3 × 4'), q.stem);
+    assert(!q.stem.includes('privateToken'), q.stem);
+    assertEqual(q.options[0]?.text, 'H_(2)O');
+    assertEqual(questionInputIssue(q), null);
+  });
+
+  it('保留不带转义的比较表达式与内嵌 TeX 公式', () => {
+    const q = toExamQuestion({
+      id: '1', type: '20', question: '<p>x<y >z，且 <script type="math/tex">a < b</script></p>',
+    })!;
+    assert(q.stem.includes('x<y >z') && q.stem.includes('a < b'), q.stem);
+    assertEqual(questionInputIssue(q), null);
+  });
+
+  it('外部图片和令牌地址不会进入题目文本或图片输入', () => {
+    const q = toExamQuestion({
+      id: '1', type: '10', question: '看图 <img src="https://example.invalid/x?token=secret" alt="示意图">',
+      options: { A: '<a href="/private?token=secret">甲</a>', B: '乙' },
+    })!;
+    assertEqual(q.stem, '看图 [图片：示意图]');
+    assertEqual(q.options[0]?.text, '甲');
+    assertEqual(q.images, undefined);
+    assert(questionInputIssue(q, true) !== null, '不可读取的外链图片应要求人工查看');
+    assert(!JSON.stringify(q).includes('secret'), '令牌地址不得出现在题目模型中');
+  });
+
+  it('内嵌 PNG 可用于明确启用的图片输入', () => {
+    const data = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a0xkAAAAASUVORK5CYII=';
+    const q = toExamQuestion({
+      id: '1', type: '20', question: '<img src="' + data + '">',
+    })!;
+    assertEqual(q.images?.[0]?.dataUrl, data);
+    assert(questionInputIssue(q) !== null, '关闭图片输入时需提示');
+    assertEqual(questionInputIssue(q, true), null);
+  });
+});
+
+describe('uooc/ai · 回填', () => {
+  function option(value: string, checked: boolean, disabled = false) {
+    return {
+      nodeType: 1,
+      tagName: 'INPUT',
+      value,
+      checked,
+      disabled,
+      parentElement: null,
+      closest: () => null,
+      click() { if (!this.disabled) this.checked = !this.checked; },
+    };
+  }
+
+  function docWith(elements: readonly object[], selectorPrefix: string): Document {
+    return {
+      querySelector: () => null,
+      querySelectorAll: (selector: string) => selector.startsWith(selectorPrefix) ? elements : [],
+    } as unknown as Document;
+  }
+
+  it('重答多选时移除旧选项，并校验准确的选中集合', () => {
+    const inputs = [option('A', true), option('B', false), option('C', true)];
+    const doc = docWith(inputs, 'input[name=');
+    const target = { qid: '123', kind: 'multi' as const, letters: ['B'] };
+    assertDeepEqual(fillAnswers([target], doc).filled, ['123']);
+    assertDeepEqual(readQuestionAnswer('123', 'multi', doc), ['B']);
+    assertDeepEqual(fillAnswers([target], doc).filled, ['123']);
+    assertDeepEqual(readQuestionAnswer('123', 'multi', doc), ['B']);
+  });
+
+  it('目标缺失或无法取消旧选项时保留原答案', () => {
+    const inputs = [option('A', true, true), option('B', false)];
+    const doc = docWith(inputs, 'input[name=');
+    for (const letter of ['B', 'C']) {
+      assertDeepEqual(fillAnswers([{ qid: '123', kind: 'multi', letters: [letter] }], doc).failed, ['123']);
+      assertDeepEqual(readQuestionAnswer('123', 'multi', doc), ['A']);
+    }
+  });
+
+  it('补填空白时保留已有内容，空数不符时不改页面', () => {
+    const controls = ['用户答案', ''].map((value) => ({
+      nodeType: 1, tagName: 'TEXTAREA', value, ownerDocument: null, dispatchEvent: () => true,
+    }));
+    const doc = docWith(controls, 'textarea[name=');
+    const target = { qid: '123', kind: 'blank' as const, letters: [], preserveFilledBlanks: true };
+    assertDeepEqual(readQuestionAnswer('123', 'blank', doc), ['用户答案', '']);
+    assertDeepEqual(fillAnswers([{ ...target, text: '甲' }], doc).failed, ['123']);
+    assertDeepEqual(readQuestionAnswer('123', 'blank', doc), ['用户答案', '']);
+    assertDeepEqual(fillAnswers([{ ...target, text: '甲|乙' }], doc).filled, ['123']);
+    assertDeepEqual(readQuestionAnswer('123', 'blank', doc), ['用户答案', '乙']);
+  });
+
+  it('提交只识别当前试卷文档中可用的 Angular 提交按钮', () => {
+    const enabled = { matches: () => false, closest: () => null };
+    const disabled = { matches: () => true, closest: () => null };
+    const hidden = { matches: () => false, closest: () => ({}) };
+    const iframe = { contentDocument: docWith([enabled], 'button[ng-click=') };
+    const doc = {
+      querySelectorAll(selector: string) {
+        if (selector === 'iframe, frame') return [iframe];
+        if (selector === 'button[ng-click="vm.commitTask()"]') return [disabled, hidden];
+        return [];
+      },
+    } as unknown as Document;
+    assertEqual(findSubmitButton(doc), null);
+    assertEqual(findSubmitButton(iframe.contentDocument), enabled as unknown as HTMLButtonElement);
+  });
+
+  it('撤销填空回填时保留原始空位和分隔字符', () => {
+    const controls = ['新的甲', '新的乙'].map((value) => ({
+      nodeType: 1, tagName: 'TEXTAREA', value, ownerDocument: null, dispatchEvent: () => true,
+    }));
+    const doc = docWith(controls, 'textarea[name=');
+    assertEqual(restoreQuestionAnswer('123', 'blank', ['|x|', ''], doc), true);
+    assertDeepEqual(readQuestionAnswer('123', 'blank', doc), ['|x|', '']);
   });
 });
 
@@ -274,6 +452,14 @@ describe('uooc/ai · 提示词', () => {
   it('共用指令包含「只要答案、不要解释」的口径', () => {
     assert(SHARED_INSTRUCTION.includes('不要'), '共用指令里得明确要求不输出解释');
     assert(SHARED_INSTRUCTION.includes('升序'), '多选答案的排序口径得写进去');
+  });
+
+  it('JSON 模式要求本次题号和答案数组，不把站点题目 ID 发给模型', () => {
+    const p = buildPrompt([{ ...q, id: 'student-question-id' }], TEMPLATES[0]!, undefined, 'json', true);
+    assert(p.includes('{"question":1,"answer":["A"]}'), p);
+    assert(p.includes('explanation'), p);
+    assert(!p.includes('student-question-id'), p);
+    assert(!SHARED_INSTRUCTION.includes('联网'), SHARED_INSTRUCTION);
   });
 
   it('题干带题号与题型，选项缩进在下一行', () => {

@@ -80,7 +80,7 @@ function emit(): void {
   }
 }
 
-export function noticePost(text: string, kind: NoticeKind = 'info', options: NoticeOptions = {}): void {
+export function noticePost(text: string, kind: NoticeKind = 'info', options: NoticeOptions = {}): void | (() => void) {
   const msg = text.trim();
   if (msg === '') return;
 
@@ -104,7 +104,7 @@ export function noticePost(text: string, kind: NoticeKind = 'info', options: Not
     return;
   }
   try {
-    sink.toast(msg, kind, { sticky });
+    return sink.toast(msg, kind, { sticky });
   } catch (err) {
     log.warn('Toast 出口抛错', String(err));
   }

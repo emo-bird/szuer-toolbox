@@ -138,57 +138,61 @@ export function readCommit(body: unknown, httpStatus = 0): CommitResult {
 
 // ------------------------------------------------------------- 交卷仓库
 
-let lastCommit: CommitResult | null = null;
-let commitWaiters: Array<(v: CommitResult | null) => void> = [];
+interface CommitWaiter {
+  readonly source: Record<string, unknown>;
+  finish(v: CommitResult | null): void;
+}
+const commitWaiters = new Set<CommitWaiter>();
 
 /** 把一份交卷响应喂进仓库（截获到） */
-function primeCommit(body: unknown, httpStatus = 0): CommitResult {
+function primeCommit(body: unknown, httpStatus: number, pending: readonly CommitWaiter[]): CommitResult {
   const result = readCommit(body, httpStatus);
-  lastCommit = result;
-  const pending = commitWaiters;
-  commitWaiters = [];
-  for (const fn of pending) fn(result);
+  for (const waiter of pending) waiter.finish(result);
   return result;
 }
 
 /**
- * 丢掉上一次交卷结果。
- *
- * ⚠️ 点【提交】**之前**必须调一次：否则用户答完第一份没通过、我们再提交时，
- * `waitCommit` 会立刻返回**上一次**那份响应（仓库里还存着），
- * 结果就是「刚点下去就报告说没通过」——而且分数还是旧的。
- */
-export function clearCommit(): void {
-  lastCommit = null;
-}
-
-/**
- * 等站点自己发的那一发 `POST /exam/commit` 的响应。
+ * 点击提交前登记，等待当前试卷窗口发出的交卷响应。
  *
  * ⚠️ 只等**站点自己发的**：我们自己的 `http.ts` 请求带 `__szuSkip`，
  * 在 `installFetch` / `installXhr` 里就被挡掉了（提交是用户点按钮触发的，
  * 站点用 Angular 自己的 `$http` 发出去，正好会被截获）。
  */
-export function waitCommit(timeoutMs: number): Promise<CommitResult | null> {
-  if (lastCommit !== null) return Promise.resolve(lastCommit);
+export function waitCommit(
+  timeoutMs: number,
+  signal: AbortSignal,
+  source: Record<string, unknown>,
+): Promise<CommitResult | null> {
+  if (signal.aborted) return Promise.resolve(null);
   return new Promise((resolve) => {
     let done = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
     const finish = (v: CommitResult | null): void => {
       if (done) return;
       done = true;
+      signal.removeEventListener('abort', abort);
+      commitWaiters.delete(waiter);
       // 无论先被 primeCommit 满足还是先超时，都把定时器收掉，不留孤儿句柄
       if (timer !== null) clearTimeout(timer);
       resolve(v);
     };
+    const abort = (): void => finish(null);
     timer = setTimeout(() => finish(null), timeoutMs);
-    commitWaiters.push(finish);
+    const waiter = { source, finish };
+    commitWaiters.add(waiter);
+    signal.addEventListener('abort', abort, { once: true });
   });
 }
 
 // ------------------------------------------------------------- 装钩子
 
-function dispatch(rawUrl: string, text: string, httpStatus = 0): void {
+function pendingCommit(url: string, source: Record<string, unknown>): CommitWaiter[] {
+  if (!matchCommitApi(url)) return [];
+  // 只匹配请求发出时已注册的等待者，迟到的上一轮响应不会完成新一轮。
+  return [...commitWaiters].filter((waiter) => waiter.source === source);
+}
+
+function dispatch(rawUrl: string, text: string, httpStatus: number, pending: readonly CommitWaiter[]): void {
   const isCommit = matchCommitApi(rawUrl);
   const api = isCommit ? null : matchLearnApi(rawUrl);
   if (!isCommit && api === null) return;
@@ -196,11 +200,11 @@ function dispatch(rawUrl: string, text: string, httpStatus = 0): void {
   try {
     body = JSON.parse(text);
   } catch {
-    log.warn('截获到的响应不是 JSON，已忽略', rawUrl);
+    log.warn('截获到的响应不是 JSON，已忽略');
     return;
   }
   if (isCommit) {
-    const result = primeCommit(body, httpStatus);
+    const result = primeCommit(body, httpStatus, pending);
     log.debug('截获交卷响应', `${result.verdict} / HTTP ${httpStatus} / 得分 ${result.score}`);
   } else if (api !== null && api.kind === 'catalog') {
     log.debug('截获 getCatalogList（只留痕，缓存层已删）', api.cid);
@@ -236,12 +240,13 @@ function installXhr(realm: Record<string, unknown>): boolean {
     const url = this[XHR_URL_KEY];
     if (typeof url === 'string' && shouldSniff(url)) {
       const self = this;
+      const pending = pendingCommit(url, realm);
       (self['addEventListener'] as (t: string, fn: () => void) => void).call(self, 'load', () => {
         try {
           const text = self['responseText'];
           if (typeof text === 'string') {
             const st = Number(self['status']);
-            dispatch(url, text, Number.isFinite(st) ? st : 0);
+            dispatch(url, text, Number.isFinite(st) ? st : 0, pending);
           }
         } catch {
           /* responseType 不是 text 时读 responseText 会抛，忽略即可 */
@@ -277,6 +282,7 @@ function installFetch(realm: Record<string, unknown>): boolean {
       /* 忽略 */
     }
     if (url === '' || !shouldSniff(url)) return p;
+    const pending = pendingCommit(url, realm);
 
     p.then((res) => {
       try {
@@ -284,7 +290,7 @@ function installFetch(realm: Record<string, unknown>): boolean {
         res
           .clone()
           .text()
-          .then((text) => dispatch(url, text, Number.isFinite(st) ? st : 0))
+          .then((text) => dispatch(url, text, Number.isFinite(st) ? st : 0, pending))
           .catch(() => undefined);
       } catch {
         /* 忽略 */

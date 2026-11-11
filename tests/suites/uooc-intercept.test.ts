@@ -11,7 +11,35 @@
  */
 
 import { assert, assertEqual, describe, it } from '../harness.ts';
-import { isCommitHttpOk, matchCommitApi, readCommit } from '../../src/sites/uooc/intercept.ts';
+import { installUoocIntercept, isCommitHttpOk, matchCommitApi, readCommit, waitCommit } from '../../src/sites/uooc/intercept.ts';
+
+describe('uooc/intercept · 交卷响应归属', () => {
+  it('旧请求和其他窗口的回复不能完成当前等待', async () => {
+    let resolveOld!: (response: Response) => void;
+    const oldResponse = new Promise<Response>((resolve) => { resolveOld = resolve; });
+    const response = (score: number): Response => new Response(JSON.stringify({ code: 1, data: { score } }));
+    let sent = 0;
+    const current = { fetch: (_url: string) => sent++ === 0 ? oldResponse : Promise.resolve(response(80)) };
+    const other = { fetch: (_url: string) => Promise.resolve(response(10)) };
+    installUoocIntercept(current);
+    installUoocIntercept(other);
+    const url = '/exam/commit';
+    void current.fetch(url);
+    const controller = new AbortController();
+    const result = waitCommit(1000, controller.signal, current);
+    resolveOld(response(20));
+    await other.fetch(url);
+    await current.fetch(url);
+    assertEqual((await result)?.score, '80');
+  });
+
+  it('取消后立即结束等待', async () => {
+    const controller = new AbortController();
+    const result = waitCommit(5000, controller.signal, {});
+    controller.abort();
+    assertEqual(await result, null);
+  });
+});
 
 describe('uooc/intercept · URL 认领', () => {
   it('认 /exam/commit，也认带域名与 query 的形态', () => {

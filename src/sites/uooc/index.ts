@@ -150,7 +150,7 @@ export const uoocAdapter: SiteAdapter = {
     }
 
     startVideoAssist();
-    // 视频随机小测：无条件自动作答（读 DOM 里的答案，用户 m06055 拍板不留开关）
+    // 观察弹题，提交前检查【视频】页的开关。
     startVideoQuiz();
     // 接管不自动启动：由用户在【接管】页点【开始接管】（用户 m04485 第二轮拍板）。
     // 主循环在 ./takeover.ts，控制台入口在 tabs/autoplay.ts。

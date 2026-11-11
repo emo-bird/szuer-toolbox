@@ -22,6 +22,7 @@
  */
 
 import type { QuestionKind } from './paper.ts';
+import { blankSegments } from './parse.ts';
 import {
   asElement,
   clickOption,
@@ -34,6 +35,7 @@ import {
 
 export * from './fill-dom.ts';
 export * from './quiz-ready.ts';
+export { blankSegments } from './parse.ts';
 
 export interface FillTarget {
   readonly qid: string;
@@ -46,6 +48,8 @@ export interface FillTarget {
    * 选择题不传；填空题**只认它**，不看 `letters`。
    */
   readonly text?: string;
+  /** 初次作答时只补空白，保留页面上用户已填的内容。 */
+  readonly preserveFilledBlanks?: boolean;
 }
 
 export interface FillReport {
@@ -58,21 +62,6 @@ export interface FillReport {
 }
 
 // ============================================================ 填空题（用户 m00107）
-
-/**
- * 填空题答案切成「每个空一段」。
- *
- * 站点与提示词约定的格式就是「多个空按空序用竖线 `|` 分隔」（见 `prompts.ts` 第 5 条），
- * 这里再认一下全角 `｜`（模型偶尔把中文标点混进来）。
- *
- * **尾部空段丢掉**：模型多写一个竖线（`答案|`）时不该把第 2 个空写成空串，
- * 否则这道题会被判成「没填完」。
- */
-export function blankSegments(text: string): string[] {
-  const parts = text.split(/[|｜]/).map((s) => s.trim());
-  while (parts.length > 0 && parts[parts.length - 1] === '') parts.pop();
-  return parts;
-}
 
 /** 跨 realm 派发事件：构造函数必须取**元素自己所在文档**的（iframe 有自己的 realm） */
 function dispatch(el: HTMLElement, type: string): void {
@@ -163,25 +152,32 @@ function commitBlank(el: HTMLElement): boolean {
  * 判「填好了」的口径 = **每个空都有字**：站点 `isComplete()` 就是这么判的，
  * 少填一个空这道题在站点眼里仍是未作答（白填）。
  */
-function fillBlank(qid: string, text: string): 'filled' | 'missing' | 'failed' {
-  const controls = textControlsFor(collectRoots(), qid);
+function fillBlank(roots: readonly Document[], target: FillTarget): 'filled' | 'missing' | 'failed' {
+  const controls = textControlsFor(roots, target.qid);
   if (controls.length === 0) return 'missing';
-  const segments = blankSegments(text);
-  if (segments.length === 0) return 'missing';
-
-  let ok = false;
-  controls.forEach((el, i) => {
-    const seg = segments[i] ?? '';
-    if (seg === '') return;
-    if (setControlValue(el, seg)) ok = true;
+  const segments = blankSegments(target.text ?? '');
+  const expected = controls.map((control, i) => {
+    const value = controlValue(control);
+    return target.preserveFilledBlanks && value.trim() !== '' ? value : segments[i] ?? '';
   });
-  if (!ok) return 'failed';
+  if (segments.length !== controls.length || expected.some((value) => value.trim() === '')) {
+    return 'failed';
+  }
+  return writeBlankValues(controls, expected) ? 'filled' : 'failed';
+}
 
+function writeBlankValues(controls: readonly HTMLElement[], expected: readonly string[]): boolean {
   const first = controls[0];
-  if (first !== undefined) commitBlank(first);
+  if (first === undefined || controls.length !== expected.length) return false;
+  const previous = controls.map(controlValue);
+  controls.forEach((el, i) => setControlValue(el, expected[i]!));
+  commitBlank(first);
+  if (controls.every((el, i) => controlValue(el) === expected[i])) return true;
 
-  // 复查：读完还得有字（被站点自己的监听器回滚过就白填了）
-  return controls.every((el) => controlValue(el).trim() !== '') ? 'filled' : 'failed';
+  // 站点拒绝部分写入时，尽量恢复原值。
+  controls.forEach((el, i) => setControlValue(el, previous[i]!));
+  commitBlank(first);
+  return false;
 }
 
 /**
@@ -206,22 +202,18 @@ function fillBlank(qid: string, text: string): 'filled' | 'missing' | 'failed' {
  * 单选/判断题：要换选项时直接点目标那个即可，radio 同 name 会自动互斥。
  * 填空题：走 `fillBlank`（文本框没有 name，得靠题目容器反查）。
  */
-export function fillAnswers(targets: readonly FillTarget[]): FillReport {
+export function fillAnswers(targets: readonly FillTarget[], top?: Document): FillReport {
   const filled: string[] = [];
   const missing: string[] = [];
   const failed: string[] = [];
 
-  const roots = collectRoots();
+  const roots = top === undefined ? collectRoots() : [top];
   for (const t of targets) {
     if (t.kind === 'blank') {
-      const how = fillBlank(t.qid, t.text ?? '');
+      const how = fillBlank(roots, t);
       if (how === 'filled') filled.push(t.qid);
       else if (how === 'missing') missing.push(t.qid);
       else failed.push(t.qid);
-      continue;
-    }
-    if (t.letters.length === 0) {
-      missing.push(t.qid);
       continue;
     }
     const inputs = inputsFor(roots, t.qid);
@@ -230,29 +222,40 @@ export function fillAnswers(targets: readonly FillTarget[]): FillReport {
       continue;
     }
 
-    let allOk = true;
-    for (const letter of t.letters) {
-      const target = inputs.find((el) => (el.value ?? '').toUpperCase() === letter);
-      if (target === undefined) {
-        allOk = false;
-        continue;
-      }
-      if (target.checked) continue; // 已经是想要的状态，别动
-      if (!clickOption(target)) allOk = false;
-    }
-
-    // 复查：点完再读一遍 `checked`。点不动的时候 `click()` 一样不报错，
-    // 不复查就会把「一道没填上的题」报成成功。
-    const okNow = t.letters.every((letter) => {
-      const el = inputs.find((i) => (i.value ?? '').toUpperCase() === letter);
-      return el !== undefined && el.checked;
-    });
-    if (okNow) filled.push(t.qid);
-    else if (allOk) failed.push(t.qid);
+    if (fillChoices(inputs, t)) filled.push(t.qid);
     else failed.push(t.qid);
   }
 
   return { filled, missing, failed };
+}
+
+function fillChoices(inputs: readonly HTMLInputElement[], target: FillTarget): boolean {
+  const desired = new Set(target.letters.map((letter) => letter.toUpperCase()));
+  if (desired.size === 0 || target.kind === 'other') return false;
+  const multiple = target.kind === 'multi';
+  if (!multiple && desired.size !== 1) return false;
+  if (target.kind === 'judge' && !desired.has('A') && !desired.has('B')) return false;
+
+  const values = inputs.map((input) => input.value.toUpperCase());
+  if ([...desired].some((letter) => !values.includes(letter))) return false;
+  const expected = values.map((letter) => desired.has(letter));
+  if (inputs.some((input, i) => input.disabled && input.checked !== expected[i])) return false;
+
+  const previous = inputs.map((input) => input.checked);
+  const apply = (state: readonly boolean[]): void => {
+    if (multiple) {
+      inputs.forEach((input, i) => {
+        if (input.checked && !state[i]) clickOption(input);
+      });
+    }
+    inputs.forEach((input, i) => {
+      if (!input.checked && state[i]) clickOption(input);
+    });
+  };
+  apply(expected);
+  if (inputs.every((input, i) => input.checked === expected[i])) return true;
+  apply(previous);
+  return false;
 }
 
 /**
@@ -265,7 +268,7 @@ export function fillAnswers(targets: readonly FillTarget[]): FillReport {
  * 不写裸的 `div.btn.btn-warning` —— 页面上可能有别的警告按钮，宁可返回 null
  * 让调用方提示用户自己点。
  */
-const SUBMIT_SELECTORS: readonly string[] = ['button.btn.btn-danger'];
+const SUBMIT_SELECTOR = 'button[ng-click="vm.commitTask()"]';
 
 /**
  * 答题页的【提交】按钮。
@@ -274,12 +277,15 @@ const SUBMIT_SELECTORS: readonly string[] = ['button.btn.btn-danger'];
  * `vm.paper.can_do` 控制显隐）⇒ 自动作答前会先看它有没有，没有就说明卷子
  * 已经交过了/根本不能交，不该再往上填答案。
  */
-export function findSubmitButton(top: Document = document): HTMLElement | null {
-  for (const selector of SUBMIT_SELECTORS) {
-    for (const doc of collectRoots(top)) {
-      const el = doc.querySelector(selector);
-      const he = asElement(el);
-      if (he !== null) return he;
+export function findSubmitButton(top?: Document): HTMLButtonElement | null {
+  const roots = top === undefined ? collectRoots() : [top];
+  for (const doc of roots) {
+    for (const button of doc.querySelectorAll<HTMLButtonElement>(SUBMIT_SELECTOR)) {
+      if (button.matches(':disabled, [aria-disabled="true"]') || button.closest('[hidden], [inert]') !== null) continue;
+      if (!isVisible(button)) continue;
+      const visibility = doc.defaultView?.getComputedStyle(button).visibility;
+      if (visibility === 'hidden' || visibility === 'collapse') continue;
+      return button;
     }
   }
   return null;
@@ -293,11 +299,28 @@ export function isAnsweredInDom(qid: string, top: Document = document): boolean 
   for (const el of inputsFor(roots, qid)) {
     if (el.checked) return true;
   }
-  // 填空题没有任何 input：文本框里有字就算已答（否则会把用户自己填的答案再问一遍）
-  for (const el of textControlsFor(roots, qid)) {
-    if (controlValue(el).trim() !== '') return true;
+  const controls = textControlsFor(roots, qid);
+  return controls.length > 0 && controls.every((el) => controlValue(el).trim() !== '');
+}
+
+/** 读取当前试卷答案快照。填空按控件顺序保留空位，选择题返回选中的字母。 */
+export function readQuestionAnswer(qid: string, kind: QuestionKind, top?: Document): string[] {
+  const roots = top === undefined ? collectRoots() : [top];
+  if (kind === 'blank' || kind === 'other') return textControlsFor(roots, qid).map(controlValue);
+  return inputsFor(roots, qid)
+    .filter((input) => input.checked)
+    .map((input) => input.value.toUpperCase())
+    .sort();
+}
+
+/** 恢复当前试卷的逐项快照，保留原本为空的槽位及文本中的分隔字符。 */
+export function restoreQuestionAnswer(qid: string, kind: QuestionKind, values: readonly string[], doc: Document): boolean {
+  if (kind === 'blank') return writeBlankValues(textControlsFor([doc], qid), values);
+  if (kind === 'other') return false;
+  if (values.length === 0) {
+    return clearQuestion(qid, kind, doc) !== 'missing' && readQuestionAnswer(qid, kind, doc).length === 0;
   }
-  return false;
+  return fillAnswers([{ qid, kind, letters: values }], doc).filled.length > 0;
 }
 
 
@@ -352,9 +375,9 @@ function emptyValueFor(kind: QuestionKind): unknown {
 export function clearQuestion(
   qid: string,
   kind: QuestionKind,
-  top: Document = document,
+  top?: Document,
 ): 'ngModel' | 'dom' | 'missing' {
-  const roots = collectRoots(top);
+  const roots = top === undefined ? collectRoots() : [top];
 
   // 填空题先走文本框：它没有 input，走下面的路只会拿到 'missing'
   if (kind === 'blank') {
@@ -420,9 +443,9 @@ export interface QuestionAnchor {
  * ```
  * 不用位置选择器（第几个 `queContainer`）—— 题号分组顺序会变。
  */
-function findQuestionAnchors(top: Document = document): QuestionAnchor[] {
+function findQuestionAnchors(roots: readonly Document[]): QuestionAnchor[] {
   const out: QuestionAnchor[] = [];
-  for (const doc of collectRoots(top)) {
+  for (const doc of roots) {
     let list: Element[];
     try {
       list = Array.from(doc.querySelectorAll('div.queContainer'));
@@ -476,8 +499,8 @@ const PAPER_TITLE_SELECTORS: readonly string[] = [
   'h3.paperTitle',
 ];
 
-function findPaperTitleAnchor(top: Document): HTMLElement | null {
-  for (const doc of collectRoots(top)) {
+function findPaperTitleAnchor(roots: readonly Document[]): HTMLElement | null {
+  for (const doc of roots) {
     for (const sel of PAPER_TITLE_SELECTORS) {
       let el: Element | null = null;
       try {
@@ -489,7 +512,7 @@ function findPaperTitleAnchor(top: Document): HTMLElement | null {
       if (he !== null && isVisible(he)) return he;
     }
   }
-  const first = findQuestionAnchors(top)[0];
+  const first = findQuestionAnchors(roots)[0];
   return first?.container.parentElement ?? null;
 }
 
@@ -518,8 +541,8 @@ function makeClearButton(text: string, title: string, onClick: () => void): HTML
 }
 
 /** 已经插进去的清除按钮全拔掉 */
-function removeClearButtons(top: Document): void {
-  for (const doc of collectRoots(top)) {
+function removeClearButtons(roots: readonly Document[]): void {
+  for (const doc of roots) {
     let list: Element[];
     try {
       list = Array.from(doc.querySelectorAll(`[${CLEAR_MARK}]`));
@@ -554,16 +577,17 @@ export function injectClearButtons(opts: {
   /** 控件失效时禁用（正在请求中） */
   readonly disabled?: boolean;
 }): ClearButtonsHandle {
-  const top = opts.top ?? document;
+  const roots = (): Document[] => opts.top === undefined ? collectRoots() : [opts.top];
 
   return {
     refresh(answered: ReadonlySet<string>): number {
-      removeClearButtons(top);
+      const docs = roots();
+      removeClearButtons(docs);
 
       if (opts.disabled === true) return 0;
 
       let count = 0;
-      for (const a of findQuestionAnchors(top)) {
+      for (const a of findQuestionAnchors(docs)) {
         const qid = a.qid;
         if (qid === null) continue;
         if (!answered.has(qid)) continue;
@@ -578,7 +602,7 @@ export function injectClearButtons(opts: {
         }
       }
 
-      const title = findPaperTitleAnchor(top);
+      const title = findPaperTitleAnchor(docs);
       if (title !== null) {
         const btn = makeClearButton('清除全部答案', '清空整张卷子的答案', () => {
           opts.onClearAll();
@@ -593,7 +617,7 @@ export function injectClearButtons(opts: {
       return count;
     },
     remove(): void {
-      removeClearButtons(top);
+      removeClearButtons(roots());
     },
   };
 }

@@ -62,6 +62,9 @@ interface Overlay {
   readonly live: HTMLElement;
   /** 用户点过「隐藏遮罩」 */
   hidden: boolean;
+  compact: boolean;
+  readonly compactToggle: HTMLButtonElement;
+  readonly heading: HTMLElement;
   off: (() => void) | null;
   /** 巡检定时器（关遮罩时清掉） */
   timer: number | null;
@@ -138,12 +141,25 @@ function questionLine(doc: Document, q: QuestionProgress): HTMLElement {
   );
 }
 
-function buildRoot(doc: Document): { node: HTMLElement; live: HTMLElement } {
+function buildRoot(doc: Document, stop: () => void) {
   const node = mk(doc, 'div', ROOT_CSS);
   node.setAttribute('data-sztb', 'quiz-overlay');
 
   const head = mk(doc, 'div', 'display:flex;align-items:center;gap:10px');
-  head.appendChild(mk(doc, 'div', 'flex:1;font-weight:600;font-size:14px', '脚本正在作答这张试卷'));
+  const heading = mk(doc, 'div', 'flex:1;font-weight:600;font-size:14px', 'AI 作答');
+  heading.setAttribute('role', 'status');
+  head.appendChild(heading);
+  const compactToggle = mk(doc, 'button', HIDE_BTN_CSS, '收起');
+  compactToggle.type = 'button';
+  compactToggle.addEventListener('click', () => {
+    if (cur === null) return;
+    cur.compact = !cur.compact;
+    render(cur);
+  });
+  const stopButton = mk(doc, 'button', HIDE_BTN_CSS, '停止 AI');
+  stopButton.type = 'button';
+  stopButton.addEventListener('click', stop);
+  head.append(compactToggle, stopButton);
   const hide = mk(doc, 'button', HIDE_BTN_CSS, '隐藏遮罩');
   hide.setAttribute('type', 'button');
   hide.addEventListener('click', () => {
@@ -158,15 +174,7 @@ function buildRoot(doc: Document): { node: HTMLElement; live: HTMLElement } {
   const live = mk(doc, 'div', 'display:flex;flex-direction:column;gap:10px;flex:1;min-height:0');
   node.appendChild(live);
 
-  node.appendChild(
-    mk(
-      doc,
-      'div',
-      'flex:none;font-size:12px;opacity:.72',
-      '遮罩只挡视线，不影响脚本作答；走到「等你过人机验证码」那一步会自动让开。',
-    ),
-  );
-  return { node, live };
+  return { node, live, compactToggle, heading };
 }
 
 /**
@@ -257,13 +265,20 @@ function render(o: Overlay): void {
   // 监视状态里那份必须是**这张试卷**的，否则（换了一场测验）不该拿别人的进度来显示
   const quiz = state.quiz !== null && state.quiz.tid === o.tid ? state.quiz : null;
   const phase = quiz === null ? 'idle' : quiz.phase;
-  // 到「已点提交、等你过验证码」这一段自动让开（B1）；用户点过隐藏就一直藏着（F1）
-  const submitting = phase === 'submitting';
-  const visible = !o.hidden && !submitting;
+  // 确认交卷及等待站点验证时，控制权交还给用户。
+  const visible = !o.hidden && phase !== 'confirming' && phase !== 'submitting';
 
   ensureAttached(o);
   o.node.style.setProperty('display', visible ? 'flex' : 'none');
   if (!visible) return;
+  o.node.style.inset = o.compact ? 'auto 10px 10px 10px' : '0';
+  o.node.style.padding = o.compact ? '8px 10px' : '18px 20px';
+  o.node.style.borderRadius = o.compact ? '6px' : '0';
+  o.compactToggle.textContent = o.compact ? '展开' : '收起';
+  o.compactToggle.setAttribute('aria-expanded', String(!o.compact));
+  o.live.style.display = o.compact ? 'none' : 'flex';
+  o.heading.textContent = o.compact && quiz !== null ? `AI 作答 · ${quiz.done}/${quiz.total} 已处理` : 'AI 作答';
+  if (o.compact) return;
 
   o.live.textContent = '';
   if (quiz === null) return;
@@ -277,7 +292,7 @@ function render(o: Overlay): void {
       doc,
       'div',
       'opacity:.85',
-      `第 ${quiz.done}/${quiz.total} 题已定稿 · 任务 tid=${quiz.tid}${o.hidden ? ' · 遮罩已隐藏' : ''}`,
+      `已处理 ${quiz.done}/${quiz.total} 题`,
     ),
   );
 
@@ -304,7 +319,7 @@ function render(o: Overlay): void {
  * 否则站点自己的首次渲染会把我们那块刷掉（用户 2026-10-09 反馈）。
  * 函数本身仍是同步返回：遮罩只是给人看的，**不许**阻塞作答流程。
  */
-export function quizOverlayOpen(frame: HTMLIFrameElement | null, tid: string): void {
+export function quizOverlayOpen(frame: HTMLIFrameElement | null, tid: string, stop: () => void): void {
   quizOverlayClose();
   if (frame === null) {
     log.info('整页答题页（页面上没有试卷 iframe），本次不盖遮罩');
@@ -314,13 +329,16 @@ export function quizOverlayOpen(frame: HTMLIFrameElement | null, tid: string): v
   // 先在某份 document 上把节点建好（拿不到 iframe 的 doc 就用顶层这份），
   // 真正挂上去的时候 appendChild 会把它 adopt 过去
   const seed = frame.contentDocument ?? document;
-  const { node, live } = buildRoot(seed);
+  const { node, live, compactToggle, heading } = buildRoot(seed, stop);
   const o: Overlay = {
     tid,
     frame,
     node,
     live,
     hidden: false,
+    compact: false,
+    compactToggle,
+    heading,
     off: null,
     timer: null,
     deadline: Date.now() + waitTimeoutMs(),

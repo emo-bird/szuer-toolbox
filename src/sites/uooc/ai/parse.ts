@@ -15,6 +15,8 @@
  * 到第 4 次仍无重复，就取第 4 次（最后一次）。
  */
 
+import type { ExamQuestion, QuestionKind } from './paper.ts';
+
 /** 一次回答最多要几次（需求细则 §B.2） */
 export const MAX_SAMPLES = 4;
 
@@ -32,6 +34,10 @@ function toHalfWidth(s: string): string {
  * 单选/多选/判断共用本函数：判断题答案本来就是 A/B 两个字母。
  */
 export function normalizeChoice(raw: string): string | null {
+  return choiceLetters(raw, true);
+}
+
+function choiceLetters(raw: string, allowJudgeWords: boolean): string | null {
   const s = toHalfWidth(raw)
     .replace(/[，、；;/\s]+/g, ',')
     .replace(/[.。]+$/g, '')
@@ -39,7 +45,7 @@ export function normalizeChoice(raw: string): string | null {
   if (s === '') return null;
 
   // 判断题常见的非字母写法，先归一成 A/B
-  const judge = judgeToLetter(s);
+  const judge = allowJudgeWords ? judgeToLetter(s) : null;
   if (judge !== null) return judge;
 
   const letters = s.split(',').filter((p) => p !== '');
@@ -65,12 +71,22 @@ export function judgeToLetter(s: string): 'A' | 'B' | null {
  * ⚠️ 填空题（用户 m00107 起参与自动作答）走的是「原文」口径，**不做字母归一** ——
  * 多个空按空序用竖线 `|` 原样保留，切段由 `fill.ts` 的 `blankSegments` 负责。
  */
-export function normalizeAnswer(raw: string, kind: 'single' | 'multi' | 'judge' | 'blank' | 'other'): string | null {
+export function normalizeAnswer(raw: string, kind: QuestionKind): string | null {
   if (kind === 'blank' || kind === 'other') {
     const t = raw.trim();
     return t === '' ? null : t;
   }
-  return normalizeChoice(raw);
+  const answer = choiceLetters(raw, kind === 'judge');
+  if (answer === null) return null;
+  if (kind === 'judge') return answer === 'A' || answer === 'B' ? answer : null;
+  return kind === 'single' && answer.includes(',') ? null : answer;
+}
+
+/** 保留中间空段，以便校验每一空和页面控件是否对齐。 */
+export function blankSegments(text: string): string[] {
+  const parts = text.split(/[|｜]/).map((s) => s.trim());
+  while (parts.length > 0 && parts[parts.length - 1] === '') parts.pop();
+  return parts;
 }
 
 /**
@@ -139,7 +155,7 @@ function stripFence(text: string): string {
  */
 export function parseAnswers(
   text: string,
-  kinds: readonly ('single' | 'multi' | 'judge' | 'blank' | 'other')[],
+  kinds: readonly QuestionKind[],
 ): (string | null)[] {
   const lines = parseAnswerLines(text);
   return kinds.map((kind, i) => {
@@ -147,6 +163,72 @@ export function parseAnswers(
     if (raw === undefined) return null;
     return normalizeAnswer(raw, kind);
   });
+}
+
+function validateQuestionAnswer(answer: string, question: ExamQuestion): string | null {
+  if (question.kind === 'other') return null;
+  if (question.kind === 'blank') {
+    const segments = blankSegments(answer);
+    const count = question.blankCount ?? 0;
+    if (segments.length === 0 || segments.some((segment) => segment === '')) return null;
+    if (count > 0 && segments.length !== count) return null;
+    return segments.join('|');
+  }
+  if (question.options.length > 0) {
+    const allowed = new Set(question.options.map((option) => option.key.toUpperCase()));
+    if (answer.split(',').some((letter) => !allowed.has(letter))) return null;
+  }
+  return answer;
+}
+
+export interface ModelAnswer {
+  readonly answer: string;
+  readonly explanation?: string;
+}
+
+function makeModelAnswer(answer: string, explanation: string | undefined, question: ExamQuestion): ModelAnswer | null {
+  const validated = validateQuestionAnswer(answer, question);
+  if (validated === null) return null;
+  const detail = explanation?.trim().slice(0, 600);
+  return detail ? { answer: validated, explanation: detail } : { answer: validated };
+}
+
+/** 单题调用以 1 为题号。结构化输出校验形状、题号、类型与实际答案范围。 */
+export function parseModelAnswer(text: string, question: ExamQuestion): ModelAnswer | null {
+  const body = text.trim();
+  const fenced = /^\x60\x60\x60(?:json)?\s*\r?\n([\s\S]*?)\r?\n\x60\x60\x60$/i.exec(body)?.[1]?.trim();
+  const candidate = fenced ?? body;
+  if (candidate.startsWith('{') || candidate.startsWith('[') || /^\x60\x60\x60json\b/i.test(body)) {
+    let result: unknown;
+    try { result = JSON.parse(candidate); } catch { return null; }
+    if (result === null || typeof result !== 'object' || Array.isArray(result)) return null;
+    const record = result as Record<string, unknown>;
+    if (Object.keys(record).some((key) => key !== 'question' && key !== 'answer' && key !== 'explanation')) return null;
+    const values = record['answer'];
+    const explanation = record['explanation'];
+    if (record['question'] !== 1 || !Array.isArray(values) || values.length === 0) return null;
+    if (explanation !== undefined && typeof explanation !== 'string') return null;
+    if (!values.every((value): value is string => typeof value === 'string' && value.trim() !== '')) return null;
+    if (question.kind === 'blank') {
+      // 回填使用竖线区分空位，拒绝会改变空位含义的单项内容。
+      if (values.some((value) => /[|｜]/.test(value))) return null;
+      return makeModelAnswer(values.join('|'), explanation, question);
+    }
+    if (!values.every((value) => /^[A-Z]$/i.test(value))) return null;
+    if (question.kind !== 'multi' && values.length !== 1) return null;
+    if (new Set(values.map((value) => value.toUpperCase())).size !== values.length) return null;
+    const answer = normalizeAnswer(values.join(','), question.kind);
+    return answer === null ? null : makeModelAnswer(answer, explanation, question);
+  }
+  const answer = parseAnswers(body, [question.kind])[0];
+  if (answer === undefined || answer === null) return null;
+  const explanation = /^\s*解释\s*[：:]\s*(.+)$/m.exec(body)?.[1];
+  return makeModelAnswer(answer, explanation, question);
+}
+
+/** 兼容只需要答案字符串的调用方。 */
+export function parseQuestionAnswer(text: string, question: ExamQuestion): string | null {
+  return parseModelAnswer(text, question)?.answer ?? null;
 }
 
 export interface Verdict {

@@ -21,7 +21,7 @@
 
   all: initial;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
-  font-size: 13px;
+  font-size: calc(13px * var(--sztb-font-scale, 1));
   line-height: 1.5;
   color: var(--sztb-text);
   box-sizing: border-box;
@@ -31,6 +31,46 @@
 .sztb-root *::before,
 .sztb-root *::after {
   box-sizing: border-box;
+}
+
+:host([data-theme="dark"]),
+:host([data-theme="dark"]) .sztb-root {
+  color-scheme: dark;
+  --sztb-bg: #181d27;
+  --sztb-bg-alt: #212837;
+  --sztb-border: #3a455a;
+  --sztb-text: #edf1f9;
+  --sztb-text-dim: #abb7cc;
+  --sztb-accent: #74a5ff;
+  --sztb-accent-hover: #91b8ff;
+  --sztb-warn: #f9bc59;
+  --sztb-danger: #ff777b;
+  --sztb-ok: #55ca91;
+}
+
+@media (prefers-color-scheme: dark) {
+  :host([data-theme="system"]),
+  :host([data-theme="system"]) .sztb-root {
+    color-scheme: dark;
+    --sztb-bg: #181d27;
+    --sztb-bg-alt: #212837;
+    --sztb-border: #3a455a;
+    --sztb-text: #edf1f9;
+    --sztb-text-dim: #abb7cc;
+    --sztb-accent: #74a5ff;
+    --sztb-accent-hover: #91b8ff;
+    --sztb-warn: #f9bc59;
+    --sztb-danger: #ff777b;
+    --sztb-ok: #55ca91;
+  }
+}
+
+:host([data-font="large"]),
+:host([data-font="large"]) .sztb-root { --sztb-font-scale: 1.14; }
+:host([data-density="compact"]) .sztb-body { padding: 6px; }
+:host([data-motion="reduce"]) .sztb-root * { transition: none !important; animation: none !important; }
+@media (prefers-reduced-motion: reduce) {
+  .sztb-root * { transition: none !important; animation: none !important; }
 }
 
 /* ---------------------------------------------------------- 悬浮球 */
@@ -45,7 +85,7 @@
   display: none;
   align-items: center;
   justify-content: center;
-  font-size: 15px;
+  font-size: calc(15px * var(--sztb-font-scale, 1));
   font-weight: 600;
   cursor: grab;
   user-select: none;
@@ -101,7 +141,7 @@
 .sztb-title {
   flex: 1 1 auto;
   font-weight: 600;
-  font-size: 13px;
+  font-size: calc(13px * var(--sztb-font-scale, 1));
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -121,7 +161,7 @@
   border-radius: 5px;
   background: transparent;
   color: var(--sztb-text-dim);
-  font-size: 14px;
+  font-size: calc(14px * var(--sztb-font-scale, 1));
   line-height: 1;
   cursor: pointer;
 }
@@ -148,7 +188,7 @@
   border-bottom: 2px solid transparent;
   background: transparent;
   color: var(--sztb-text-dim);
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--sztb-font-scale, 1));
   cursor: pointer;
   border-radius: 6px 6px 0 0;
   white-space: nowrap;
@@ -230,14 +270,14 @@
 
 .sztb-row-label {
   display: block;
-  font-size: 13px;
+  font-size: calc(13px * var(--sztb-font-scale, 1));
   cursor: pointer;
 }
 
 .sztb-row-desc {
   display: block;
   color: var(--sztb-text-dim);
-  font-size: 12px;
+  font-size: calc(12px * var(--sztb-font-scale, 1));
   margin-top: 1px;
   word-break: break-word;
 }
@@ -247,7 +287,7 @@
   margin-left: 6px;
   padding: 0 5px;
   border-radius: 4px;
-  font-size: 11px;
+  font-size: calc(11px * var(--sztb-font-scale, 1));
   font-weight: 600;
   vertical-align: 1px;
 }
@@ -271,13 +311,13 @@
 }
 
 .sztb-field-label {
-  font-size: 13px;
+  font-size: calc(13px * var(--sztb-font-scale, 1));
   color: var(--sztb-text);
 }
 
 /* 配置项提示：单独一行，紧跟在标签下面（不塞进输入框里） */
 .sztb-field-desc {
-  font-size: 12px;
+  font-size: calc(12px * var(--sztb-font-scale, 1));
   line-height: 1.45;
   color: var(--sztb-text-dim);
   word-break: break-word;
@@ -289,7 +329,7 @@
   padding: 5px 8px;
   border: 1px solid var(--sztb-border);
   border-radius: 6px;
-  font-size: 13px;
+  font-size: calc(13px * var(--sztb-font-scale, 1));
   font-family: inherit;
   color: var(--sztb-text);
   background: var(--sztb-bg);
@@ -314,7 +354,7 @@
 
 /* 校验提示：校验通过时用 hidden 收起来，不占高度 */
 .sztb-field-hint {
-  font-size: 12px;
+  font-size: calc(12px * var(--sztb-font-scale, 1));
   line-height: 1.45;
   color: #b3730a;
 }
@@ -334,7 +374,7 @@
   border-radius: 6px;
   background: var(--sztb-bg);
   color: var(--sztb-text);
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--sztb-font-scale, 1));
   font-family: inherit;
   cursor: pointer;
 }
@@ -361,7 +401,7 @@
 
 .sztb-group-title {
   margin: 10px 0 2px;
-  font-size: 12px;
+  font-size: calc(12px * var(--sztb-font-scale, 1));
   font-weight: 600;
   color: var(--sztb-text-dim);
 }
@@ -374,7 +414,7 @@
   padding: 16px 8px;
   text-align: center;
   color: var(--sztb-text-dim);
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--sztb-font-scale, 1));
 }
 
 /* 段首说明文字：站点自己的设置标签页用它交代门禁规则 */
@@ -385,14 +425,14 @@
   border-radius: 0 5px 5px 0;
   background: var(--sztb-bg-alt);
   color: var(--sztb-text-dim);
-  font-size: 12px;
+  font-size: calc(12px * var(--sztb-font-scale, 1));
   line-height: 1.6;
 }
 
 /* ---------------------------------------------------------- 日志面板 */
 .sztb-log {
   font-family: Consolas, "Cascadia Mono", monospace;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--sztb-font-scale, 1));
   line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-all;
@@ -436,7 +476,7 @@
   border-radius: 7px;
   background: rgba(31, 35, 41, 0.94);
   color: #fff;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--sztb-font-scale, 1));
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.24);
   animation: sztb-toast-in 0.16s ease;
   word-break: break-word;
@@ -488,7 +528,7 @@
 .sztb-modal-title {
   padding: 12px 14px 0;
   font-weight: 600;
-  font-size: 13.5px;
+  font-size: calc(13.5px * var(--sztb-font-scale, 1));
 }
 
 .sztb-modal-title[data-danger="true"] {
@@ -497,7 +537,7 @@
 
 .sztb-modal-body {
   padding: 8px 14px 14px;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--sztb-font-scale, 1));
   color: var(--sztb-text-dim);
   white-space: pre-wrap;
   word-break: break-word;
@@ -561,7 +601,7 @@
 .sztb-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: calc(12px * var(--sztb-font-scale, 1));
 }
 
 .sztb-table th,
@@ -584,7 +624,7 @@
 .sztb-tree {
   max-height: 240px;
   overflow-y: auto;
-  font-size: 12px;
+  font-size: calc(12px * var(--sztb-font-scale, 1));
   border: 1px solid var(--sztb-border);
   border-radius: 4px;
   padding: 2px 0;
@@ -614,7 +654,7 @@
 /* ---- 提示流与接管状态（UOOC【监视】页第一块 / 右上角 Toast，用户 m02281）---- */
 
 .sztb-status-line {
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--sztb-font-scale, 1));
   font-weight: 600;
   line-height: 1.5;
   word-break: break-word;
@@ -623,7 +663,7 @@
 .sztb-notices {
   max-height: 200px;
   overflow-y: auto;
-  font-size: 12px;
+  font-size: calc(12px * var(--sztb-font-scale, 1));
   border: 1px solid var(--sztb-border);
   border-radius: 4px;
   padding: 2px 4px;
@@ -680,7 +720,7 @@
   border: 0;
   background: transparent;
   color: inherit;
-  font-size: 14px;
+  font-size: calc(14px * var(--sztb-font-scale, 1));
   line-height: 1;
   padding: 0 0 0 2px;
   opacity: 0.75;

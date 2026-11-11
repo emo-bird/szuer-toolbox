@@ -34,6 +34,7 @@ import { el, clamp } from '../utils/dom.ts';
 import { read, write } from '../core/storage.ts';
 import { scoped } from '../core/log.ts';
 import { TabView } from './tabs.ts';
+import { applyDisplayPreferences } from './display.ts';
 import { COMMON_SITE_ID, activeTabKey, pageScopeOf, resolveActiveTab } from './tab-order.ts';
 import {
   BALL_SIZE,
@@ -49,7 +50,7 @@ import type { Pos } from './panel-geometry.ts';
 import { ToastStack } from './widgets/toast.ts';
 import { showConfirm } from './widgets/confirm.ts';
 import { showAuthAlert } from './widgets/auth-alert.ts';
-import { showModalAlert } from './widgets/modal.ts';
+import { closeModalAlerts, showModalAlert } from './widgets/modal.ts';
 import type { ConfirmOptions, PanelApi, TabContext, TabRegistration } from '../../sites/types.ts';
 
 const log = scoped('ui/panel');
@@ -162,6 +163,7 @@ export function createPanel(
   host.style.setProperty('z-index', '2147483000');
 
   const shadow = host.attachShadow({ mode: 'open' });
+  applyDisplayPreferences(host);
 
   const baseStyle = document.createElement('style');
   baseStyle.textContent = baseCss;
@@ -189,7 +191,7 @@ export function createPanel(
   const ball = el('div', {
     class: 'sztb-ball',
     text: '深',
-    attrs: { title: '深大人工具箱（点击展开）' },
+    attrs: { role: 'button', tabindex: 0, 'aria-label': '展开深大人工具箱', title: '深大人工具箱（点击展开）' },
   });
 
   const titleText = el('span', { class: 'sztb-title' }, '深大人工具箱');
@@ -307,6 +309,7 @@ export function createPanel(
   collapseBtn.addEventListener('click', (ev) => {
     ev.stopPropagation();
     setCollapsed(true);
+    ball.focus();
   });
 
   ball.addEventListener('click', (ev) => {
@@ -316,6 +319,14 @@ export function createPanel(
       return;
     }
     setCollapsed(false);
+    collapseBtn.focus();
+  });
+
+  ball.addEventListener('keydown', (ev) => {
+    if (ev.key !== 'Enter' && ev.key !== ' ') return;
+    ev.preventDefault();
+    setCollapsed(false);
+    collapseBtn.focus();
   });
 
   /**
@@ -396,7 +407,7 @@ export function createPanel(
     );
   });
 
-  window.addEventListener('resize', () => applyGeometry());
+  window.addEventListener('resize', applyGeometry);
 
   // ------------------------------------------------------------ PanelApi
   const api: PanelHandle = {
@@ -440,6 +451,8 @@ export function createPanel(
       }
     },
     destroy: () => {
+      window.removeEventListener('resize', applyGeometry);
+      closeModalAlerts(shadow);
       try {
         tabView.destroy();
         toasts.destroy();

@@ -38,6 +38,7 @@ import type { TabContext } from '../../../sites/types.ts';
  */
 function renderValueField(siteId: string, def: ValueDef<unknown>): HTMLElement {
   const defaultText = formatValue(def.default);
+  const controlId = `sztb-setting-${siteId}-${def.id}`;
 
   const control =
     def.kind === 'select'
@@ -54,16 +55,20 @@ function renderValueField(siteId: string, def: ValueDef<unknown>): HTMLElement {
   }
 
   const hint = el('div', { class: 'sztb-field-hint', attrs: { hidden: true } });
+  control.id = controlId;
+  hint.id = `${controlId}-hint`;
+  control.setAttribute('aria-describedby', def.desc === undefined ? hint.id : `${controlId}-desc ${hint.id}`);
   const field = el(
     'div',
     { class: 'sztb-field', data: { invalid: 'false' } },
-    el('label', { class: 'sztb-field-label', text: def.label }),
-    def.desc !== undefined ? el('div', { class: 'sztb-field-desc', text: def.desc }) : null,
+    el('label', { class: 'sztb-field-label', text: def.label, attrs: { for: controlId } }),
+    def.desc !== undefined ? el('div', { class: 'sztb-field-desc', text: def.desc, attrs: { id: `${controlId}-desc` } }) : null,
     control,
     hint,
   );
 
   function showHint(message: string | null): void {
+    control.setAttribute('aria-invalid', String(message !== null));
     if (message === null) {
       hint.hidden = true;
       hint.textContent = '';
