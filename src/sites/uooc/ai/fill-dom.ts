@@ -45,28 +45,25 @@ export function isVisible(el: Element): boolean {
  * 每一步都 `try{}` 包住：站点自己的 `ng-click` 里抛异常不能把回填整个带崩。
  */
 export function clickOption(input: HTMLInputElement): boolean {
+  if (input.disabled) return false;
+  const before = input.checked;
   const attempts: (Element | null)[] = [
     input,
     input.closest('label'),
     input.parentElement?.querySelector('.ti-a-i') ?? null,
     input.parentElement,
   ];
-  for (const el of attempts) {
+  for (const el of new Set(attempts)) {
     if (el === null) continue;
     if (el !== input && !isVisible(el)) continue;
     try {
       (el as HTMLElement).click();
-      return true;
     } catch {
       // 换下一级
     }
+    if (input.checked !== before) return true;
   }
-  try {
-    input.click();
-    return true;
-  } catch {
-    return false;
-  }
+  return false;
 }
 
 /** 收集顶层文档 + 所有同源 iframe 的 document */

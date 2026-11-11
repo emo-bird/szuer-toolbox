@@ -32,7 +32,9 @@
 import { registerValue, getValue as getStoredValue } from '../../common/core/settings.ts';
 import type { SiteToggleDef } from '../types.ts';
 import { scoped } from '../../common/core/log.ts';
-import type { LlmConfig } from './ai/llm.ts';
+import { backendName, read, remove, write } from '../../common/core/storage.ts';
+import { validateLlmEndpoint } from './ai/llm.ts';
+import type { LlmConfig, LlmResponseFormat } from './ai/llm.ts';
 
 const log = scoped('uooc/settings');
 
@@ -63,6 +65,8 @@ export const TOGGLE = {
   MUTE: 'mute',
   /** 🟢 防失焦暂停（U4） */
   KEEP_PLAYING: 'keep-playing',
+  VIDEO_QUIZ_AUTO_SUBMIT: 'video-quiz-auto-submit',
+  CAPTCHA_SOUND: 'captcha-sound',
   /** 🟠 AI 答题（U6–U9）：连播走到测验就交给它；关掉则停下等用户手动处理 */
   AI_ANSWER: 'ai-answer',
 } as const;
@@ -113,8 +117,24 @@ export const UOOC_TOGGLES: readonly SiteToggleDef[] = [
     group: GROUP.VIDEO,
   },
   {
+    id: TOGGLE.VIDEO_QUIZ_AUTO_SUBMIT,
+    label: '自动提交视频小题',
+    desc: '视频弹题时自动选答案并点击确定。关闭后由你作答。',
+    risk: 'irreversible',
+    default: false,
+    group: GROUP.AI,
+  },
+  {
+    id: TOGGLE.CAPTCHA_SOUND,
+    label: '测验交卷提示音',
+    desc: '确认提交弹窗和验证码弹窗出现时，分别播放提示音。',
+    risk: 'safe',
+    default: true,
+    group: GROUP.AI,
+  },
+  {
     id: TOGGLE.AI_ANSWER,
-    label: 'AI 答题',
+    label: '接管遇到测验时自动启动 AI',
     desc:
       '连播遇到测验脚本就在页内答题 iframe 里拉题问模型、逐题回填；' +
       '提交前会弹确认框，人机验证码要你手动点一下',
@@ -159,57 +179,6 @@ export function registerUoocSettings(): void {
     group: GROUP.WAIT,
   });
 
-  // ------------------------------------------------------------ AI 作答（U6–U9）
-
-  registerValue<string>({
-    siteId: SITE_ID,
-    id: VALUE.AI_BASE_URL,
-    label: '接口地址',
-    desc: 'OpenAI Chat Completions 兼容的根地址，会自动补 /chat/completions。例：https://api.openai.com/v1',
-    default: '',
-    kind: 'url',
-    group: GROUP.AI,
-  });
-
-  registerValue<string>({
-    siteId: SITE_ID,
-    id: VALUE.AI_API_KEY,
-    label: 'API Key',
-    desc: '只存在你本机的油猴存储里。本地部署（ollama 等）不需要填',
-    default: '',
-    kind: 'password',
-    group: GROUP.AI,
-  });
-
-  registerValue<string>({
-    siteId: SITE_ID,
-    id: VALUE.AI_MODEL,
-    label: '模型名',
-    desc: '填服务商文档里那个精确的模型 id，例：gpt-4o-mini',
-    default: '',
-    kind: 'text',
-    group: GROUP.AI,
-  });
-
-  registerValue<string>({
-    siteId: SITE_ID,
-    id: VALUE.AI_TIMEOUT_MS,
-    label: '超时(ms)',
-    desc: '单次请求的最长等待时间；推理型模型要调大',
-    default: '60000',
-    kind: 'number',
-    group: GROUP.AI,
-  });
-
-  registerValue<string>({
-    siteId: SITE_ID,
-    id: VALUE.AI_CONCURRENCY,
-    label: '并发数',
-    desc: '同时答几道题（1~8）。默认 1 最稳；调高容易撞到服务商的速率限制（表现为「这道题没答出来」）',
-    default: '1',
-    kind: 'number',
-    group: GROUP.AI,
-  });
 }
 
 /** 读一个毫秒配置项；非法值回退到 `fallbackMs` 并留一条 warn */
@@ -249,9 +218,148 @@ export function waitTimeoutMs(): number {
   return readMs(VALUE.WAIT_TIMEOUT_MS, 30000);
 }
 
-/** 读一个字符串配置项并去掉首尾空白 */
-function readText(id: string): string {
-  return getStoredValue<string>(SITE_ID, id).trim();
+const AI_PROFILES_KEY = 'uooc:ai-profiles';
+const AI_ACTIVE_KEY = 'uooc:ai-active-profile';
+const DEFAULT_PROFILE_ID = 'default';
+interface AiSecret {
+  readonly origin: string;
+  readonly value: string;
+}
+const memoryKeys = new Map<string, AiSecret>();
+
+export interface AiProfile {
+  readonly id: string;
+  readonly name: string;
+  readonly baseUrl: string;
+  readonly model: string;
+  readonly timeoutMs: number;
+  readonly concurrency: number;
+  readonly responseFormat: LlmResponseFormat;
+  readonly vision: boolean;
+}
+
+function legacyKey(id: string): string {
+  return `value:${SITE_ID}:${id}`;
+}
+
+function legacyProfile(): AiProfile {
+  const timeout = Number(read<unknown>(legacyKey(VALUE.AI_TIMEOUT_MS), null) ?? 60000);
+  const concurrency = Number(read<unknown>(legacyKey(VALUE.AI_CONCURRENCY), null) ?? 1);
+  return {
+    id: DEFAULT_PROFILE_ID,
+    name: '默认方案',
+    baseUrl: read(legacyKey(VALUE.AI_BASE_URL), ''),
+    model: read(legacyKey(VALUE.AI_MODEL), ''),
+    timeoutMs: Number.isFinite(timeout) && timeout >= 1000 ? timeout : 60000,
+    concurrency: Number.isFinite(concurrency) ? Math.min(8, Math.max(1, Math.floor(concurrency))) : 1,
+    responseFormat: 'text',
+    vision: false,
+  };
+}
+
+export function aiProfiles(): AiProfile[] {
+  const saved = read<unknown>(AI_PROFILES_KEY, null);
+  if (!Array.isArray(saved)) return [legacyProfile()];
+  const profiles: AiProfile[] = [];
+  for (const candidate of saved) {
+    if (typeof candidate !== 'object' || candidate === null) continue;
+    const { id, name, baseUrl, model, timeoutMs, concurrency, responseFormat, vision } = candidate as Partial<AiProfile>;
+    if (typeof id !== 'string' || !/^[\w-]{1,64}$/.test(id)
+      || typeof name !== 'string' || typeof baseUrl !== 'string' || typeof model !== 'string'
+      || typeof timeoutMs !== 'number' || !Number.isFinite(timeoutMs) || timeoutMs < 1000
+      || typeof concurrency !== 'number' || !Number.isInteger(concurrency) || concurrency < 1 || concurrency > 8) continue;
+    profiles.push({
+      id, name, baseUrl, model, timeoutMs, concurrency,
+      responseFormat: responseFormat === 'json' ? 'json' : 'text',
+      vision: vision === true,
+    });
+  }
+  return profiles.length > 0 ? profiles : [{ ...legacyProfile(), baseUrl: '', model: '' }];
+}
+
+/** 仅导出已保存方案的公开字段，接口地址中的认证与临时参数一并移除。 */
+export function exportAiProfiles(): string {
+  const profiles = aiProfiles().map(({ id, name, baseUrl, model, timeoutMs, concurrency, responseFormat, vision }) => {
+    let endpoint = '';
+    try {
+      const url = new URL(baseUrl);
+      if (url.protocol === 'https:' || url.protocol === 'http:') {
+        endpoint = `${url.origin}${url.pathname}`;
+      }
+    } catch { /* 无法解析的旧地址不写入导出文件 */ }
+    return { id, name, baseUrl: endpoint, model, timeoutMs, concurrency, responseFormat, vision };
+  });
+  const activeId = read(AI_ACTIVE_KEY, DEFAULT_PROFILE_ID);
+  const activeProfileId = profiles.some((profile) => profile.id === activeId) ? activeId : profiles[0]?.id;
+  return JSON.stringify({ version: 1, activeProfileId, profiles }, null, 2);
+}
+
+export function activeAiProfile(): AiProfile {
+  const profiles = aiProfiles();
+  const activeId = read(AI_ACTIVE_KEY, DEFAULT_PROFILE_ID);
+  return profiles.find((profile) => profile.id === activeId) ?? profiles[0]!;
+}
+
+export function selectAiProfile(id: string): void {
+  if (aiProfiles().some((profile) => profile.id === id)) write(AI_ACTIVE_KEY, id);
+}
+
+function secretKey(id: string): string {
+  return `uooc:ai-secret:${id}`;
+}
+
+export function aiProfileSecret(id: string, baseUrl: string): string {
+  const endpoint = validateLlmEndpoint(baseUrl).url;
+  if (endpoint === undefined) return '';
+  const origin = new URL(endpoint).origin;
+  const secret = backendName() === 'GM'
+    ? read<AiSecret | null>(secretKey(id), null)
+    : memoryKeys.get(id);
+  if (secret?.origin === origin && typeof secret.value === 'string') return secret.value.trim();
+  if (secret || backendName() !== 'GM' || id !== DEFAULT_PROFILE_ID) return '';
+  const legacy = validateLlmEndpoint(legacyProfile().baseUrl).url;
+  return legacy !== undefined && new URL(legacy).origin === origin
+    ? read(legacyKey(VALUE.AI_API_KEY), '').trim()
+    : '';
+}
+
+function setAiProfileSecret(id: string, apiKey: string, origin?: string): void {
+  const key = apiKey.trim();
+  const secret = key !== '' && origin !== undefined ? { origin, value: key } : null;
+  if (backendName() !== 'GM') {
+    if (secret === null) memoryKeys.delete(id);
+    else memoryKeys.set(id, secret);
+    return;
+  }
+  if (secret === null) remove(secretKey(id));
+  else write(secretKey(id), secret);
+  if (id === DEFAULT_PROFILE_ID) remove(legacyKey(VALUE.AI_API_KEY));
+}
+
+/** 只保存公开字段。不同来源的接口不会沿用旧接口的认证信息。 */
+export function saveAiProfile(profile: AiProfile, replacementKey?: string): void {
+  const profiles = aiProfiles();
+  const old = profiles.find((item) => item.id === profile.id);
+  const endpoint = validateLlmEndpoint(profile.baseUrl);
+  const previous = old ? validateLlmEndpoint(old.baseUrl).url : undefined;
+  const sameOrigin = endpoint.url !== undefined && previous !== undefined
+    && new URL(endpoint.url).origin === new URL(previous).origin;
+  if (old !== undefined && !sameOrigin) setAiProfileSecret(profile.id, '');
+  const { id, name, baseUrl, model, timeoutMs, concurrency, responseFormat, vision } = profile;
+  const stored = { id, name, baseUrl, model, timeoutMs, concurrency, responseFormat, vision };
+  write(AI_PROFILES_KEY, old === undefined ? [...profiles, stored] : profiles.map((item) => item.id === id ? stored : item));
+  if (replacementKey !== undefined) {
+    setAiProfileSecret(id, replacementKey, endpoint.url === undefined ? undefined : new URL(endpoint.url).origin);
+  }
+  write(AI_ACTIVE_KEY, id);
+}
+
+export function removeAiProfile(id: string): void {
+  const remaining = aiProfiles().filter((profile) => profile.id !== id);
+  if (remaining.length === 0) return;
+  setAiProfileSecret(id, '');
+  write(AI_PROFILES_KEY, remaining);
+  if (read(AI_ACTIVE_KEY, DEFAULT_PROFILE_ID) === id) write(AI_ACTIVE_KEY, remaining[0]!.id);
 }
 
 /**
@@ -261,21 +369,23 @@ function readText(id: string): string {
  * 而 OpenAI 那类会直接返回 401，报错信息已经足够清楚。
  */
 export function aiConfig(): LlmConfig | null {
-  const baseUrl = readText(VALUE.AI_BASE_URL);
-  const model = readText(VALUE.AI_MODEL);
-  if (baseUrl === '' || model === '') return null;
+  const profile = activeAiProfile();
+  const endpoint = validateLlmEndpoint(profile.baseUrl);
+  if (endpoint.url === undefined || profile.model.trim() === '') return null;
   return {
-    baseUrl,
-    model,
-    apiKey: readText(VALUE.AI_API_KEY),
-    timeoutMs: readMs(VALUE.AI_TIMEOUT_MS, 60000),
+    baseUrl: profile.baseUrl,
+    model: profile.model.trim(),
+    apiKey: aiProfileSecret(profile.id, profile.baseUrl),
+    timeoutMs: profile.timeoutMs,
+    responseFormat: profile.responseFormat,
+    profileId: profile.id,
+    vision: profile.vision,
   };
 }
 
 /** AI 作答的并发数，夹在 1~8（上限是防呆，不是性能调优） */
 export function aiConcurrency(): number {
-  const n = Math.floor(readMs(VALUE.AI_CONCURRENCY, 1));
-  return Math.min(8, Math.max(1, n));
+  return activeAiProfile().concurrency;
 }
 
 /**

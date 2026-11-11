@@ -21,6 +21,7 @@
  */
 
 import { scoped } from '../../../common/core/log.ts';
+import type { ExecutionSnapshot } from './runner.ts';
 // ⚠️ 唯一一个跨模块依赖，而且是 `import type` ⇒ 编译后不产生运行时代码，
 // 文件头「只依赖 scoped 日志、谁都能引」这条仍然成立，也不会成环
 // （`catalog.ts` 谁也不引）。
@@ -38,7 +39,9 @@ export type QuestionStatus =
   /** 问了但没答出来 */
   | 'failed'
   /** 页面上已经有答案了，不重复请求 */
-  | 'skipped';
+  | 'skipped'
+  | 'unsupported'
+  | 'review';
 
 /**
  * 状态中文（监视页与试卷遮罩共用，别在各自文件里再抄一份）。
@@ -48,6 +51,8 @@ export const QUESTION_STATUS_TEXT: Record<QuestionStatus, string> = {
   answered: '已作答',
   failed: '没答出',
   skipped: '跳过',
+  unsupported: '不支持',
+  review: '待核对',
 };
 
 /** 阶段中文（同上，两处共用） */
@@ -56,6 +61,8 @@ export const QUIZ_PHASE_TEXT: Record<QuizPhase, string> = {
   fetching: '正在拉题…',
   answering: '正在问模型…',
   filling: '正在回填页面…',
+  reviewing: '等待审核',
+  confirming: '等待确认提交',
   submitting: '已点提交，等待站点结果…（人机验证码要你手动点）',
   retrying: '未通过，正在重答低分题…',
   done: '已结束',
@@ -76,6 +83,8 @@ export interface QuestionProgress {
   readonly samples: readonly (string | null)[];
   /** 备注：重答模式会说「模型没听排除」之类的 */
   readonly note: string;
+  readonly explanation?: string;
+  readonly cached?: boolean;
 }
 
 /** 课程（连播）进度 */
@@ -98,17 +107,18 @@ export interface CourseProgress {
 }
 
 /** 答题阶段（监视页顶部一句话） */
-export type QuizPhase = 'idle' | 'fetching' | 'answering' | 'filling' | 'submitting' | 'retrying' | 'done' | 'error';
+export type QuizPhase = 'idle' | 'fetching' | 'answering' | 'filling' | 'reviewing' | 'confirming' | 'submitting' | 'retrying' | 'done' | 'error';
 
 export interface QuizProgress {
   readonly tid: string;
   readonly total: number;
-  /** 已经有最终答案（含页面上本来就有答案的）的题数 */
+  /** 已处理的题数（含失败、待核对与跳过） */
   readonly done: number;
   readonly phase: QuizPhase;
   /** 阶段说明（错误原因、重答原因都写这儿） */
   readonly message: string;
   readonly questions: readonly QuestionProgress[];
+  readonly execution?: ExecutionSnapshot;
 }
 
 export interface MonitorState {
@@ -165,25 +175,34 @@ function publishQuiz(): void {
 export function quizBegin(
   tid: string,
   questions: readonly { id: string; typeText: string; hasAnswer: boolean }[],
+  preserve: boolean = false,
 ): void {
+  const previous = preserve && quiz?.tid === tid ? new Map(quiz.questions.map((q) => [q.qid, q])) : new Map();
+  const items: QuestionProgress[] = questions.map((q, i) => previous.get(q.id) ?? ({
+    qid: q.id,
+    no: i + 1,
+    typeText: q.typeText,
+    status: q.hasAnswer ? 'skipped' : 'pending',
+    answer: '',
+    requests: 0,
+    samples: [],
+    note: q.hasAnswer ? '页面上已有答案，不重复请求' : '',
+  }));
   quiz = {
     tid,
     total: questions.length,
-    done: questions.filter((q) => q.hasAnswer).length,
+    done: items.filter((q) => q.status !== 'pending').length,
     phase: 'fetching',
     message: '',
-    questions: questions.map((q, i) => ({
-      qid: q.id,
-      no: i + 1,
-      typeText: q.typeText,
-      status: q.hasAnswer ? 'skipped' : 'pending',
-      answer: '',
-      requests: 0,
-      samples: [],
-      note: q.hasAnswer ? '页面上已有答案，不重复请求' : '',
-    })),
+    questions: items,
   };
   log.debug(`监视：登记 ${tid}，共 ${questions.length} 题`);
+  publishQuiz();
+}
+
+export function quizExecution(execution: ExecutionSnapshot): void {
+  if (quiz === null) return;
+  quiz = { ...quiz, execution };
   publishQuiz();
 }
 
@@ -197,7 +216,7 @@ export function quizPatch(qid: string, patch: Partial<Omit<QuestionProgress, 'qi
     return { ...q, ...patch };
   });
   if (!hit) return;
-  const done = questions.filter((q) => q.status === 'answered' || q.status === 'skipped').length;
+  const done = questions.filter((q) => q.status !== 'pending').length;
   quiz = { ...quiz, questions, done };
   publishQuiz();
 }
@@ -209,7 +228,7 @@ export function quizPhase(phase: QuizPhase, message = ''): void {
   publishQuiz();
   // 阶段变化就是「给用户看的进度」，从这里统一发出去（监视页 + Toast 一份，见 notice.ts）
   const detail = message === '' ? '' : ` —— ${message}`;
-  noticePost(`${QUIZ_PHASE_TEXT[phase]}${detail}`, phase === 'error' ? 'error' : 'info');
+  noticePost(`${QUIZ_PHASE_TEXT[phase]}${detail}`, phase === 'error' ? 'error' : 'info', { quiet: phase !== 'error' });
 }
 
 /**
@@ -219,15 +238,7 @@ export function quizPhase(phase: QuizPhase, message = ''): void {
  */
 export function quizEnd(message: string, kind: NoticeKind = 'info'): void {
   if (quiz === null) return;
-  quiz = { ...quiz, phase: 'done', message };
+  quiz = { ...quiz, phase: kind === 'error' ? 'error' : 'done', message };
   publishQuiz();
   noticePost(message, kind);
 }
-
-/** 换一份卷子/清空 */
-export function quizClear(): void {
-  quiz = null;
-  publishQuiz();
-}
-
-

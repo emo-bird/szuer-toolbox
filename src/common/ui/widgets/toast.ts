@@ -41,7 +41,7 @@ export class ToastStack {
     this.reposition();
   }
 
-  show(message: string, kind: ToastKind = 'info', options: ToastOptions = {}): void {
+  show(message: string, kind: ToastKind = 'info', options: ToastOptions = {}): () => void {
     const isSticky = options.sticky === true;
     const node = el('div', {
       class: 'sztb-toast',
@@ -72,7 +72,7 @@ export class ToastStack {
         if (oldest === undefined || oldest === node) break;
         this.dismiss(oldest);
       }
-      return;
+      return () => this.dismiss(node);
     }
 
     const timer = window.setTimeout(() => {
@@ -81,6 +81,11 @@ export class ToastStack {
       this.reposition();
     }, options.durationMs ?? DEFAULT_DURATION);
     this.timers.add(timer);
+    return () => {
+      window.clearTimeout(timer);
+      this.timers.delete(timer);
+      this.dismiss(node);
+    };
   }
 
   /** 手动关掉一条（sticky 的「×」按钮走这里） */

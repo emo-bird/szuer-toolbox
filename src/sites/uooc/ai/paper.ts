@@ -17,6 +17,7 @@
  */
 
 import { PRIORITY, qs, request } from '../../../common/core/http.ts';
+import { readRichInput, type ExamImage } from './rich-input.ts';
 
 /** 题型。`blank` = 填空题（用户 m00107 起参与自动作答）；`other` = 主观题，**仍不参与**。 */
 export type QuestionKind = 'single' | 'multi' | 'judge' | 'blank' | 'other';
@@ -35,6 +36,10 @@ export interface ExamQuestion {
   readonly typeText: string;
   readonly stem: string;
   readonly options: readonly ExamOption[];
+  /** 题目含有无法读取的关键内容时，暂停该题的自动作答。 */
+  readonly contentIssue?: string;
+  /** 仅含已验证的内嵌图片数据，供明确启用图片输入的模型使用。 */
+  readonly images?: readonly ExamImage[];
   readonly score: string;
   /**
    * 你这道题**已经填过的答案**（`student_answer`）。
@@ -60,6 +65,16 @@ export interface ExamQuestion {
  */
 export function isAnswerable(kind: QuestionKind): boolean {
   return kind === 'single' || kind === 'multi' || kind === 'judge' || kind === 'blank';
+}
+
+export function questionInputIssue(question: ExamQuestion, allowImages = false): string | null {
+  if (question.contentIssue !== undefined) return question.contentIssue;
+  if (!allowImages && (question.images?.length ?? 0) > 0) return '题目包含图片，需要支持图片输入的模型';
+  if (question.stem.trim() === '') return '没有可读取的题干';
+  if ((question.kind === 'single' || question.kind === 'multi') && question.options.length === 0) {
+    return '没有可读取的选项';
+  }
+  return null;
 }
 
 /**
@@ -89,33 +104,22 @@ export function kindOf(typeText: string, type: string): QuestionKind {
 }
 
 /** 把 `options` 归一成 `[{key,text}]`；键不是单个字母的（填空题的「第1空」）一律丢掉 */
-function toOptions(raw: unknown): ExamOption[] {
+function toOptions(raw: unknown): Array<{ key: string; content: ReturnType<typeof readRichInput> }> {
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return [];
-  const out: ExamOption[] = [];
+  const out: Array<{ key: string; content: ReturnType<typeof readRichInput> }> = [];
   for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
     if (!/^[A-Za-z]$/.test(key)) continue;
-    out.push({ key: key.toUpperCase(), text: String(value ?? '').trim() });
+    const letter = key.toUpperCase();
+    const content = typeof value === 'string' || typeof value === 'number'
+      ? readRichInput(String(value), letter)
+      : { text: '', images: [], issue: '选项 ' + letter + ' 的内容格式无法读取' };
+    out.push({ key: letter, content });
   }
   return out.sort((a, b) => a.key.localeCompare(b.key));
 }
 
 function asString(v: unknown): string {
   return v === null || v === undefined ? '' : String(v);
-}
-
-/**
- * `question` **可能带 HTML**（实测 tid=736720049 的填空题是
- * `<p><span style="…">…</span></p>`，tid=291597830 的单选题却是纯文本）
- * ⇒ 有标签就剥掉再给模型，否则提示词里全是噪音。
- */
-function stripHtml(s: string): string {
-  if (!s.includes('<')) return s;
-  return s
-    .replace(/<[^>]*>/g, ' ')
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/\u00a0/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
 }
 
 /** `student_answer` 归一成字符串数组：空 ⇒ `[]` */
@@ -144,19 +148,28 @@ export function blankCountOf(raw: unknown, kind: QuestionKind): number {
 }
 
 /** 把 `getTaskPaper` 的一条 question 转成我们的模型；字段缺失时返回 null 而不是抛异常 */
-function toExamQuestion(raw: unknown): ExamQuestion | null {
+export function toExamQuestion(raw: unknown): ExamQuestion | null {
   if (raw === null || typeof raw !== 'object') return null;
   const o = raw as Record<string, unknown>;
   const id = asString(o['id']).trim();
   if (id === '') return null;
   const typeText = asString(o['type_text']);
   const kind = kindOf(typeText, asString(o['type']));
+  const stem = readRichInput(asString(o['question']), 'stem');
+  const options = toOptions(o['options']);
+  const images = [...stem.images, ...options.flatMap(({ content }) => content.images)];
+  const optionIssue = options.find(({ content }) => content.issue !== undefined || content.text === '');
+  const contentIssue = stem.issue ?? optionIssue?.content.issue ??
+    (optionIssue !== undefined ? '选项 ' + optionIssue.key + ' 没有可读取的内容' : undefined) ??
+    (images.length > 4 ? '题目图片数量超出处理上限' : undefined);
   return {
     id,
     kind,
     typeText,
-    stem: stripHtml(asString(o['question'])),
-    options: toOptions(o['options']),
+    stem: stem.text,
+    options: options.map(({ key, content }) => ({ key, text: content.text })),
+    ...(contentIssue === undefined ? {} : { contentIssue }),
+    ...(contentIssue === undefined && images.length > 0 ? { images } : {}),
     score: asString(o['score']),
     studentAnswer: toStudentAnswer(o['student_answer']),
     blankCount: blankCountOf(o['options'], kind),
@@ -170,13 +183,14 @@ export interface ExamPaper {
 }
 
 /** 拉一份试卷 */
-export async function fetchPaper(tid: string): Promise<ExamPaper> {
+export async function fetchPaper(tid: string, signal?: AbortSignal): Promise<ExamPaper> {
   const res = await request({
     url: `${location.origin}/exam/getTaskPaper?${qs({ tid })}`,
     responseType: 'json',
     priority: PRIORITY.HIGH,
     // 用户 m01884 报备 2 拍板：拉试卷也跟 AI 接口一样给足 60 秒（原来是 20 秒）
     timeoutMs: 60000,
+    signal,
   });
   const body = res.json as Record<string, unknown> | null;
   const data = (body?.['data'] ?? null) as Record<string, unknown> | null;

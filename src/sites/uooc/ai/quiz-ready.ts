@@ -35,8 +35,8 @@ export function containersComplete(controlCounts: readonly number[]): boolean {
  * 「已经出现的容器都是完整的」，保证不了「全部题目都出现了」。这是用户拍板接受的取舍
  * （另一个做法要等 paper 的题号清单，而那要发生在跳转之后）。
  */
-export function quizDomReady(top: Document = document): boolean {
-  for (const doc of collectRoots(top)) {
+export function quizDomReady(top?: Document): boolean {
+  for (const doc of top === undefined ? collectRoots() : [top]) {
     const boxes = doc.querySelectorAll('div.queContainer');
     if (boxes.length === 0) continue;
     const counts: number[] = [];

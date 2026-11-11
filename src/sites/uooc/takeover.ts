@@ -28,6 +28,8 @@ import type { PanelApi } from '../types.ts';
 
 import { sleep, gotoPoint, waitVideoEnd, taskLabel, publishProgress, pointLabel, VIEWER_SEL, type Task } from './takeover-utils.ts';
 import { quizTidOnPage, runQuizAnswer, type AiQuizResult } from './ai/index.ts';
+import { prepareQuizAlertSound } from './ai/verification-notice.ts';
+import { hasOpenVideoQuiz } from './video-quiz.ts';
 import { setCourseProgress } from './ai/monitor.ts';
 import {
   courseIdFromLocation,
@@ -85,7 +87,8 @@ export interface TakeoverStatus {
 let running = false;
 let statusText = IDLE_TEXT;
 /** 本次运行的取消令牌；同时也是「只允许跑一个」的锁 */
-let token: { cancelled: boolean } | null = null;
+type TakeoverToken = { cancelled: boolean; controller: AbortController };
+let token: TakeoverToken | null = null;
 const listeners = new Set<() => void>();
 
 /**
@@ -131,17 +134,19 @@ export function subscribeTakeover(fn: () => void): () => void {
 
 /** 开始接管。**立刻返回**，循环在后台跑 */
 export function takeoverStart(host: PanelApi): void {
+  prepareQuizAlertSound();
   if (running) {
     log.warn('接管已经在跑，这次【开始接管】被忽略');
     return;
   }
   // 新的一轮允许再弹一次致命弹窗
   fatalShown = false;
-  const t = { cancelled: false };
+  const t = { cancelled: false, controller: new AbortController() };
   token = t;
   running = true;
   setStatus('接管中：正在读取课程目录…');
   void loop(host, t).catch((err) => {
+    if (t.cancelled) return;
     const detail = err instanceof Error ? err.message : String(err);
     log.error('接管循环异常退出', detail);
     // 循环自己抛出来的（不该发生）也要把面板解开，否则按钮会一直显示「停止」
@@ -154,6 +159,7 @@ export function takeoverStop(): void {
   const t = token;
   if (t === null) return;
   t.cancelled = true;
+  t.controller.abort();
   release();
   setStatus(IDLE_TEXT);
   // 这一轮已经收场，下次开始接管可再弹
@@ -239,7 +245,7 @@ async function reload(ctx: Ctx, t: { cancelled: boolean }): Promise<boolean> {
 }
 
 /** 某个任务点在最新的树里还是「未完成」吗（点没了也算不再拦路） */
-async function loop(host: PanelApi, t: { cancelled: boolean }): Promise<void> {
+async function loop(host: PanelApi, t: TakeoverToken): Promise<void> {
   // ---- ① 这是哪门课 ----
   const cid = courseIdFromLocation(location.pathname, location.hash);
   if (cid === null) {
@@ -479,7 +485,14 @@ async function handleVideo(ctx: Ctx, task: Task, t: { cancelled: boolean }): Pro
 
   // §C.1 第 3 步：`ended` 之后等 HOLD_AFTER_MS（= 5000），站点上报完成状态需要时间
   await sleep(holdAfterMs(), t);
+  await waitForVideoQuizToClose(t);
   return !t.cancelled;
+}
+
+async function waitForVideoQuizToClose(t: { cancelled: boolean }): Promise<void> {
+  if (t.cancelled || !hasOpenVideoQuiz()) return;
+  setStatus('等待当前视频小测关闭…');
+  while (!t.cancelled && hasOpenVideoQuiz()) await sleep(250, t);
 }
 
 // ------------------------------------------------------------- 测验
@@ -508,7 +521,7 @@ interface QuizOutcome {
   readonly rounds: number;
 }
 
-async function handleQuiz(ctx: Ctx, task: Task, t: { cancelled: boolean }): Promise<QuizOutcome> {
+async function handleQuiz(ctx: Ctx, task: Task, t: TakeoverToken): Promise<QuizOutcome> {
   const give = (ok: boolean, verdict: CommitVerdict | null, rounds: number): QuizOutcome => ({
     ok,
     verdict,
@@ -528,6 +541,8 @@ async function handleQuiz(ctx: Ctx, task: Task, t: { cancelled: boolean }): Prom
     return give(false, null, 0);
   }
 
+  await waitForVideoQuizToClose(t);
+  if (t.cancelled) return give(false, null, 0);
   if (!(await gotoPoint(task.hash, 'quiz', label, t))) {
     if (t.cancelled) return give(false, null, 0);
     await fatal(
@@ -561,7 +576,7 @@ async function handleQuiz(ctx: Ctx, task: Task, t: { cancelled: boolean }): Prom
     if (t.cancelled) return give(false, null, rounds);
     rounds = round;
     setStatus(`接管中：正在作答 ${label}（第 ${round}/${QUIZ_MAX_ROUNDS} 轮）`);
-    const result: AiQuizResult | null = await runQuizAnswer(tid, ctx.host);
+    const result: AiQuizResult | null = await runQuizAnswer(tid, ctx.host, t.controller.signal);
     if (t.cancelled) return give(false, null, rounds);
 
     if (result === null) {
@@ -573,6 +588,10 @@ async function handleQuiz(ctx: Ctx, task: Task, t: { cancelled: boolean }): Prom
 
     const commit = result.commit;
     last = commit;
+    if (result.cancelled || !result.submitted) {
+      stop(`已停止 —— 测验「${label}」未继续提交`);
+      return give(false, null, rounds);
+    }
 
     // ① 压根没截获到交卷响应（§D：与「等满超时」同一套处理）
     if (commit === null) {

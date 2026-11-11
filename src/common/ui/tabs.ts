@@ -42,6 +42,19 @@ export class TabView {
     this.options = options;
     this.tabbar = el('nav', { class: 'sztb-tabbar', attrs: { role: 'tablist' } });
     this.body = el('div', { class: 'sztb-body' });
+    this.tabbar.addEventListener('keydown', (event) => {
+      const tabs = [...this.tabbar.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+      const index = tabs.findIndex((button) => button === event.target);
+      if (index < 0) return;
+      const next = event.key === 'Home' ? tabs[0] : event.key === 'End' ? tabs.at(-1)
+        : event.key === 'ArrowRight' ? tabs[(index + 1) % tabs.length]
+        : event.key === 'ArrowLeft' ? tabs[(index + tabs.length - 1) % tabs.length] : undefined;
+      const id = next?.dataset['tab'];
+      if (id === undefined) return;
+      event.preventDefault();
+      this.activate(id);
+      next?.focus();
+    });
   }
 
   /**
@@ -78,6 +91,7 @@ export class TabView {
   }
 
   private mountTab(tab: TabRegistration, ctx: TabContext): void {
+    const id = `sztb-tab-${tab.id}`;
     // 1) 样式：每个标签页一份 <style data-tab>，卸载时一并移除
     const style = document.createElement('style');
     style.dataset['tab'] = tab.id;
@@ -88,13 +102,15 @@ export class TabView {
     const button = el('button', {
       class: 'sztb-tab',
       text: tab.title,
-      attrs: { type: 'button', role: 'tab', 'aria-selected': 'false', 'data-tab': tab.id },
+      attrs: { type: 'button', role: 'tab', id, tabindex: -1, 'aria-selected': 'false',
+        'aria-controls': `${id}-panel`, 'data-tab': tab.id },
       on: { click: () => this.activate(tab.id) },
     });
     this.tabbar.appendChild(button);
 
     // 3) 内容面板
-    const pane = el('div', { class: 'sztb-pane', attrs: { role: 'tabpanel' }, data: { tab: tab.id } });
+    const pane = el('div', { class: 'sztb-pane',
+      attrs: { role: 'tabpanel', id: `${id}-panel`, 'aria-labelledby': id, tabindex: 0 }, data: { tab: tab.id } });
     this.body.appendChild(pane);
 
     let dispose: (() => void) | undefined;
@@ -118,7 +134,9 @@ export class TabView {
     }
     this.current = tabId;
     for (const button of this.tabbar.querySelectorAll<HTMLElement>('.sztb-tab')) {
-      button.setAttribute('aria-selected', String(button.dataset['tab'] === tabId));
+      const selected = button.dataset['tab'] === tabId;
+      button.setAttribute('aria-selected', String(selected));
+      button.tabIndex = selected ? 0 : -1;
     }
     for (const pane of this.body.querySelectorAll<HTMLElement>('.sztb-pane')) {
       pane.dataset['active'] = String(pane.dataset['tab'] === tabId);

@@ -41,7 +41,7 @@ export interface PanelApi {
    * `options.sticky = true` 表示**不自动消失**，右上角带「×」由用户点掉 ——
    * 只有异常/失败这类「错过了就查不到」的提示才该用。
    */
-  toast(message: string, kind?: 'info' | 'warn' | 'error' | 'success', options?: ToastOptions): void;
+  toast(message: string, kind?: 'info' | 'warn' | 'error' | 'success', options?: ToastOptions): void | (() => void);
   /** 弹二次确认框，resolve 为 true 表示用户点了确认 */
   confirm(options: ConfirmOptions): Promise<boolean>;
   /**
@@ -64,6 +64,7 @@ export interface PanelApi {
 }
 
 export interface ConfirmOptions {
+  signal?: AbortSignal;
   title: string;
   body: string;
   /** 危险操作确认：按钮文案与配色都会走红色 */

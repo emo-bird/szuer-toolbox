@@ -28,6 +28,12 @@ import {
 import { isCurrentRow, type CourseRow } from '../catalog.ts';
 import { clockText, noticeList, subscribeNotice, type Notice } from '../notice.ts';
 import { subscribeTakeover, takeoverStatus } from '../takeover.ts';
+import {
+  applyReviewedAnswer, isQuizRunning, markReviewedAnswer, quizTidOnPage, runQuizAnswer,
+  subscribeQuizRun, undoReviewedAnswers,
+} from '../ai/index.ts';
+import { currentReview, locateReviewQuestion, saveReviewDraft } from '../ai/review.ts';
+import { isAnswerable } from '../ai/paper.ts';
 
 const log = scoped('uooc/monitor-tab');
 
@@ -76,19 +82,164 @@ function courseTree(rows: readonly CourseRow[], currentId: string | null): HTMLE
   return box;
 }
 
-function questionRow(q: QuestionProgress): HTMLElement {
-  const samples = q.samples.length === 0 ? '—' : q.samples.map((s) => (s === null ? '✗' : s)).join(' → ');
-  return el(
-    'tr',
-    {},
-    el('td', { text: String(q.no) }),
-    el('td', { text: q.typeText === '' ? '—' : q.typeText }),
-    el('td', { text: QUESTION_STATUS_TEXT[q.status] }),
-    el('td', { text: String(q.requests) }),
-    el('td', { text: samples }),
-    el('td', { text: q.answer === '' ? '—' : q.answer }),
-    el('td', { text: q.note === '' ? '—' : q.note }),
+const REVIEW_CSS = `
+.sztb-review { display: grid; gap: 8px; container-type: inline-size; }
+.sztb-review-actions { display: flex; flex-wrap: wrap; gap: 5px; }
+.sztb-review-row { border: 1px solid var(--sztb-border); border-radius: 6px; padding: 7px 9px; }
+.sztb-review-row summary { cursor: pointer; overflow-wrap: anywhere; }
+.sztb-review-row p { margin: 4px 0 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.sztb-review-list { display: grid; gap: 6px; }
+.sztb-review-status { font-size: .92em; color: var(--sztb-text); white-space: pre-line; }
+@container (min-width: 530px) { .sztb-review-list { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; } }
+`;
+
+function mountReview(root: HTMLElement, ctx: TabContext): { draw: () => void; dispose: () => void } {
+  const summary = el('div', { class: 'sztb-review-status', attrs: { role: 'status' } });
+  const feedback = el('div', { class: 'sztb-review-status', attrs: { role: 'status' } });
+  const list = el('div', { class: 'sztb-review-list' });
+  const progress = el('progress', { attrs: { value: 0, max: 1, 'aria-label': '试卷处理进度' },
+    style: { width: '100%' } });
+  const filter = el('select', { class: 'sztb-input', attrs: { 'aria-label': '筛选题目' } },
+    el('option', { text: '全部题目', attrs: { value: 'all' } }),
+    el('option', { text: '待核对或失败', attrs: { value: 'attention' } }),
   );
+  let busy = false;
+  let disposed = false;
+  let startedAt = 0;
+
+  const action = (text: string, run: () => string | void | Promise<string | void>, danger = false): HTMLButtonElement =>
+    el('button', {
+      class: 'sztb-btn', text, attrs: { type: 'button', 'data-variant': danger ? 'danger' : undefined },
+      on: { click: () => {
+        if (busy || disposed) return;
+        busy = true;
+        feedback.textContent = '';
+        draw();
+        void Promise.resolve().then(run).then((message) => {
+          if (!disposed && message !== undefined) feedback.textContent = message;
+        }).catch((err: unknown) => {
+          if (!disposed) feedback.textContent = err instanceof Error ? err.message : String(err);
+        }).finally(() => { busy = false; if (!disposed) draw(); });
+      } },
+    });
+
+  const runReview = async (intent: 'draft' | 'submit' | { ids: readonly string[] }): Promise<string | void> => {
+    const tid = quizTidOnPage();
+    if (tid === null) return '请先打开一张试卷';
+    await runQuizAnswer(tid, ctx.host, undefined, intent);
+  };
+
+  const retry = action('仅重试失败题', async () => {
+    const failed = monitorState().quiz?.questions.filter((q) => q.status === 'failed') ?? [];
+    if (failed.length === 0) return '没有失败题';
+    const entries = currentReview()?.entries;
+    const ids: string[] = [];
+    let reapplied = 0;
+    for (const q of failed) {
+      if (entries?.get(q.qid)?.suggestion === undefined) ids.push(q.qid);
+      else if (await applyReviewedAnswer(q.qid, ctx.host)) reapplied += 1;
+    }
+    if (ids.length > 0) return runReview({ ids });
+    return reapplied > 0 ? `已重新回填 ${reapplied} 道题` : '已有建议未能回填，请定位原题检查';
+  });
+  const save = action('保存草稿', async () => {
+    const review = currentReview();
+    if (review === null) return '请先生成答案';
+    const count = await saveReviewDraft(review);
+    return count > 0 ? `已将 ${count} 道题的建议保存到本机` : '没有可保存的建议';
+  });
+  const restore = action('恢复草稿', () => runReview('draft'));
+  const undo = action('撤销本次回填', () => {
+    const count = undoReviewedAnswers();
+    return count > 0 ? `已恢复 ${count} 道题的原答案` : '没有可撤销的回填，或页面答案已被修改';
+  });
+  const submit = action('提交当前答案', () => runReview('submit'), true);
+  root.append(el('h3', { class: 'sztb-group-title', text: 'AI 答案审核' }), summary, progress,
+    el('div', { class: 'sztb-review-actions' }, retry, save, restore, undo, submit), feedback, filter, list);
+
+  function createRow(qid: string) {
+    const title = el('summary');
+    const body = el('p');
+    const locate = action('定位原题', () => { if (!locateReviewQuestion(qid)) return '当前页面找不到该题'; });
+    const generate = action('重新生成', () => runReview({ ids: [qid] }));
+    const apply = action('应用建议', async () => (await applyReviewedAnswer(qid, ctx.host))
+      ? '已将建议写入页面' : '未应用，页面答案可能已变动');
+    const approve = action('标记已核对', () => markReviewedAnswer(qid) ? '已标记' : '请先在页面上完整填写该题');
+    const undoOne = action('撤销回填', () => undoReviewedAnswers(qid) > 0 ? '已恢复原答案' : '页面答案已变动，无法撤销');
+    const node = el('details', { class: 'sztb-review-row' }, title, body,
+      el('div', { class: 'sztb-review-actions' }, locate, generate, apply, approve, undoOne));
+    return { node, title, body, locate, generate, apply, approve, undoOne };
+  }
+  const rows = new Map<string, ReturnType<typeof createRow>>();
+  let tid = '';
+
+  function draw(): void {
+    const quiz = monitorState().quiz;
+    const review = currentReview();
+    const running = isQuizRunning();
+    const disabled = running || busy;
+    if (running && startedAt === 0) startedAt = Date.now();
+    if (!running) startedAt = 0;
+    if ((quiz?.tid ?? '') !== tid) {
+      tid = quiz?.tid ?? '';
+      rows.clear();
+      list.replaceChildren();
+    }
+    const questions = quiz?.questions ?? [];
+    const count = (status: QuestionProgress['status']): number => questions.filter((q) => q.status === status).length;
+    const execution = quiz?.execution;
+    const executionText = execution === undefined ? '' : ` · 请求 ${execution.requests}${execution.budget > 0 ? `/${execution.budget}` : ''}` +
+      (execution.usageResponses > 0 ? ` · ${execution.totalTokens} token（${execution.usageResponses} 次有统计）` : '');
+    const activity = execution?.phase === 'requesting' ? ' · 请求模型' : execution?.phase === 'retrying'
+      ? ' · 等待重试' : execution?.phase === 'parsing' ? ' · 解析答案' : execution?.phase === 'cache' ? ' · 命中缓存' : '';
+    const text = quiz === null ? '打开测验后开始作答，或恢复本机草稿。'
+      : `${QUIZ_PHASE_TEXT[quiz.phase]} · ${quiz.done}/${quiz.total} 已处理${executionText}${running ? activity : ''}` +
+        (startedAt ? ` · 已运行 ${Math.floor((Date.now() - startedAt) / 1000)} 秒` : '') +
+        `\n回填/核对 ${count('answered')} · 待核对 ${count('review')} · 失败 ${count('failed')} · 不支持 ${count('unsupported')}` +
+        (quiz.message ? `\n${quiz.message}` : '');
+    if (summary.textContent !== text) summary.textContent = text;
+    progress.max = quiz?.total || 1;
+    progress.value = quiz?.done ?? 0;
+    const entries = review?.entries;
+    retry.disabled = disabled || entries === undefined || count('failed') === 0;
+    restore.disabled = disabled;
+    save.disabled = disabled || entries === undefined || ![...entries.values()].some((entry) => entry.suggestion !== undefined);
+    undo.disabled = disabled || entries === undefined || ![...entries.values()].some((entry) => entry.applied !== undefined);
+    submit.disabled = disabled || entries === undefined || entries.size === 0;
+    const activeIds = new Set(questions.map((q) => q.qid));
+    for (const [id, row] of rows) {
+      if (!activeIds.has(id)) { row.node.remove(); rows.delete(id); }
+    }
+    for (const q of questions) {
+      let row = rows.get(q.qid);
+      if (row === undefined) {
+        row = createRow(q.qid);
+        rows.set(q.qid, row);
+        list.appendChild(row.node);
+      }
+      const entry = entries?.get(q.qid);
+      row.node.hidden = filter.value === 'attention' && q.status !== 'review' && q.status !== 'failed';
+      const title = `第 ${q.no} 题 · ${q.typeText || '题目'} · ${QUESTION_STATUS_TEXT[q.status]}`;
+      if (row.title.textContent !== title) row.title.textContent = title;
+      const details = [
+        q.answer ? `答案 ${q.answer}` : '',
+        entry?.suggestion && entry.suggestion !== q.answer ? `AI 建议 ${entry.suggestion}` : '',
+        q.samples.length > 0 ? `采样 ${q.samples.map((value) => value ?? '无有效答案').join(' / ')}` : '',
+        q.cached ? '来自缓存' : '',
+        q.explanation ?? '',
+        q.note,
+      ].filter(Boolean).join('\n');
+      if (row.body.textContent !== details) row.body.textContent = details;
+      row.locate.disabled = entry === undefined;
+      row.generate.disabled = disabled || entry === undefined || !isAnswerable(entry.question.kind);
+      row.apply.disabled = disabled || entry?.suggestion === undefined;
+      row.approve.disabled = disabled || entry === undefined;
+      row.undoOne.disabled = disabled || entry?.applied === undefined;
+    }
+  }
+  filter.addEventListener('change', draw);
+  const timer = window.setInterval(() => { if (isQuizRunning()) draw(); }, 1000);
+  return { draw, dispose: () => { disposed = true; window.clearInterval(timer); } };
 }
 
 /**
@@ -129,21 +280,36 @@ export const UOOC_MONITOR_TAB: TabRegistration = {
   id: `${SITE_ID}:monitor`,
   title: '监视',
   order: 230,
-  mount(root: HTMLElement, ctx: TabContext): void {
+  css: REVIEW_CSS,
+  mount(root: HTMLElement, ctx: TabContext): () => void {
     // 两块分开装：状态块永远在第一位，下面的进度块怎么长都挤不掉它
     const statusBox = el('div', { class: 'sztb-field' });
     root.appendChild(statusBox);
     const box = el('div', { class: 'sztb-field' });
     root.appendChild(box);
+    const reviewBox = el('div', { class: 'sztb-review' });
+    root.appendChild(reviewBox);
+    const review = mountReview(reviewBox, ctx);
 
     const offs: (() => void)[] = [];
+    let courseState: ReturnType<typeof monitorState>['course'] | undefined;
+    let lastNotice: ReturnType<typeof noticeList> | undefined;
+    let lastTakeover = '';
     const draw = (): void => {
       const s = monitorState();
-      statusBox.textContent = '';
-      fillStatus(statusBox);
-      box.textContent = '';
-
+      review.draw();
+      const notices = noticeList();
+      const takeover = takeoverStatus().text;
+      if (lastNotice !== notices || lastTakeover !== takeover) {
+        lastNotice = notices;
+        lastTakeover = takeover;
+        statusBox.replaceChildren();
+        fillStatus(statusBox);
+      }
       const course = s.course;
+      if (course === courseState) return;
+      courseState = course;
+      box.replaceChildren();
       if (course === null) {
         box.appendChild(el('div', { class: 'sztb-group-title', text: '课程进度' }));
         box.appendChild(el('div', { class: 'sztb-field-desc', text: '接管还没开始（在【接管】页点【开始接管】）' }));
@@ -157,53 +323,20 @@ export const UOOC_MONITOR_TAB: TabRegistration = {
         }
       }
 
-      box.appendChild(el('div', { class: 'sztb-group-title', text: 'AI 答题进度' }));
-      const quiz = s.quiz;
-      if (quiz === null) {
-        box.appendChild(el('div', { class: 'sztb-field-desc', text: '本次会话还没跑过答题' }));
-      } else {
-        box.appendChild(el('div', { class: 'sztb-field-desc', text: `任务 tid=${quiz.tid} —— ${QUIZ_PHASE_TEXT[quiz.phase]}` }));
-        if (quiz.message !== '') box.appendChild(el('div', { class: 'sztb-field-desc', text: quiz.message }));
-        box.appendChild(bar(quiz.done, quiz.total));
-        const table = el(
-          'table',
-          { class: 'sztb-table' },
-          el(
-            'thead',
-            {},
-            el(
-              'tr',
-              {},
-              el('th', { text: '题号' }),
-              el('th', { text: '题型' }),
-              el('th', { text: '状态' }),
-              el('th', { text: '请求' }),
-              el('th', { text: '每次答案' }),
-              el('th', { text: '定稿' }),
-              el('th', { text: '备注' }),
-            ),
-          ),
-          el('tbody', {}, ...quiz.questions.map(questionRow)),
-        );
-        box.appendChild(table);
-      }
-      void ctx;
     };
 
     draw();
-    const stop = (): void => {
-      while (offs.length > 0) offs.pop()?.();
-    };
+    let frame: number | null = null;
     const onChange = (): void => {
-      // 标签页被关掉（root 脱离文档）就自动退订，免得订阅表越积越多
-      if (!root.isConnected) {
-        stop();
-        return;
-      }
-      draw();
+      if (frame !== null) return;
+      frame = window.requestAnimationFrame(() => { frame = null; draw(); });
     };
-    // 三个源都要订：进度（ai/monitor）、提示流（notice）、接管状态行（takeover）
-    offs.push(subscribeMonitor(onChange), subscribeNotice(onChange), subscribeTakeover(onChange));
+    offs.push(subscribeMonitor(onChange), subscribeNotice(onChange), subscribeTakeover(onChange), subscribeQuizRun(onChange));
     log.debug('监视页已挂载');
+    return () => {
+      while (offs.length > 0) offs.pop()?.();
+      if (frame !== null) window.cancelAnimationFrame(frame);
+      review.dispose();
+    };
   },
 };

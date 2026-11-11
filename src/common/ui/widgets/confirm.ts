@@ -32,6 +32,7 @@ export function showConfirm(shadowRoot: ShadowRoot, options: ConfirmOptions): Pr
     body: options.body,
     danger,
     cancelKey: CANCEL_KEY,
+    ...(options.signal === undefined ? {} : { signal: options.signal }),
     actions: [
       { key: CANCEL_KEY, label: options.cancelText ?? '取消' },
       {

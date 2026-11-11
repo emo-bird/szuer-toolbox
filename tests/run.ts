@@ -41,5 +41,8 @@ import './suites/uooc-intercept.test.ts';
 import './suites/uooc-notice.test.ts';
 import './suites/uooc-overlay.test.ts';
 import './suites/uooc-quiz-ready.test.ts';
+import './suites/uooc-ai-run.test.ts';
+import './suites/uooc-provider.test.ts';
+import './suites/uooc-ai-runner.test.ts';
 
 await run();

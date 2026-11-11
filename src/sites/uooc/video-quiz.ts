@@ -31,13 +31,14 @@
  *
  * ## 不做的事
  *
- * - **不留开关**（用户 m06055：「已经可以直接读取答案了，不需要此功能了，从需求中移除」）
- *   —— 视频小测**无条件**自动作答，两个开关（「小测自动答题」与「关闭视频小测答案枚举」）都不做。
+ * - 由【AI 作答】页的「自动提交视频小题」控制。
  * - **不猜**：找不到答案的题一律原样留着等用户，绝不点第一项糊过去。
  * - **不发请求**：视频小测没有对应的后端接口，走 LLM 是另一条路（`ai/`），本文件不碰。
  */
 
 import { scoped } from '../../common/core/log.ts';
+import { isEnabled, subscribeToggle } from '../../common/core/settings.ts';
+import { SITE_ID, TOGGLE } from './settings.ts';
 
 const log = scoped('uooc/video-quiz');
 
@@ -49,7 +50,7 @@ const DONE_ATTR = 'data-sztb-quiz-done';
 const INPUT_SEL = 'input[name^="answer_"]';
 const ANSWER_ID_RE = /^answer_(.+)$/;
 /** 站内「确定」按钮（两个都留：前者是语义选择器，后者是实测类名） */
-const SURE_SEL = '[ng-click^="sureAnswer"]';
+const SURE_SEL = '[ng-click*="sureAnswer"]';
 const SURE_FALLBACK_SEL = 'button.btn.btn-success.fl_right';
 /** 找视频容器的 `source` 属性：先精确、再放宽 */
 const VIDEO_SOURCE_SEL = '[uooc-video][source]';
@@ -57,6 +58,8 @@ const ANY_SOURCE_SEL = '[source]';
 
 /** DOM 变动去抖（与 `video.ts` 同一口径） */
 const RESCAN_DEBOUNCE_MS = 200;
+/** 分开点选和确认，给站点时间同步小测答案。 */
+const ANSWER_SETTLE_MS = 300;
 /** 点完「确定」后再看一眼的间隔：还在就说明没点掉（答案不对 / 按钮变灰） */
 const AFTER_SURE_MS = 800;
 
@@ -64,6 +67,35 @@ const AFTER_SURE_MS = 800;
 interface VideoQuiz {
   readonly id: string;
   readonly letters: readonly string[];
+}
+
+function isVisible(element: HTMLElement): boolean {
+  const { width, height } = element.getBoundingClientRect();
+  return width > 0 && height > 0 &&
+    !element.closest('[hidden], [aria-hidden="true"]') &&
+    (element.checkVisibility?.({ visibilityProperty: true, opacityProperty: true }) ?? true);
+}
+
+function isVideoQuizOpen(layer: HTMLElement): boolean {
+  if (!isVisible(layer)) return false;
+  const { top, right, bottom, left } = layer.getBoundingClientRect();
+  // 站点关闭弹窗后会把题目容器放回播放器下方，容器仍有尺寸，但已离开视口。
+  return bottom > 0 && right > 0 && top < window.innerHeight && left < window.innerWidth;
+}
+
+export function hasOpenVideoQuiz(): boolean {
+  return Array.from(document.querySelectorAll<HTMLElement>(LAYER_SEL)).some(isVideoQuizOpen);
+}
+
+function findConfirm(layer: HTMLElement): HTMLElement | undefined {
+  const box = layer.closest('.layui-layer') ?? layer;
+  const usable = (button: HTMLElement): boolean =>
+    isVisible(button) && !button.closest(':disabled, [aria-disabled="true"], .layui-btn-disabled, .disabled');
+  return Array.from(box.querySelectorAll<HTMLElement>(SURE_SEL))
+    .find((button) => /^\s*(?:vm\.)?sureAnswer\s*\(/.test(button.getAttribute('ng-click') ?? '') && usable(button)) ??
+    Array.from(box.querySelectorAll<HTMLElement>(SURE_FALLBACK_SEL)).find(usable) ??
+    Array.from(box.querySelectorAll<HTMLElement>('.layui-layer-btn .layui-layer-btn0'))
+      .find((button) => /^(?:确定|确认|提交)$/.test(button.textContent?.trim() ?? '') && usable(button));
 }
 
 /**
@@ -166,7 +198,11 @@ export interface VideoQuizOutcome {
  *
  * 不抛异常。可能返回 `null`（这一层还没渲染出选项，等下一轮扫描再看）。
  */
-async function answerVideoQuizLayer(layer: HTMLElement): Promise<VideoQuizOutcome | null> {
+async function answerVideoQuizLayer(
+  layer: HTMLElement,
+  readyAfter: WeakMap<HTMLElement, number>,
+  schedule: () => void,
+): Promise<VideoQuizOutcome | null> {
   const inputs = Array.from(layer.querySelectorAll<HTMLInputElement>(INPUT_SEL));
   if (inputs.length === 0) return null; // 还没渲染出来，下一轮再说
 
@@ -187,54 +223,49 @@ async function answerVideoQuizLayer(layer: HTMLElement): Promise<VideoQuizOutcom
     else arr.push(inp);
   }
 
-  let answered = 0;
-  let missing = 0;
+  const selections = new Map<HTMLInputElement, boolean>();
   for (const [id, list] of groups) {
     const want = answers.get(id);
-    if (want === undefined) {
-      missing += 1;
-      log.warn(`小测 ${id} 在页面的 quiz 数据里找不到，留给用户`);
-      continue;
-    }
-    const wantSet = new Set(want.map((s) => s.toUpperCase()));
-    let hit = 0;
+    if (want === undefined) return null;
+    const wantSet = new Set(want);
+    const match = list.filter((inp) => wantSet.has(inp.value.toUpperCase()));
+    if (match.length !== wantSet.size || (list.some((inp) => inp.type === 'radio') && match.length !== 1)) return null;
     for (const inp of list) {
-      if (!wantSet.has(inp.value.toUpperCase())) continue;
-      if (!inp.checked) inp.click();
-      hit += 1;
-    }
-    if (hit > 0) answered += 1;
-    else {
-      missing += 1;
-      log.warn(`小测 ${id} 的答案 [${want.join(',')}] 在选项里找不到对应项，留给用户`);
+      selections.set(inp, match.includes(inp));
     }
   }
 
-  if (answered === 0) return { questions: groups.size, answered: 0, sure: false };
-
-  const box = layer.closest('.layui-layer') ?? layer;
-  const sure =
-    box.querySelector<HTMLElement>(SURE_SEL) ?? box.querySelector<HTMLElement>(SURE_FALLBACK_SEL);
-  if (sure === null) {
-    log.warn('小测弹层里没有【确定】按钮，答案已选好，请你点一下');
-    return { questions: groups.size, answered, sure: false };
+  if (selections.size === 0) return null;
+  let changed = false;
+  for (const [inp, checked] of selections) {
+    if (inp.checked !== checked && (checked || inp.type === 'checkbox')) {
+      inp.click();
+      changed ||= inp.checked === checked;
+    }
   }
+  if (changed || !readyAfter.has(layer)) readyAfter.set(layer, performance.now() + ANSWER_SETTLE_MS);
+  if (performance.now() < (readyAfter.get(layer) ?? 0)) {
+    schedule();
+    return null;
+  }
+  if ([...selections].some(([inp, checked]) => !inp.isConnected || inp.checked !== checked)) return null;
+
+  const sure = findConfirm(layer);
+  if (sure === undefined) return null;
 
   layer.setAttribute(DONE_ATTR, '1');
   sure.click();
-  log.info(
-    `视频小测已作答：${answered}/${groups.size} 题（${missing} 题没对上），已点【确定】`,
-  );
+  log.info(`视频小测已点【确定】，共 ${groups.size} 题`);
 
   // 点完再看一眼：还在就说明没点掉（答案不对 / 按钮变灰），只报告不重试
   await new Promise<void>((resolve) => {
     window.setTimeout(resolve, AFTER_SURE_MS);
   });
-  if (layer.isConnected) {
+  if (layer.isConnected && isVideoQuizOpen(layer)) {
     log.warn('点了【确定】但小测弹层还在 —— 可能答案不对，交给用户处理（不重试）');
   }
 
-  return { questions: groups.size, answered, sure: true };
+  return { questions: groups.size, answered: groups.size, sure: true };
 }
 
 /**
@@ -245,12 +276,18 @@ async function answerVideoQuizLayer(layer: HTMLElement): Promise<VideoQuizOutcom
 export function startVideoQuiz(): () => void {
   let timer: number | null = null;
   let stopped = false;
+  const readyAfter = new WeakMap<HTMLElement, number>();
 
   const scan = (): void => {
-    if (stopped) return;
+    if (stopped || !isEnabled(SITE_ID, TOGGLE.VIDEO_QUIZ_AUTO_SUBMIT)) return;
     for (const el of document.querySelectorAll<HTMLElement>(LAYER_SEL)) {
+      if (!isVideoQuizOpen(el)) {
+        readyAfter.delete(el);
+        el.removeAttribute(DONE_ATTR);
+        continue;
+      }
       if (el.hasAttribute(DONE_ATTR)) continue;
-      void answerVideoQuizLayer(el);
+      void answerVideoQuizLayer(el, readyAfter, schedule);
     }
   };
 
@@ -263,16 +300,23 @@ export function startVideoQuiz(): () => void {
   };
 
   scan();
+  const unsubscribe = subscribeToggle(SITE_ID, TOGGLE.VIDEO_QUIZ_AUTO_SUBMIT, schedule);
 
   const observer = new MutationObserver(schedule);
-  observer.observe(document.documentElement, { childList: true, subtree: true });
+  observer.observe(document.documentElement, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ['class', 'style', 'hidden', 'aria-hidden', 'disabled', 'aria-disabled', 'source', 'ng-click'],
+  });
   // 站内 hash 路由换集不重载页面
   window.addEventListener('hashchange', schedule);
 
-  log.debug('视频小测助手已挂载（读 DOM 里的答案，无声作答）');
+  log.debug('视频小测助手已挂载');
 
   return () => {
     stopped = true;
+    unsubscribe();
     if (timer !== null) {
       window.clearTimeout(timer);
       timer = null;

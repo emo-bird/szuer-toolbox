@@ -26,6 +26,7 @@ export interface RegisteredToggle extends SiteToggleDef {
 }
 
 const toggleRegistry = new Map<string, RegisteredToggle>();
+const toggleListeners = new Map<string, Set<() => void>>();
 
 /** `siteId + '\u0000' + toggleId` 作复合键 */
 function composite(siteId: string, toggleId: string): string {
@@ -85,6 +86,18 @@ export function isEnabled(siteId: string, toggleId: string): boolean {
 /** 写入开关状态。UI 层必须在调用本函数**之前**完成二次确认。 */
 export function setEnabled(siteId: string, toggleId: string, enabled: boolean): void {
   write(storageKey(siteId, toggleId), enabled);
+  for (const listener of toggleListeners.get(composite(siteId, toggleId)) ?? []) listener();
+}
+
+export function subscribeToggle(siteId: string, toggleId: string, listener: () => void): () => void {
+  const key = composite(siteId, toggleId);
+  const listeners = toggleListeners.get(key) ?? new Set<() => void>();
+  listeners.add(listener);
+  toggleListeners.set(key, listeners);
+  return () => {
+    listeners.delete(listener);
+    if (listeners.size === 0) toggleListeners.delete(key);
+  };
 }
 
 /** 该开关当前是否「用户显式开启过」——用于判断是否需要弹二次确认 */
