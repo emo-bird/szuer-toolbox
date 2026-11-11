@@ -40,8 +40,10 @@
 ## 安装与更新
 
 1. 在 Chrome、Edge 或 Firefox 中安装 Tampermonkey（篡改猴）或 Violentmonkey（暴力猴）。
-2. 打开脚本链接，在管理器弹出的页面确认安装。已安装的脚本通过上游仓库的 `@updateURL` 检查更新。 [安装深大人工具箱](https://raw.githubusercontent.com/emo-bird/szuer-toolbox/master/dist/szuer-toolbox.user.js)
+2. 打开 v1.2.5 的安装链接，在管理器弹出的页面确认安装。该链接固定到 v1.2.5 的构建产物。 [安装深大人工具箱 v1.2.5](https://raw.githubusercontent.com/Starverse032/szuer-toolbox/c05692050df68c45c9191fb0263598058a7650b1/dist/szuer-toolbox.user.js)
 3. 打开或刷新优课课程页、本科选课页，点击悬浮球展开工具箱。
+
+安装后，脚本通过 `@updateURL` 从原仓库的 `master` 检查后续更新。
 
 ## 优课使用说明
 
