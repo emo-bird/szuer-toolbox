@@ -101,7 +101,7 @@ function mountReview(root: HTMLElement, ctx: TabContext): { draw: () => void; di
     style: { width: '100%' } });
   const filter = el('select', { class: 'sztb-input', attrs: { 'aria-label': '筛选题目' } },
     el('option', { text: '全部题目', attrs: { value: 'all' } }),
-    el('option', { text: '待核对或失败', attrs: { value: 'attention' } }),
+    el('option', { text: '需处理的题目', attrs: { value: 'attention' } }),
   );
   let busy = false;
   let disposed = false;
@@ -218,8 +218,9 @@ function mountReview(root: HTMLElement, ctx: TabContext): { draw: () => void; di
         list.appendChild(row.node);
       }
       const entry = entries?.get(q.qid);
-      row.node.hidden = filter.value === 'attention' && q.status !== 'review' && q.status !== 'failed';
-      const title = `第 ${q.no} 题 · ${q.typeText || '题目'} · ${QUESTION_STATUS_TEXT[q.status]}`;
+      row.node.hidden = filter.value === 'attention' && !q.incomplete && q.status !== 'review' && q.status !== 'failed';
+      const title = `第 ${q.no} 题 · ${q.typeText || '题目'} · ${QUESTION_STATUS_TEXT[q.status]}` +
+        (q.incomplete ? ' · 未填完整' : '');
       if (row.title.textContent !== title) row.title.textContent = title;
       const details = [
         q.answer ? `答案 ${q.answer}` : '',

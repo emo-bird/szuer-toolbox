@@ -150,7 +150,7 @@ function pickAll(root: Document | Element, selector: string): HTMLElement[] {
  * `$('#u' + question.id + n).val()` 读它 ⇒ 只要 DOM value 对了，站点就能读走。
  *
  * 三级降级：`textarea.ue-container1`（实测 / 参考脚本同款）→ 容器里任意 `textarea`
- * → `[contenteditable="true"]`；容器都反查不到时，才退回去认 `name=<qid>` 的控件。
+ * → 普通文本输入或 `[contenteditable="true"]`；容器反查不到时，才退回按 `name=<qid>` 查找。
  */
 export function textControlsFor(roots: readonly Document[], qid: string): HTMLElement[] {
   const out: HTMLElement[] = [];
@@ -159,7 +159,7 @@ export function textControlsFor(roots: readonly Document[], qid: string): HTMLEl
     if (container !== null) {
       let local = pickAll(container, 'textarea.ue-container1');
       if (local.length === 0) local = pickAll(container, 'textarea');
-      if (local.length === 0) local = pickAll(container, '[contenteditable="true"]');
+      if (local.length === 0) local = pickAll(container, 'input[type="text"], input[type="search"], [contenteditable="true"]');
       out.push(...usable(local));
       continue;
     }
