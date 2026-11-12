@@ -85,6 +85,7 @@ export interface QuestionProgress {
   readonly note: string;
   readonly explanation?: string;
   readonly cached?: boolean;
+  readonly incomplete?: boolean;
 }
 
 /** 课程（连播）进度 */
@@ -218,6 +219,14 @@ export function quizPatch(qid: string, patch: Partial<Omit<QuestionProgress, 'qi
   if (!hit) return;
   const done = questions.filter((q) => q.status !== 'pending').length;
   quiz = { ...quiz, questions, done };
+  publishQuiz();
+}
+
+/** 记录当前试卷的回读结果，保留每道题的 AI 作答状态和建议。 */
+export function quizSetIncomplete(ids: ReadonlySet<string>): void {
+  if (quiz === null) return;
+  const questions = quiz.questions.map((q) => ({ ...q, incomplete: ids.has(q.qid) }));
+  quiz = { ...quiz, questions };
   publishQuiz();
 }
 

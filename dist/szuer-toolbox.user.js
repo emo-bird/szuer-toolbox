@@ -2,7 +2,7 @@
 // @name         深大人工具箱
 // @name:en      SZUer Toolbox
 // @namespace    https://github.com/emo-bird/szuer-toolbox
-// @version      1.2.5
+// @version      1.2.6
 // @description  深大校园站工具箱：UOOC 课程助手 + 本科选课助手。完全自研 UI，无外部运行时依赖。
 // @description:en  Toolbox for SZU campus sites: UOOC course helper + undergraduate course-selection helper.
 // @author       一门鸽鸽 (emo_bird) & DeepSeek
@@ -52,7 +52,7 @@
  * ============================================================================
  */
 
-/* 构建信息：2026-11-11T11:04:58.462Z（构建号 12） */
+/* 构建信息：2026-11-12T01:54:59.394Z（构建号 14） */
 
 "use strict";
 (() => {
@@ -3070,7 +3070,7 @@ ${options.desc ?? ""}
       if (container !== null) {
         let local = pickAll(container, "textarea.ue-container1");
         if (local.length === 0) local = pickAll(container, "textarea");
-        if (local.length === 0) local = pickAll(container, '[contenteditable="true"]');
+        if (local.length === 0) local = pickAll(container, 'input[type="text"], input[type="search"], [contenteditable="true"]');
         out.push(...usable(local));
         continue;
       }
@@ -4317,6 +4317,12 @@ ${options.desc ?? ""}
     quiz = { ...quiz, questions, done };
     publishQuiz();
   }
+  function quizSetIncomplete(ids) {
+    if (quiz === null) return;
+    const questions = quiz.questions.map((q) => ({ ...q, incomplete: ids.has(q.qid) }));
+    quiz = { ...quiz, questions };
+    publishQuiz();
+  }
   function quizPhase(phase, message = "") {
     if (quiz === null) return;
     quiz = { ...quiz, phase, message };
@@ -4952,7 +4958,12 @@ ${options.desc ?? ""}
     if (result.filled.length === 0) return false;
     if (entry.applied === void 0 || !sameAnswer(entry.applied, before)) entry.original = before;
     entry.applied = readQuestionAnswer(id, q.kind, review2.doc);
-    quizPatch(id, { status: "answered", answer: entry.applied.join(q.kind === "blank" ? " | " : ","), note: "已审核并应用" });
+    quizPatch(id, {
+      status: "answered",
+      answer: entry.applied.join(q.kind === "blank" ? " | " : ","),
+      incomplete: !isAnswerComplete(q, entry.applied),
+      note: "已审核并应用"
+    });
     return true;
   }
   function undoReviewedAnswers(id) {
@@ -4963,7 +4974,13 @@ ${options.desc ?? ""}
       if (id !== void 0 && entry.question.id !== id) continue;
       if (undoReviewAnswer(review2, entry)) {
         restored += 1;
-        quizPatch(entry.question.id, { status: "review", answer: entry.suggestion ?? "", note: "已恢复回填前的答案" });
+        const q = entry.question;
+        quizPatch(q.id, {
+          status: "review",
+          answer: entry.suggestion ?? "",
+          incomplete: !isAnswerComplete(q, readQuestionAnswer(q.id, q.kind, review2.doc)),
+          note: "已恢复回填前的答案"
+        });
       }
     }
     return restored;
@@ -4974,8 +4991,13 @@ ${options.desc ?? ""}
     if (review2 === null || entry === void 0 || isQuizRunning()) return false;
     const q = entry.question;
     const values = readQuestionAnswer(id, q.kind, review2.doc);
-    if (values.length === 0 || values.some((value) => value.trim() === "") || q.kind === "blank" && q.blankCount && q.blankCount !== values.length) return false;
-    quizPatch(id, { status: "answered", answer: values.join(q.kind === "blank" ? " | " : ","), note: "已人工核对" });
+    if (!isAnswerComplete(q, values)) return false;
+    quizPatch(id, {
+      status: "answered",
+      answer: values.join(q.kind === "blank" ? " | " : ","),
+      incomplete: false,
+      note: "已人工核对"
+    });
     return true;
   }
   function lettersOf2(answer) {
@@ -5027,6 +5049,15 @@ ${options.desc ?? ""}
   }
   function readAnswer(q, run) {
     return readQuestionAnswer(q.id, q.kind, run.doc);
+  }
+  function isAnswerComplete(question, values) {
+    return values.length > 0 && values.every((value) => value.trim() !== "") && (question.kind !== "blank" || !question.blankCount || values.length === question.blankCount);
+  }
+  function auditAnswers(questions, run) {
+    run.checkPage();
+    const incomplete = new Set(questions.filter((q) => !isAnswerComplete(q, readAnswer(q, run))).map((q) => q.id));
+    quizSetIncomplete(incomplete);
+    return incomplete.size;
   }
   function summarizeFailures(outcomes) {
     const bad = outcomes.filter((o) => o.answer === "");
@@ -5226,14 +5257,7 @@ ${options.desc ?? ""}
     }
     const review2 = preserve ? priorReview : openReview(tid, run.doc, run.isCurrentPage, all);
     const initial = new Map(all.map((q) => [q.id, readAnswer(q, run)]));
-    const already = all.filter((q) => {
-      const current2 = initial.get(q.id) ?? [];
-      if (q.kind === "blank") {
-        const slots = q.blankCount || current2.length;
-        return slots > 0 && slots === current2.length && current2.every((value) => value.trim() !== "");
-      }
-      return current2.length > 0 || q.studentAnswer.length > 0;
-    });
+    const already = all.filter((q) => isAnswerComplete(q, initial.get(q.id) ?? []));
     const alreadyIds = new Set(already.map((q) => q.id));
     const selected = typeof intent === "object" ? new Set(intent.ids) : null;
     const todo = all.filter((q) => isAnswerable(q.kind) && (selected === null ? !alreadyIds.has(q.id) : selected.has(q.id)));
@@ -5339,7 +5363,7 @@ ${options.desc ?? ""}
         applied2.delete(qid);
         const entry = review2.entries.get(qid);
         if (entry !== void 0) delete entry.applied;
-        quizPatch(qid, { status: "pending", answer: "", note: "答案已清除" });
+        quizPatch(qid, { status: "pending", answer: "", incomplete: true, note: "答案已清除" });
         refreshButtons();
         log10.info(`清除第 ${qid} 题的答案（${how}）`);
       },
@@ -5351,7 +5375,7 @@ ${options.desc ?? ""}
           applied2.delete(q.id);
           const entry = review2.entries.get(q.id);
           if (entry !== void 0) delete entry.applied;
-          quizPatch(q.id, { status: "pending", answer: "", note: "答案已清除" });
+          quizPatch(q.id, { status: "pending", answer: "", incomplete: true, note: "答案已清除" });
         }
         refreshButtons();
         log10.info("清除全部答案");
@@ -5362,33 +5386,40 @@ ${options.desc ?? ""}
     };
     refreshButtons();
     const filled = answers.size;
+    const pendingResult = {
+      total: all.length,
+      alreadyAnswered: already.length,
+      answered: filled,
+      filled,
+      submitted: false,
+      commit: null,
+      retried: 0
+    };
+    const incomplete = auditAnswers(all, run);
+    const reportIncomplete = (count) => {
+      const message = `已检查 ${all.length} 道题，${count} 道为空或未填完整。请在【监视】定位并补齐后提交。`;
+      quizPhase("reviewing", message);
+      if (auto || intent === "submit") noticePost(message, "warn");
+    };
+    if (incomplete > 0) {
+      reportIncomplete(incomplete);
+      return pendingResult;
+    }
     if (!auto && intent !== "submit") {
-      if (intent !== "draft") quizPhase("reviewing", "请到【监视】核对答案，再决定是否提交");
-      return {
-        total: all.length,
-        alreadyAnswered: already.length,
-        answered: answers.size,
-        filled,
-        submitted: false,
-        commit: null,
-        retried: 0
-      };
+      if (intent !== "draft") quizPhase("reviewing", `已检查 ${all.length} 道题，全部已填写。请到【监视】核对答案，再决定是否提交`);
+      return pendingResult;
     }
     const failure = summarizeFailures(failures);
-    const complete = all.filter((question) => {
-      const values = readAnswer(question, run);
-      return values.length > 0 && values.every((value) => value.trim() !== "") && (question.kind !== "blank" || !question.blankCount || values.length === question.blankCount);
-    }).length;
     const reviewCount = monitorState().quiz?.questions.filter((q) => q.status === "review").length ?? 0;
     const bodyLines = [
-      `当前页面：${complete}/${all.length} 道题已填完整，${all.length - complete} 道为空或未填完整。`
+      `当前页面：${all.length}/${all.length} 道题已填完整。`
     ];
     if (reviewCount > 0) bodyLines.push(`${reviewCount} 道题有待核对的建议。`);
     if (skippedKind > 0) bodyLines.push(`跳过 ${skippedKind} 道主观题（名词解释/问答/论述）。`);
     if (filled < todo.length) bodyLines.push(`有 ${todo.length - filled} 道没填进去（见【监视】页的逐题表）。`);
     if (failure !== "") bodyLines.push(failure);
     bodyLines.push("");
-    bodyLines.push("点【开始提交】后脚本会点站点的提交按钮，接着会弹人机验证码，需要你手动点一下。");
+    bodyLines.push("点【开始提交】后，请手动完成站点验证码。验证成功后站点会继续提交，脚本会等待交卷结果。");
     bodyLines.push("未通过时，脚本可重答本次填入的低分题。再次提交前会请你确认。");
     checkVideoQuizClosed();
     quizPhase("confirming", `已填入 ${filled} 道，等你确认提交`);
@@ -5418,6 +5449,11 @@ ${options.desc ?? ""}
         cancelled: true
       };
     }
+    const remaining = auditAnswers(all, run);
+    if (remaining > 0) {
+      reportIncomplete(remaining);
+      return pendingResult;
+    }
     buttons.remove();
     const first = await submitAndRead(run);
     let commit = first.commit;
@@ -5426,6 +5462,11 @@ ${options.desc ?? ""}
       const r = await retryLowScore(commit, all, answers, priorVotes, cfg, run, applied2, review2, execution);
       retried = r.retried;
       if (r.changed > 0) {
+        const retryIncomplete = auditAnswers(all, run);
+        if (retryIncomplete > 0) {
+          reportIncomplete(retryIncomplete);
+          return { ...pendingResult, submitted: true, commit, retried, cancelled: true };
+        }
         checkVideoQuizClosed();
         quizPhase("confirming", `已修改 ${r.changed} 道题，等待你确认再次提交`);
         const reconfirmation = host.confirm({
@@ -5438,6 +5479,11 @@ ${options.desc ?? ""}
         const resubmit = await reconfirmation;
         run.checkPage();
         if (resubmit) {
+          const retryRemaining = auditAnswers(all, run);
+          if (retryRemaining > 0) {
+            reportIncomplete(retryRemaining);
+            return { ...pendingResult, submitted: true, commit, retried, cancelled: true };
+          }
           const again = await submitAndRead(run);
           if (again.submitted) commit = again.commit;
         } else {
@@ -6910,7 +6956,7 @@ ${detail}
       "select",
       { class: "sztb-input", attrs: { "aria-label": "筛选题目" } },
       el("option", { text: "全部题目", attrs: { value: "all" } }),
-      el("option", { text: "待核对或失败", attrs: { value: "attention" } })
+      el("option", { text: "需处理的题目", attrs: { value: "attention" } })
     );
     let busy = false;
     let disposed = false;
@@ -7038,8 +7084,8 @@ ${quiz2.message}` : "");
           list2.appendChild(row3.node);
         }
         const entry = entries2?.get(q.qid);
-        row3.node.hidden = filter.value === "attention" && q.status !== "review" && q.status !== "failed";
-        const title = `第 ${q.no} 题 · ${q.typeText || "题目"} · ${QUESTION_STATUS_TEXT[q.status]}`;
+        row3.node.hidden = filter.value === "attention" && !q.incomplete && q.status !== "review" && q.status !== "failed";
+        const title = `第 ${q.no} 题 · ${q.typeText || "题目"} · ${QUESTION_STATUS_TEXT[q.status]}` + (q.incomplete ? " · 未填完整" : "");
         if (row3.title.textContent !== title) row3.title.textContent = title;
         const details = [
           q.answer ? `答案 ${q.answer}` : "",
@@ -12130,9 +12176,9 @@ ${text2}
 
   // src/main.ts
   var log31 = scoped("main");
-  var VERSION = true ? "1.2.5" : "0.0.0-dev";
-  var BUILD_TIME = true ? "2026-11-11T11:04:58.462Z" : null;
-  var BUILD_NO = true ? 12 : null;
+  var VERSION = true ? "1.2.6" : "0.0.0-dev";
+  var BUILD_TIME = true ? "2026-11-12T01:54:59.394Z" : null;
+  var BUILD_NO = true ? 14 : null;
   var VERSION_LABEL = BUILD_NO === null ? `v${VERSION}` : `v${VERSION}#${BUILD_NO}`;
   function wireSites() {
     registerSites();
