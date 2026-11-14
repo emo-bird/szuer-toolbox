@@ -9,6 +9,7 @@ import { el, clear } from '../../utils/dom.ts';
 import { copyText } from '../../utils/clipboard.ts';
 import {
   entries,
+  dump,
   formatEntry,
   subscribe,
   setLevel,
@@ -24,8 +25,7 @@ const LEVELS: LogLevel[] = ['debug', 'info', 'warn', 'error'];
 
 /** 复制全文。共用 `copyText()`：GM_setClipboard → execCommand → 剪贴板 API 三条路依次退。 */
 async function copyAll(): Promise<void> {
-  const text = entries().map(formatEntry).join('\n');
-  await copyText(text);
+  await copyText(dump());
 }
 
 const tabCss = `
@@ -144,7 +144,7 @@ function renderTab(root: HTMLElement): () => void {
     return el('div', {
       class: 'sztb-log-line',
       text: formatEntry(entry),
-      data: { level: entry.level },
+      data: { level: entry.level, seq: String(entry.seq) },
     });
   }
 
@@ -159,12 +159,10 @@ function renderTab(root: HTMLElement): () => void {
     if (count > 0) return;
 
     const buffered = rawCount();
-    const shown = entries().length;
-    const filtered = buffered - shown;
     emptyHint.textContent =
       buffered === 0
         ? '暂无日志。'
-        : `当前没有等级 ≥ ${getLevel()} 的日志（缓冲里另有 ${filtered} 条被过滤掉了）。`;
+        : `当前没有等级 ≥ ${getLevel()} 的日志（缓冲里另有 ${buffered} 条被过滤掉了）。`;
   }
 
   function repaint(): void {
@@ -180,16 +178,13 @@ function renderTab(root: HTMLElement): () => void {
 
   repaint();
   const off = subscribe((entry) => {
-    // core/log 现在一律入缓冲（v0.9），所以这里必须自己判等级：
-    // 低于当前显示门槛的条目不进 DOM，但**留在缓冲里**，切回低等级能看到。
-    if (!passesLevel(entry.level)) return;
-    if (pre.style.display === 'none') pre.style.display = '';
-    emptyHint.style.display = 'none';
-    pre.appendChild(line(entry));
-    // 缓冲满了之后 core/log 会丢最老的，这里同步保证 DOM 不会无限增长
-    if (pre.childElementCount > 520) pre.firstElementChild?.remove();
-    // 新需求：停在底部时新日志自动到底；正在往上翻则不动
-    if (autoScroll) scrollToBottom();
+    const first = pre.firstElementChild as HTMLElement | null;
+    const evicted = first !== null && Number(first.dataset['seq']) <= entry.seq - rawCount();
+    if (evicted) first.remove();
+    const shown = passesLevel(entry.level);
+    if (shown) pre.appendChild(line(entry));
+    if (evicted || shown || pre.childElementCount === 0) syncEmptyHint();
+    if ((evicted || shown) && visible && autoScroll) scrollToBottom();
   });
 
   return () => {

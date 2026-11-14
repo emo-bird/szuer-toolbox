@@ -1,7 +1,9 @@
-import { chatDetailed, chatUrl, LlmError, type LlmConfig } from './llm.ts';
+import { chatDetailed, chatUrl, LlmError, prepareLlmPrompt, type LlmCitation, type LlmConfig, type LlmUsage } from './llm.ts';
+import { DEEPSEEK_FLASH, DEEPSEEK_PRO, deepSeekFileExpired, deepSeekModel, isDeepSeekEndpoint } from './deepseek.ts';
 import { MAX_SAMPLES, parseModelAnswer } from './parse.ts';
 import { buildPrompt, TEMPLATES, type PromptTemplate } from './prompts.ts';
 import { questionInputIssue, type ExamQuestion } from './paper.ts';
+import { loadExamAsset } from './asset-image.ts';
 import { getCachedAnswer, setCachedAnswer } from './answer-cache.ts';
 import { readRunnerSettings, type RunnerSettings } from './runner-settings.ts';
 
@@ -12,6 +14,8 @@ export interface ExecutionSnapshot {
   readonly requests: number;
   readonly totalTokens: number;
   readonly usageResponses: number;
+  readonly searches: number;
+  readonly fetches: number;
   readonly budget: number;
   readonly phase: 'requesting' | 'retrying' | 'parsing' | 'cache' | 'idle';
   readonly pending: number;
@@ -25,7 +29,7 @@ export interface AnswerExecution {
   readonly terminalError: string;
   readonly retryAt: number;
   startRequest(): boolean;
-  finishRequest(tokens?: number): void;
+  finishRequest(usage?: LlmUsage): void;
   reportParsing(): void;
   setWaiting(waiting: boolean): void;
   reportCacheHit(): void;
@@ -40,13 +44,15 @@ export function createAnswerExecution(
   let requests = 0;
   let totalTokens = 0;
   let usageResponses = 0;
+  let searches = 0;
+  let fetches = 0;
   let pending = 0;
   let retrying = 0;
   let cacheHits = 0;
   let terminalError = '';
   let retryAt = 0;
   const snapshot = (phase: ExecutionSnapshot['phase']): ExecutionSnapshot => ({
-    requests, totalTokens, usageResponses, budget: settings.budget, phase, pending, retrying, cacheHits,
+    requests, totalTokens, usageResponses, searches, fetches, budget: settings.budget, phase, pending, retrying, cacheHits,
   });
   const idlePhase = (): ExecutionSnapshot['phase'] => pending > 0 ? 'requesting' : retrying > 0 ? 'retrying' : 'idle';
   const emit = (phase: ExecutionSnapshot['phase']): void => {
@@ -64,12 +70,18 @@ export function createAnswerExecution(
       emit('requesting');
       return true;
     },
-    finishRequest(tokens) {
+    finishRequest(usage) {
       pending -= 1;
+      const tokens = usage?.totalTokens ?? (
+        usage?.promptTokens !== undefined && usage.completionTokens !== undefined
+          ? usage.promptTokens + usage.completionTokens : undefined
+      );
       if (tokens !== undefined && Number.isSafeInteger(tokens) && tokens >= 0) {
         totalTokens += tokens;
         usageResponses += 1;
       }
+      searches += usage?.searches ?? 0;
+      fetches += usage?.fetches ?? 0;
       emit(idlePhase());
     },
     reportParsing() { emit('parsing'); },
@@ -105,6 +117,7 @@ export interface AnswerOutcome {
   readonly note?: string;
   readonly review?: boolean;
   readonly explanation?: string;
+  readonly citations?: readonly LlmCitation[];
   readonly cached?: boolean;
   readonly unsupported?: boolean;
 }
@@ -121,7 +134,7 @@ export interface AnswerOneOptions {
   readonly maxRequests?: number;
 }
 
-export interface AnswerProgress {
+interface AnswerProgress {
   readonly index: number;
   readonly total: number;
   readonly question: ExamQuestion;
@@ -151,6 +164,7 @@ function shuffledTemplates(): PromptTemplate[] {
 interface Vote {
   readonly answer: string;
   readonly explanation?: string;
+  readonly citations?: readonly LlmCitation[];
 }
 
 function tally(votes: readonly Vote[]): { winner?: Vote; count: number; agreed: boolean } {
@@ -171,6 +185,7 @@ async function cacheKey(q: ExamQuestion, cfg: LlmConfig, settings: RunnerSetting
   const input = JSON.stringify([
     'answer-v1', chatUrl(cfg.baseUrl), cfg.profileId ?? '', cfg.model,
     cfg.responseFormat ?? 'text', settings.explain, settings.reviewModel,
+    cfg.deepSeek ?? null,
     q.id, q.kind, q.typeText, q.stem, q.options, q.blankCount ?? 0,
   ]);
   const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input));
@@ -188,6 +203,7 @@ function failurePolicy(err: unknown): { retry: boolean; wait?: number; global: b
   if (!(err instanceof LlmError)) {
     return { retry: err instanceof Error && (err.name === 'TimeoutError' || err instanceof TypeError), global: false };
   }
+  if (err.category === 'refusal' || err.category === 'incomplete') return { retry: false, global: false };
   if (err.category === 'config' || err.category === 'quota' || err.category === 'auth' ||
       err.category === 'not-found' || err.category === 'format') {
     return { retry: false, global: true };
@@ -226,40 +242,50 @@ async function askOnce(
   exclude: string,
   opts: AnswerOneOptions,
   execution: AnswerExecution,
+  images: readonly string[],
   review = false,
 ): Promise<AskResult> {
   let requests = 0;
   let error = '';
   let delay = 0;
-  const prompt = buildPrompt([question], template, exclude || undefined, cfg.responseFormat, execution.settings.explain);
-  const images = cfg.vision === true ? question.images?.map(({ dataUrl }) => dataUrl) : undefined;
+  const file = isDeepSeekEndpoint(cfg.baseUrl) ? cfg.deepSeek?.referenceFile : undefined;
+  let prompt: string;
+  try {
+    prompt = prepareLlmPrompt(cfg, buildPrompt([question], template, exclude || undefined, cfg.responseFormat, execution.settings.explain));
+  } catch (err) {
+    if (!(err instanceof LlmError)) throw err;
+    return { vote: null, requests, error: err.message, terminal: true };
+  }
   for (let attempt = 0; attempt < (review ? 1 : ASK_ATTEMPTS); attempt += 1) {
     opts.signal?.throwIfAborted();
     await waitBeforeRequest(execution, delay, opts.signal);
     opts.signal?.throwIfAborted();
+    if (file && deepSeekFileExpired(file)) {
+      return { vote: null, requests, error: '作答参考文件已过期，请重新上传或移除后重试', terminal: true };
+    }
     if (!execution.startRequest()) {
       return { vote: null, requests, error: execution.terminalError || '本次作答已达到请求预算', terminal: true };
     }
     requests += 1;
-    let tokens: number | undefined;
+    let usage: LlmUsage | undefined;
     try {
       const result = await chatDetailed(cfg, prompt, opts.signal, {
         ...(cfg.responseFormat === 'json' ? { responseFormat: 'json' } : {}),
-        ...(images?.length ? { images } : {}),
+        ...(images.length > 0 ? { images } : {}),
+        ...(file ? { fileId: file.id } : {}),
       });
-      const usage = result.usage;
-      tokens = usage?.totalTokens ?? (
-        usage?.promptTokens !== undefined && usage.completionTokens !== undefined
-          ? usage.promptTokens + usage.completionTokens : undefined
-      );
+      usage = result.usage;
       opts.signal?.throwIfAborted();
       execution.reportParsing();
       const vote = parseModelAnswer(result.content, question);
-      if (vote !== null && vote.answer !== exclude) return { vote, requests, error: '', terminal: false };
+      if (vote !== null && vote.answer !== exclude) {
+        return { vote: { ...vote, ...(result.citations ? { citations: result.citations } : {}) }, requests, error: '', terminal: false };
+      }
       error = vote === null ? '模型未返回有效答案格式' : '模型重复了已排除的答案';
       opts.onWarn?.(error);
       delay = 1000 * 2 ** attempt;
     } catch (err) {
+      if (err instanceof LlmError) usage = err.usage;
       opts.signal?.throwIfAborted();
       error = err instanceof Error ? err.message : String(err);
       opts.onWarn?.(error);
@@ -269,7 +295,7 @@ async function askOnce(
       delay = Math.max(policy.wait ?? 0, 1000 * 2 ** attempt);
       if (err instanceof LlmError && (err.status === 429 || policy.wait !== undefined)) execution.postpone(delay);
     } finally {
-      execution.finishRequest(tokens);
+      execution.finishRequest(usage);
     }
   }
   return { vote: null, requests, error, terminal: false };
@@ -294,9 +320,30 @@ export async function answerOne(
   });
   const issue = questionInputIssue(question, cfg.vision === true);
   if (issue !== null) return deliver({ unsupported: true, error: issue });
+  const official = isDeepSeekEndpoint(cfg.baseUrl);
+  const file = official ? cfg.deepSeek?.referenceFile : undefined;
+  if (file && deepSeekFileExpired(file)) {
+    return deliver({ error: '作答参考文件已过期，请重新上传或移除后重试' });
+  }
+  if (file && deepSeekModel(cfg.model.trim()) !== DEEPSEEK_FLASH) {
+    return deliver({ error: '参考文件需要 DeepSeek Flash，请修改模型方案后重试' });
+  }
+  if (official && deepSeekModel(cfg.model.trim()) === DEEPSEEK_PRO && question.images?.length) {
+    return deliver({ unsupported: true, error: 'DeepSeek V4 Pro 不支持图片输入，请使用 deepseek-flash' });
+  }
+
+  let images: string[];
+  try {
+    images = await Promise.all((question.images ?? []).map((image) =>
+      image.dataUrl ?? loadExamAsset(image.assetUrl, opts.signal)));
+  } catch (err) {
+    opts.signal?.throwIfAborted();
+    const reason = err instanceof Error && err.name !== 'TimeoutError' ? err.message : '优课图片下载超时';
+    return deliver({ error: reason });
+  }
 
   let key: string | undefined;
-  if (settings.cache && !retryMode && !question.images?.length) {
+  if (settings.cache && !retryMode && !question.images?.length && !cfg.deepSeek?.search && !cfg.deepSeek?.readUrl) {
     try { key = await cacheKey(question, cfg, settings); } catch { /* 无摘要能力时照常请求 */ }
   }
   opts.signal?.throwIfAborted();
@@ -313,7 +360,7 @@ export async function answerOne(
   const rounds = Math.max(1, Math.min(retryMode ? 2 : MAX_SAMPLES, opts.maxRequests ?? MAX_SAMPLES));
   let newVotes = 0;
   for (const template of pool.slice(0, rounds)) {
-    const result = await askOnce(question, cfg, template, exclude, opts, execution);
+    const result = await askOnce(question, cfg, template, exclude, opts, execution, images);
     requests += result.requests;
     samples.push(result.vote?.answer ?? null);
     if (result.vote === null) {
@@ -341,8 +388,10 @@ export async function answerOne(
 
   const model = settings.reviewModel;
   const template = TEMPLATES[0];
-  if (new Set(votes.map((vote) => vote.answer)).size > 1 && model && model !== cfg.model && template !== undefined) {
-    const result = await askOnce(question, { ...cfg, model }, template, exclude, opts, execution, true);
+  const differentModel = official ? deepSeekModel(model) !== deepSeekModel(cfg.model.trim()) : model !== cfg.model;
+  const canReviewImages = !official || images.length === 0 || deepSeekModel(model) !== DEEPSEEK_PRO;
+  if (new Set(votes.map((vote) => vote.answer)).size > 1 && model && differentModel && canReviewImages && !file && template !== undefined) {
+    const result = await askOnce(question, { ...cfg, model }, template, exclude, opts, execution, images, true);
     requests += result.requests;
     samples.push(result.vote?.answer ?? null);
     if (result.vote !== null) {
@@ -350,7 +399,8 @@ export async function answerOne(
     }
     return deliver({ ...winner, review: true, note: `${note}，复核未完成`, error: result.error });
   }
-  return deliver({ ...winner, review: true, note: `${note}，请人工核对` });
+  return deliver({ ...winner, review: true, note: file && model
+    ? `${note}，参考文件仅支持 Flash，请人工核对` : `${note}，请人工核对` });
 }
 
 /** 并发作答，共享任务预算。结果按入参顺序返回。 */

@@ -84,6 +84,7 @@ export interface QuestionProgress {
   /** 备注：重答模式会说「模型没听排除」之类的 */
   readonly note: string;
   readonly explanation?: string;
+  readonly citations?: readonly import('./llm.ts').LlmCitation[] | undefined;
   readonly cached?: boolean;
   readonly incomplete?: boolean;
 }
@@ -110,7 +111,7 @@ export interface CourseProgress {
 /** 答题阶段（监视页顶部一句话） */
 export type QuizPhase = 'idle' | 'fetching' | 'answering' | 'filling' | 'reviewing' | 'confirming' | 'submitting' | 'retrying' | 'done' | 'error';
 
-export interface QuizProgress {
+interface QuizProgress {
   readonly tid: string;
   readonly total: number;
   /** 已处理的题数（含失败、待核对与跳过） */

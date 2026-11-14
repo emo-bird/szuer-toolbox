@@ -153,14 +153,14 @@ export interface SiteAdapter {
 }
 
 /** 启动期上下文：此时还没有悬浮窗，也没有 DOM */
-export interface SiteEarlyContext {
+interface SiteEarlyContext {
   readonly adapter: SiteAdapter;
   /** 启动时的 URL；hash 路由站点后续变化由 main 的 watchNavigation 负责 */
   readonly url: URL;
 }
 
 /** 站点初始化上下文 */
-export interface SiteInitContext {
+interface SiteInitContext {
   readonly adapter: SiteAdapter;
   /** 当前页是否命中 `pages`（true = 已自动展开） */
   readonly isFeaturePage: boolean;

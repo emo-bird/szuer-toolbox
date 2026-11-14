@@ -26,7 +26,7 @@ import { scoped } from '../../common/core/log.ts';
 import { isEnabled } from '../../common/core/settings.ts';
 import type { PanelApi } from '../types.ts';
 
-import { sleep, gotoPoint, waitVideoEnd, taskLabel, publishProgress, pointLabel, VIEWER_SEL, type Task } from './takeover-utils.ts';
+import { sleep, gotoPoint, waitVideoEnd, taskLabel, publishProgress, VIEWER_SEL, type Task } from './takeover-utils.ts';
 import { quizTidOnPage, runQuizAnswer, type AiQuizResult } from './ai/index.ts';
 import { prepareQuizAlertSound } from './ai/verification-notice.ts';
 import { hasOpenVideoQuiz } from './video-quiz.ts';
@@ -54,14 +54,6 @@ const log = scoped('uooc/takeover');
 // ------------------------------------------------------------- 常量
 
 /**
- * 同一个任务点**连续**被挑中这么多次还没往下走 → 判定卡死，弹窗停下。
- *
- * 正常路径下**不该触发**（视频走完两轮直接 `fatal` 返回，跳过的点都进了
- * `skipped` 不会再被挑中）。留着是防「某条分支忘了 return」这类改错，
- * 免得变成整夜空转。
- */
-const STUCK_LIMIT = 3;
-/**
  * 测验最多重做几轮（含首次）—— 「未达标就要重做」（用户 2026-10-08 拍板）。
  *
  * 一轮 = 一次完整的 `runQuizAnswer`（它内部已经带「重答低分题再交一次」）。
@@ -84,23 +76,9 @@ export interface TakeoverStatus {
   readonly text: string;
 }
 
-let running = false;
 let statusText = IDLE_TEXT;
-/** 本次运行的取消令牌；同时也是「只允许跑一个」的锁 */
-type TakeoverToken = { cancelled: boolean; controller: AbortController };
-let token: TakeoverToken | null = null;
+let controller: AbortController | null = null;
 const listeners = new Set<() => void>();
-
-/**
- * 「本次接管已经弹过一次致命弹窗」的守卫。
- *
- * `fatal` 是 async、且多路 `void fatal(...)`（循环内分支 + 顶层 catch），
- * 不加守卫会出现两条不同 fatal 依次调用：`dedupeClass` 只防了遮罩叠加，
- * 状态行 `statusText` 是 last-writer-wins，后到的会把先到的覆盖掉。
- * 这里保证**一次接管最多弹一条**；在「开始接管 / 停止接管」处复位
- * （不在 `release()` 里复位——`release()` 正是 `fatal` 自己调用的，放那里会立刻失效）。
- */
-let fatalShown = false;
 
 function notify(): void {
   for (const fn of [...listeners]) {
@@ -121,7 +99,7 @@ function setStatus(text: string, kind: NoticeKind = 'info'): void {
 }
 
 export function takeoverStatus(): TakeoverStatus {
-  return { running, text: statusText };
+  return { running: controller !== null, text: statusText };
 }
 
 /** 订阅状态变化，返回退订函数（【接管】页靠 `root.isConnected` 退订） */
@@ -135,18 +113,15 @@ export function subscribeTakeover(fn: () => void): () => void {
 /** 开始接管。**立刻返回**，循环在后台跑 */
 export function takeoverStart(host: PanelApi): void {
   prepareQuizAlertSound();
-  if (running) {
+  if (controller !== null) {
     log.warn('接管已经在跑，这次【开始接管】被忽略');
     return;
   }
-  // 新的一轮允许再弹一次致命弹窗
-  fatalShown = false;
-  const t = { cancelled: false, controller: new AbortController() };
-  token = t;
-  running = true;
+  controller = new AbortController();
+  const signal = controller.signal;
   setStatus('接管中：正在读取课程目录…');
-  void loop(host, t).catch((err) => {
-    if (t.cancelled) return;
+  void loop(host, signal).catch((err) => {
+    if (controller?.signal !== signal) return;
     const detail = err instanceof Error ? err.message : String(err);
     log.error('接管循环异常退出', detail);
     // 循环自己抛出来的（不该发生）也要把面板解开，否则按钮会一直显示「停止」
@@ -156,22 +131,17 @@ export function takeoverStart(host: PanelApi): void {
 
 /** 【停止接管】：立刻停，不等收尾 */
 export function takeoverStop(): void {
-  const t = token;
-  if (t === null) return;
-  t.cancelled = true;
-  t.controller.abort();
+  if (controller === null) return;
+  controller.abort();
   release();
   setStatus(IDLE_TEXT);
-  // 这一轮已经收场，下次开始接管可再弹
-  fatalShown = false;
 }
 
 // ------------------------------------------------------------- 收尾
 
 /** 把「在跑」的状态收掉（不改状态行文字） */
 function release(): void {
-  running = false;
-  token = null;
+  controller = null;
   setCourseProgress(null);
 }
 
@@ -188,8 +158,6 @@ function stop(text: string): void {
  * 理由：这些条件都需要人看一眼才知道怎么办。
  */
 async function fatal(host: PanelApi, status: string, body: string): Promise<void> {
-  if (fatalShown) return;
-  fatalShown = true;
   release();
   // `'warn'` 会让这条提示在右上角**常驻**（带「×」），错过了还能回头看
   setStatus(status, 'warn');
@@ -232,8 +200,8 @@ interface Ctx {
 }
 
 /** 拉一次树；成功返回 true。失败时该弹的窗、该停的状态都已经处理好了 */
-async function reload(ctx: Ctx, t: { cancelled: boolean }): Promise<boolean> {
-  const res = await fetchCatalogPoints({ cid: ctx.cid, shouldAbort: () => t.cancelled });
+async function reload(ctx: Ctx, signal: AbortSignal): Promise<boolean> {
+  const res = await fetchCatalogPoints({ cid: ctx.cid, signal });
   if (res.ok) {
     ctx.points = res.points;
     return true;
@@ -244,8 +212,7 @@ async function reload(ctx: Ctx, t: { cancelled: boolean }): Promise<boolean> {
   return false;
 }
 
-/** 某个任务点在最新的树里还是「未完成」吗（点没了也算不再拦路） */
-async function loop(host: PanelApi, t: TakeoverToken): Promise<void> {
+async function loop(host: PanelApi, signal: AbortSignal): Promise<void> {
   // ---- ① 这是哪门课 ----
   const cid = courseIdFromLocation(location.pathname, location.hash);
   if (cid === null) {
@@ -264,7 +231,7 @@ async function loop(host: PanelApi, t: TakeoverToken): Promise<void> {
   };
 
   // ---- ② 首次取树 ----
-  const first = await fetchCatalogPoints({ cid, shouldAbort: () => t.cancelled });
+  const first = await fetchCatalogPoints({ cid, signal });
   if (!first.ok) {
     if (first.failure.kind === 'aborted') return; // 用户按的停止
     await fatalCatalog(host, first.failure, first.attempts);
@@ -279,11 +246,8 @@ async function loop(host: PanelApi, t: TakeoverToken): Promise<void> {
   }
 
   // ---- ③ 主循环 ----
-  let lastNodeId = '';
-  let stuck = 0;
-
   for (;;) {
-    if (t.cancelled) return;
+    if (signal.aborted) return;
 
     const sum = summarizeTaskPoints(ctx.points);
     const section = firstUnfinished(ctx.points, ctx.skipped);
@@ -302,19 +266,6 @@ async function loop(host: PanelApi, t: TakeoverToken): Promise<void> {
       return;
     }
 
-    stuck = section.nodeId === lastNodeId ? stuck + 1 : 1;
-    lastNodeId = section.nodeId;
-    if (stuck > STUCK_LIMIT) {
-      await fatal(
-        host,
-        `已停止 —— 「${section.name}」连续 ${STUCK_LIMIT} 轮没有进展`,
-        `同一节被连续挑中 ${STUCK_LIMIT} 次都没能往下走，判定为卡死。\n\n` +
-          `位置：${pointLabel(section)}\n形态：${section.form}\n任务点个数：${section.taskCount}\n` +
-          '这多半是本工具的 bug（而不是站点的问题），可以带着上面的信息反馈。',
-      );
-      return;
-    }
-
     // ---- 形态不支持：**只 warn 一次、跳过**，绝不为它中断整轮 ----
     if (section.form === 'unsupported') {
       log.warn(`「${section.name}」(${section.nodeId}) 的路径形态不支持，已跳过`);
@@ -323,7 +274,7 @@ async function loop(host: PanelApi, t: TakeoverToken): Promise<void> {
     }
 
     // ---- ② 资源级：这一节到底要打开哪一个（§B.5 第二段）----
-    const unit = await fetchUnitSources({ cid, point: section, shouldAbort: () => t.cancelled });
+    const unit = await fetchUnitSources({ cid, point: section, signal });
     if (!unit.ok) {
       if (unit.failure.kind === 'aborted') return; // 用户按的停止
       await fatalCatalog(host, unit.failure, unit.attempts);
@@ -348,8 +299,8 @@ async function loop(host: PanelApi, t: TakeoverToken): Promise<void> {
 
       if (kind === 'quiz') {
         // §C.2 / D1：交卷响应本身就是结论 —— **不拉树核实**
-        const q = await handleQuiz(ctx, task, t);
-        if (t.cancelled) return;
+        const q = await handleQuiz(ctx, task, signal);
+        if (signal.aborted) return;
         if (!q.ok) return; // 内部已经 fatal() 或 stop() 过了
         if (q.verdict !== 'pass') {
           await fatal(
@@ -367,8 +318,8 @@ async function loop(host: PanelApi, t: TakeoverToken): Promise<void> {
         continue;
       }
 
-      const handled = await handleVideo(ctx, task, t);
-      if (t.cancelled) return;
+      const handled = await handleVideo(ctx, task, signal);
+      if (signal.aborted) return;
       if (!handled) return; // 内部已经 fatal() 或 stop() 过了
 
       // 播到底了（`handleVideo` 内部已经等过「播完后停留」）—— 记「已处理」，
@@ -405,8 +356,7 @@ async function loop(host: PanelApi, t: TakeoverToken): Promise<void> {
     // 是资源级状态的汇总，所以「这一节都做完了」这一刻重拉，进度、终点判定与
     // 「下一个未完成的节」才会跟着往前走 —— 只在视频播完那一刻拉是查不出东西的。
     log.info(`「${section.name}」这一节处理了 ${processed} 个任务点，重拉课程树刷新进度`);
-    if (!(await reload(ctx, t))) return;
-    if (t.cancelled) return;
+    if (!(await reload(ctx, signal)) || signal.aborted) return;
     // 重拉之后站点仍标这一节未完成 ⇒ 本轮不再挑它（防死循环）；
     // 记上了的话它本来就不会再被 `firstUnfinished` 挑中，这一句是幂等的
     if (ctx.points.find((p) => p.nodeId === section.nodeId)?.finished !== true) {
@@ -419,10 +369,10 @@ async function loop(host: PanelApi, t: TakeoverToken): Promise<void> {
 // ------------------------------------------------------------- 视频
 
 /** @returns `false` = 已经收尾（停止 / 弹窗），调用方直接返回 */
-async function handleVideo(ctx: Ctx, task: Task, t: { cancelled: boolean }): Promise<boolean> {
+async function handleVideo(ctx: Ctx, task: Task, signal: AbortSignal): Promise<boolean> {
   const label = taskLabel(task);
-  if (!(await gotoPoint(task.hash, 'video', label, t))) {
-    if (t.cancelled) return false;
+  if (!(await gotoPoint(task.hash, 'video', label, signal))) {
+    if (signal.aborted) return false;
     // D1（用户拍板 a）：等不到预期元素 → 与测验同一套，弹窗 + 停
     await fatal(
       ctx.host,
@@ -465,8 +415,8 @@ async function handleVideo(ctx: Ctx, task: Task, t: { cancelled: boolean }): Pro
   }
 
   log.info(`视频「${label}」开始等播完（当前 ${video.currentTime.toFixed(1)}s / ${String(video.duration)}s）`);
-  const ended = await waitVideoEnd(video, t);
-  if (t.cancelled) return false;
+  const ended = await waitVideoEnd(video, signal);
+  if (signal.aborted) return false;
   if (!ended) {
     // 2026-10-09 用户拍板 A：**不假报成功**。原来这里靠「重拉树核实」兜住，
     // 那条路已经按用户要求删掉了 ⇒ 没等到 `ended` 就如实停下（红线：「没抛异常」≠「成功了」）
@@ -484,15 +434,15 @@ async function handleVideo(ctx: Ctx, task: Task, t: { cancelled: boolean }): Pro
   }
 
   // §C.1 第 3 步：`ended` 之后等 HOLD_AFTER_MS（= 5000），站点上报完成状态需要时间
-  await sleep(holdAfterMs(), t);
-  await waitForVideoQuizToClose(t);
-  return !t.cancelled;
+  await sleep(holdAfterMs(), signal);
+  await waitForVideoQuizToClose(signal);
+  return !signal.aborted;
 }
 
-async function waitForVideoQuizToClose(t: { cancelled: boolean }): Promise<void> {
-  if (t.cancelled || !hasOpenVideoQuiz()) return;
+async function waitForVideoQuizToClose(signal: AbortSignal): Promise<void> {
+  if (signal.aborted || !hasOpenVideoQuiz()) return;
   setStatus('等待当前视频小测关闭…');
-  while (!t.cancelled && hasOpenVideoQuiz()) await sleep(250, t);
+  while (!signal.aborted && hasOpenVideoQuiz()) await sleep(250, signal);
 }
 
 // ------------------------------------------------------------- 测验
@@ -521,7 +471,7 @@ interface QuizOutcome {
   readonly rounds: number;
 }
 
-async function handleQuiz(ctx: Ctx, task: Task, t: TakeoverToken): Promise<QuizOutcome> {
+async function handleQuiz(ctx: Ctx, task: Task, signal: AbortSignal): Promise<QuizOutcome> {
   const give = (ok: boolean, verdict: CommitVerdict | null, rounds: number): QuizOutcome => ({
     ok,
     verdict,
@@ -541,10 +491,10 @@ async function handleQuiz(ctx: Ctx, task: Task, t: TakeoverToken): Promise<QuizO
     return give(false, null, 0);
   }
 
-  await waitForVideoQuizToClose(t);
-  if (t.cancelled) return give(false, null, 0);
-  if (!(await gotoPoint(task.hash, 'quiz', label, t))) {
-    if (t.cancelled) return give(false, null, 0);
+  await waitForVideoQuizToClose(signal);
+  if (signal.aborted) return give(false, null, 0);
+  if (!(await gotoPoint(task.hash, 'quiz', label, signal))) {
+    if (signal.aborted) return give(false, null, 0);
     await fatal(
       ctx.host,
       `已停止 —— 测验「${label}」等满等待超时还没出题`,
@@ -573,11 +523,11 @@ async function handleQuiz(ctx: Ctx, task: Task, t: TakeoverToken): Promise<QuizO
   let rounds = 0;
 
   for (let round = 1; round <= QUIZ_MAX_ROUNDS; round += 1) {
-    if (t.cancelled) return give(false, null, rounds);
+    if (signal.aborted) return give(false, null, rounds);
     rounds = round;
     setStatus(`接管中：正在作答 ${label}（第 ${round}/${QUIZ_MAX_ROUNDS} 轮）`);
-    const result: AiQuizResult | null = await runQuizAnswer(tid, ctx.host, t.controller.signal);
-    if (t.cancelled) return give(false, null, rounds);
+    const result: AiQuizResult | null = await runQuizAnswer(tid, ctx.host, signal);
+    if (signal.aborted) return give(false, null, rounds);
 
     if (result === null) {
       // 没跑起来（模型没配 / 拉题失败）—— `runQuizAnswer` 自己已经 toast 过原因了
@@ -645,7 +595,7 @@ async function handleQuiz(ctx: Ctx, task: Task, t: TakeoverToken): Promise<QuizO
     if (round === QUIZ_MAX_ROUNDS) return give(true, 'fail', rounds);
     setStatus(`接管中：测验「${label}」第 ${round} 轮没过（得分 ${commit.score}），重做…`);
     // 重做前给站点一点时间落库，也让日志好读
-    await sleep(holdAfterMs(), t);
+    await sleep(holdAfterMs(), signal);
   }
 
   return give(true, last === null ? null : last.verdict, rounds);

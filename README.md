@@ -40,7 +40,7 @@
 ## 安装与更新
 
 1. 在 Chrome、Edge 或 Firefox 中安装 Tampermonkey（篡改猴）或 Violentmonkey（暴力猴）。
-2. 打开 v1.2.6 的安装链接，在管理器弹出的页面确认安装。 [安装深大人工具箱 v1.2.6](https://raw.githubusercontent.com/Starverse032/szuer-toolbox/release-v1.2.6/dist/szuer-toolbox.user.js)
+2. 打开 v1.2.13 的安装链接，在管理器弹出的页面确认安装。 [安装深大人工具箱 v1.2.13](https://raw.githubusercontent.com/Starverse032/szuer-toolbox/release-v1.2.13/dist/szuer-toolbox.user.js)
 3. 打开或刷新优课课程页、本科选课页，点击悬浮球展开工具箱。
 
 安装后，脚本通过 `@updateURL` 从原仓库的 `master` 检查后续更新。
@@ -48,6 +48,18 @@
 ## 优课使用说明
 
 **手动作答**。打开试卷，在【AI 作答】填写接口地址、模型 ID 和接口所需的 API Key，保存方案并测试连接。点【开始作答】生成并回填答案，再到【监视】核对结果。接口支持 JSON 模式时，可在「输出格式」选择 JSON。启用内嵌图片输入会把可读取的图片随题目发往所选接口。
+
+**DeepSeek 官方接口（v1.2.8 起）**。在【AI 作答】点「填入 DeepSeek 官方配置」，填写 API Key 并保存。默认选用 `deepseek-flash`，支持题图、联网搜索、阅读公开链接和内容安全审核。纯文字题也可以手动选择 `deepseek-v4-pro`。开启联网工具时，脚本改用兼容文本请求，可在【监视】查看模型返回的来源和用量。 [DeepSeek 联网工具文档](https://api-docs.deepseek.com/zh-cn/guides/web_tools/)
+
+**思考与上下文**。每个官方方案可分别保存思考强度、最大输出 Token、文本输入上限和作答参考资料。思考强度支持跟随模型、关闭、低、高、最高；留空的最大输出 Token 由模型决定。文本输入上限按字符检查题目、作答提示和参考资料，超限会在【监视】标出。参考资料会随每题发给 DeepSeek，导出方案时会省略资料和密钥。 [DeepSeek 思考模式文档](https://api-docs.deepseek.com/zh-cn/guides/thinking_mode/)
+
+**直接引用作答参考文件**。打开对应课程的学习页，在 DeepSeek Flash 方案下点击「上传作答参考文件」，选择 PDF、Word 或 PPT 后运行上传，再点「用此文件辅助作答」。每门课程可绑定一份文件，绑定即时保存到脚本管理器，重启浏览器后仍可用。新文件在 DeepSeek 无到期时间，旧版上传的限时文件请重新上传并绑定。文档里的图表也要参与作答时，上传前选「图文混排解析」。 [DeepSeek 文件解析](https://api-docs.deepseek.com/guides/document_parsing/)
+
+「解除课程绑定」只移除当前课程的引用。「删除云端文件」需要确认，DeepSeek 确认删除后会清理本机上引用同一文件的课程绑定。 [DeepSeek 文件删除接口](https://api-docs.deepseek.com/api/delete-file/)
+
+**试卷草稿和视频设置**。草稿按试卷独立保存，保留最近 30 份，保存后 90 天到期。关闭二倍速或静音时，播放器会立即恢复被脚本锁定前的设置。
+
+**DeepSeek 独立工具**。支持手动搜索、抓取、上传文件并提问、OCR、转写音频和合成语音。可以把工具输出加入当前方案的作答参考资料。 [DeepSeek 计费文档](https://api-docs.deepseek.com/zh-cn/quick_start/pricing/)
 
 **接管课程**。在【接管】点【开始接管】。如果希望遇到测验时自动启动 AI，先在【AI 作答】打开「接管遇到测验时自动启动 AI」。这个开关和「自动提交视频小题」分别设置，均默认关闭。
 

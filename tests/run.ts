@@ -44,5 +44,6 @@ import './suites/uooc-quiz-ready.test.ts';
 import './suites/uooc-ai-run.test.ts';
 import './suites/uooc-provider.test.ts';
 import './suites/uooc-ai-runner.test.ts';
+import './suites/uooc-review.test.ts';
 
 await run();

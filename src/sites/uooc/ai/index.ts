@@ -31,7 +31,6 @@
  */
 
 import { scoped } from '../../../common/core/log.ts';
-import { safePath } from '../../../common/core/http.ts';
 import { pageOrSelf } from '../../../common/utils/page.ts';
 import type { PanelApi } from '../../types.ts';
 import { installUoocIntercept, isCommitHttpOk, waitCommit, type CommitResult } from '../intercept.ts';
@@ -44,7 +43,7 @@ import {
   readQuestionAnswer,
   type FillTarget,
 } from './fill.ts';
-import { chatUrl, type LlmConfig } from './llm.ts';
+import type { LlmConfig } from './llm.ts';
 import { fetchPaper, isAnswerable, type ExamQuestion } from './paper.ts';
 import { parseQuestionAnswer } from './parse.ts';
 import { answerOne, answerQuestions, createAnswerExecution, type AnswerExecution, type AnswerOutcome } from './runner.ts';
@@ -398,6 +397,7 @@ async function retryLowScore(
       requests: o.requests,
       samples: o.samples,
       explanation: o.explanation,
+      citations: o.citations,
       note: unchanged ? (o.note ?? (ok ? '' : '重答未能回填')) : '页面答案已修改，请人工核对',
     });
     if (ok) {
@@ -504,7 +504,7 @@ async function runQuizAnswerBody(
   intent: QuizIntent | undefined,
   auto: boolean,
 ): Promise<AiQuizResult> {
-  if (cfg !== null) log.info(`开始 AI 作答：tid=${tid}，接口=${safePath(chatUrl(cfg.baseUrl))}，模型=${cfg.model}`);
+  if (cfg !== null) log.info(`开始 AI 作答：tid=${tid}，模型=${cfg.model}`);
   const paper = await fetchPaper(tid, run.signal);
   run.checkPage();
 
@@ -586,6 +586,7 @@ async function runQuizAnswerBody(
       requests: outcome.requests,
       samples: outcome.samples,
       explanation: outcome.explanation,
+      citations: outcome.citations,
       cached: outcome.cached,
       note: !same || hasCurrentAnswer ? '保留了页面原答案，请核对建议'
         : outcome.note || outcome.error || (ok ? '' : '未能回填到当前试卷'),

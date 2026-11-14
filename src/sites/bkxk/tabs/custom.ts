@@ -22,7 +22,7 @@
  *
  * 【改完立刻重画课表】增删改只动 storage，站点 DOM 一个字节都没变 ⇒
  * `timetable.ts` 的 MutationObserver 不会触发，用户会以为「加了课却没出现」。
- * 所以每次改动都调 `refreshTimetable()`（不在课表页时它静默返回 0）。
+ * 所以每次改动都调 `refreshTimetable()`（有课表容器时才处理）。
  *
  * 【总开关】设置里的「自定义课程」（🟢）关掉时整页禁用（用户拍板 A）：
  * 只显示一行提示、表单不可填；同时 `custom.ts:readEnabledCustomCourses()` 返回空数组，
@@ -554,7 +554,7 @@ function mountCustomTab(root: HTMLElement, ctx: TabContext): void {
     renderList();
     renderConflicts();
     // 只动 storage 不会触发站点的 MutationObserver，必须主动请站点重画一次课表
-    if (refreshTimetable() > 0) log.info('已请站点重画课表（这次带的课程就是你刚改的）');
+    refreshTimetable();
   }
 
   // ── 事件 ──────────────────────────────────────────────────────────────

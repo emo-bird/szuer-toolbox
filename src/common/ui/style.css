@@ -359,6 +359,7 @@
   color: #b3730a;
 }
 
+[hidden].sztb-field,
 .sztb-field-hint[hidden] {
   display: none;
 }

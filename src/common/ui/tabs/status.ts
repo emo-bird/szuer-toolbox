@@ -7,15 +7,13 @@
  * 所以这里只声明一个 `StatusProvider` 接口，由 main 装配时把 registry 的信息喂进来。
  */
 
-import { el, clear } from '../../utils/dom.ts';
+import { el } from '../../utils/dom.ts';
 import { backendName, hasGmStorage } from '../../core/storage.ts';
 import { getIntervalMs, queueDepth, RECOMMENDED_MIN_INTERVAL_MS } from '../../core/http.ts';
 import { getLevel } from '../../core/log.ts';
 import type { TabRegistration } from '../../../sites/types.ts';
 
 export interface StatusInfo {
-  href: string;
-  host: string;
   resolution: string;
   adapterId: string | null;
   inject: boolean;
@@ -34,7 +32,7 @@ export function setStatusProvider(fn: () => StatusInfo): void {
   provider = fn;
 }
 
-function row(label: string, value: string): HTMLElement {
+function row(label: string, value: string | HTMLElement): HTMLElement {
   return el(
     'div',
     { class: 'sztb-row' },
@@ -42,59 +40,56 @@ function row(label: string, value: string): HTMLElement {
       'div',
       { class: 'sztb-row-main' },
       el('span', { class: 'sztb-row-label', text: label }),
-      el('span', { class: 'sztb-row-desc', text: value }),
+      typeof value === 'string' ? el('span', { class: 'sztb-row-desc', text: value }) : value,
     ),
   );
 }
 
-function renderTab(root: HTMLElement): () => void {
-  function repaint(): void {
-    clear(root);
-    const info = provider?.() ?? null;
-
-    if (info === null) {
-      root.appendChild(el('div', { class: 'sztb-empty', text: '状态信息尚未注入' }));
-      return;
-    }
-
-    root.appendChild(el('div', { class: 'sztb-group-title', text: '本页' }));
-    root.appendChild(row('URL', info.href));
-    root.appendChild(row('站点分派', info.resolution));
-    root.appendChild(row('命中适配器', info.adapterId ?? '（无，仅公共标签页）'));
-    root.appendChild(row('是否注入', info.inject ? '是' : '否'));
-    root.appendChild(row('自动展开', info.autoExpand ? '是' : '否'));
-    root.appendChild(row('标签页数量', String(info.tabCount)));
-
-    root.appendChild(el('div', { class: 'sztb-group-title', text: '已注册站点' }));
-    root.appendChild(
-      row(
-        '适配器',
-        info.registeredAdapters.length > 0 ? info.registeredAdapters.join('、') : '（无）',
-      ),
-    );
-
-    root.appendChild(el('div', { class: 'sztb-group-title', text: '运行环境' }));
-    root.appendChild(row('脚本版本', info.version));
-    root.appendChild(row('构建时间', info.buildTime ?? '（开发模式，未注入）'));
-    root.appendChild(row('存储后端', backendName()));
-    root.appendChild(row('GM 存储可用', hasGmStorage() ? '是' : '否（已降级）'));
-    root.appendChild(
-      row('请求间隔', `${getIntervalMs()}ms（建议不低于 ${RECOMMENDED_MIN_INTERVAL_MS}ms）`),
-    );
-    root.appendChild(row('队列排队中', String(queueDepth())));
-    root.appendChild(row('日志等级', getLevel()));
-
-    const refresh = el('button', {
-      class: 'sztb-btn',
-      text: '刷新',
-      attrs: { type: 'button' },
-      on: { click: repaint },
-    });
-    root.appendChild(refresh);
+function renderTab(root: HTMLElement): void | (() => void) {
+  const info = provider?.();
+  if (info === undefined) {
+    root.appendChild(el('div', { class: 'sztb-empty', text: '状态信息尚未注入' }));
+    return;
   }
 
+  const href = el('span', { class: 'sztb-row-desc' });
+  const interval = el('span', { class: 'sztb-row-desc' });
+  const depth = el('span', { class: 'sztb-row-desc' });
+  const level = el('span', { class: 'sztb-row-desc' });
+  function update(element: HTMLElement, value: string): void {
+    if (element.textContent !== value) element.textContent = value;
+  }
+  function repaint(): void {
+    update(href, location.href);
+    update(interval, `${getIntervalMs()}ms（建议不低于 ${RECOMMENDED_MIN_INTERVAL_MS}ms）`);
+    update(depth, String(queueDepth()));
+    update(level, getLevel());
+  }
+
+  root.append(
+    el('div', { class: 'sztb-group-title', text: '本页' }),
+    row('URL', href),
+    row('站点分派', info.resolution),
+    row('命中适配器', info.adapterId ?? '（无，仅公共标签页）'),
+    row('是否注入', info.inject ? '是' : '否'),
+    row('自动展开', info.autoExpand ? '是' : '否'),
+    row('标签页数量', String(info.tabCount)),
+    el('div', { class: 'sztb-group-title', text: '已注册站点' }),
+    row('适配器', info.registeredAdapters.join('、') || '（无）'),
+    el('div', { class: 'sztb-group-title', text: '运行环境' }),
+    row('脚本版本', info.version),
+    row('构建时间', info.buildTime ?? '（开发模式，未注入）'),
+    row('存储后端', backendName()),
+    row('GM 存储可用', hasGmStorage() ? '是' : '否（已降级）'),
+    row('请求间隔', interval),
+    row('队列排队中', depth),
+    row('日志等级', level),
+    el('button', { class: 'sztb-btn', text: '刷新', attrs: { type: 'button' }, on: { click: repaint } }),
+  );
   repaint();
-  const timer = window.setInterval(repaint, 2000);
+  const timer = window.setInterval(() => {
+    if (!document.hidden && root.dataset['active'] === 'true') repaint();
+  }, 2000);
   return () => window.clearInterval(timer);
 }
 

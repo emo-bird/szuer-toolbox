@@ -2,7 +2,7 @@ import { assert, assertEqual, describe, it } from '../harness.ts';
 import { resetQueueForTest } from '../../src/common/core/http.ts';
 import { clearAnswerCache } from '../../src/sites/uooc/ai/answer-cache.ts';
 import { answerOne, answerQuestions, createAnswerExecution } from '../../src/sites/uooc/ai/runner.ts';
-import type { ExamQuestion } from '../../src/sites/uooc/ai/paper.ts';
+import { toExamQuestion, type ExamQuestion } from '../../src/sites/uooc/ai/paper.ts';
 
 const config = { baseUrl: 'https://model.example/v1', model: 'primary', apiKey: '', timeoutMs: 500 };
 const settings = { budget: 0, explain: false, reviewModel: '', cache: false };
@@ -58,6 +58,112 @@ async function fakeModels(
 }
 
 describe('UOOC 作答执行策略', () => {
+  it('DeepSeek 作答引用已关联文件，过期或更换为不支持的模型时不发送请求', async () => {
+    const globals = globalThis as Record<string, unknown>;
+    const previous = globals['GM_xmlhttpRequest'];
+    const bodies: string[] = [];
+    globals['GM_xmlhttpRequest'] = (req: { data: string; onload(result: object): void }) => {
+      bodies.push(req.data);
+      req.onload({ status: 200, responseText: answer('A').text });
+      return { abort() {} };
+    };
+    const referenceFile = { id: 'file-api-course', name: '讲义.pdf', expiresAt: Date.now() + 60_000 };
+    const deepSeek = { thinking: 'auto' as const, search: false, readUrl: false, safety: false, referenceFile };
+    const cfg = { ...config, baseUrl: 'https://api.deepseek.com', model: 'deepseek-flash', deepSeek };
+    try {
+      const execution = createAnswerExecution(settings);
+      assertEqual((await answerOne(question, cfg, { execution })).answer, 'A');
+      assertEqual(bodies.length, 2);
+      for (const body of bodies) {
+        const parts = JSON.parse(body).messages[0].content;
+        assertEqual(parts[0].file_id, referenceFile.id);
+        assert(parts[1].text.includes(question.stem), '文件引用必须保留题干');
+      }
+      const expired = await answerOne(question, { ...cfg,
+        deepSeek: { ...deepSeek, referenceFile: { ...referenceFile, expiresAt: Date.now() - 1 } },
+      }, { execution });
+      assert(expired.error.includes('已过期'), '文件已过期需要提示');
+      const pro = await answerOne(question, { ...cfg, model: 'deepseek-v4-pro' }, { execution });
+      assert(pro.error.includes('参考文件需要 DeepSeek Flash'), 'Pro 不能发送参考文件');
+      assertEqual(execution.snapshot.requests, 2);
+      assertEqual(bodies.length, 2);
+    } finally {
+      resetQueueForTest();
+      globals['GM_xmlhttpRequest'] = previous;
+    }
+  });
+  it('DeepSeek 参考资料超限不消耗请求预算，截断的题仍统计用量', async () => {
+    const cfg = { ...config, baseUrl: 'https://api.deepseek.com', model: 'deepseek-flash',
+      deepSeek: { thinking: 'max' as const, search: true, readUrl: false, safety: false, inputLimit: 5, context: '讲义' } };
+    await fakeModels(() => ({
+      status: 200,
+      text: JSON.stringify({
+        choices: [{ finish_reason: 'length', message: { content: '1. A' } }],
+        usage: { total_tokens: 12, server_tool_use: { tool_search: 2, tool_fetch: 1 } },
+      }),
+    }), async (models) => {
+      const execution = createAnswerExecution({ ...settings, budget: 1 });
+      const tooLong = await answerOne(question, cfg, { execution });
+      assert(tooLong.error.includes('文本输入上限'), '监视须显示可处理的超限原因');
+      assertEqual(execution.snapshot.requests, 0);
+      const truncated = await answerOne(question, { ...cfg, deepSeek: { ...cfg.deepSeek, inputLimit: 3000 } }, { execution });
+      assert(truncated.error.includes('回复被截断'), '监视须显示截断原因');
+      assertEqual(truncated.answer, '');
+      assertEqual(models.length, 1);
+      assertEqual(execution.snapshot.totalTokens, 12);
+      assertEqual(execution.snapshot.searches, 2);
+      assertEqual(execution.snapshot.fetches, 1);
+    });
+  });
+
+  it('启用图片输入时读取优课公开图片，采样时重复使用同一份图像', async () => {
+    const url = 'https://assets.uooconline.com/upload/2019/08/01/example.png';
+    const parsed = toExamQuestion({
+      id: '1', type_text: '单选题', question: '<img src="' + url.replace('https:', 'http:') + '">看图作答',
+      options: { A: '甲', B: '乙' },
+    })!;
+    const globals = globalThis as Record<string, unknown>;
+    const previous = globals['GM_xmlhttpRequest'];
+    const bytes = new Uint8Array(332004);
+    bytes.set([137, 80, 78, 71, 13, 10, 26, 10]);
+    let downloads = 0;
+    let modelRequests = 0;
+    globals['GM_xmlhttpRequest'] = (req: {
+      url: string; anonymous: boolean; redirect?: string; responseType?: string; data?: string;
+      onload(result: object): void;
+    }) => {
+      if (req.url === url) {
+        downloads++;
+        assertEqual(req.anonymous, true);
+        assertEqual(req.redirect, 'error');
+        assertEqual(req.responseType, 'arraybuffer');
+        req.onload({ status: 200, finalUrl: url, responseHeaders: 'Content-Type: image/png', response: bytes.buffer });
+      } else {
+        modelRequests++;
+        const request = JSON.parse(req.data ?? '');
+        const image = request.messages[0].content.find((part: { type: string }) => part.type === 'image_url');
+        assert(image.image_url.url.startsWith('data:image/png;base64,'), '模型应收到图片数据');
+        assertEqual(atob(image.image_url.url.split(',')[1]).length, bytes.length);
+        assert(!req.data?.includes(url), '模型请求不含资源地址');
+        req.onload({ status: 200, statusText: '', responseText: answer('A').text });
+      }
+      return { abort() {} };
+    };
+    try {
+      const disabled = await answerOne(parsed, config);
+      assertEqual(disabled.unsupported, true);
+      assertEqual(downloads, 0);
+      assertEqual(modelRequests, 0);
+      const enabled = await answerOne(parsed, { ...config, vision: true });
+      assertEqual(enabled.answer, 'A');
+      assertEqual(downloads, 1);
+      assertEqual(modelRequests, 2);
+    } finally {
+      resetQueueForTest();
+      if (previous === undefined) delete globals['GM_xmlhttpRequest'];
+      else globals['GM_xmlhttpRequest'] = previous;
+    }
+  });
   it('多个并发题及后续重答共享请求预算，只统计接口实际返回的 token 用量', async () => {
     await fakeModels(() => answer('A'), async (models) => {
       const execution = createAnswerExecution({ ...settings, budget: 2 });

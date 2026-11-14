@@ -76,11 +76,8 @@ function compareToggle(a: RegisteredToggle, b: RegisteredToggle): number {
 export function isEnabled(siteId: string, toggleId: string): boolean {
   const def = toggleRegistry.get(composite(siteId, toggleId));
   if (def === undefined) return false;
-  const stored = read<boolean | null>(storageKey(siteId, toggleId), null);
-  if (stored === null) {
-    return def.risk === 'irreversible' ? false : def.default;
-  }
-  return stored;
+  const stored = read<unknown>(storageKey(siteId, toggleId), null);
+  return typeof stored === 'boolean' ? stored : def.risk !== 'irreversible' && def.default;
 }
 
 /** 写入开关状态。UI 层必须在调用本函数**之前**完成二次确认。 */
@@ -113,7 +110,7 @@ export function needsConfirm(risk: RiskLevel): boolean {
 // ------------------------------------------------------------- 普通配置项
 
 /** `kind: 'select'` 用的可选项 */
-export interface SelectOption {
+interface SelectOption {
   readonly value: string;
   readonly label: string;
 }
@@ -235,17 +232,16 @@ export function registeredSiteIds(): string[] {
 
 export function getValue<T>(siteId: string, id: string): T {
   const def = valueRegistry.get(composite(siteId, id));
-  const fallback = (def?.default ?? undefined) as T;
-  return read<T>(`value:${siteId}:${id}`, fallback);
+  if (def === undefined) return undefined as T;
+  return read<T>(`value:${siteId}:${id}`, def.default as T);
 }
 
 export function setValue(siteId: string, id: string, value: unknown): void {
   write(`value:${siteId}:${id}`, value);
-  // 立刻生效（可选钩子）。钩子抛错不能连累「值已经写进去了」这个事实，
-  // 但也不能静默 —— 所以只吞掉异常，交由调用方的 UI 继续走。
+  // 生效钩子失败时保留已写入的值。
   const def = valueRegistry.get(composite(siteId, id));
   try {
-    (def?.apply as ((v: unknown) => void) | undefined)?.(value);
+    def?.apply?.(value);
   } catch {
     /* 生效钩子失败不影响已保存的值 */
   }
@@ -262,12 +258,10 @@ export function storedSettingKeys(): string[] {
  * 删掉一个配置项的存储。
  *
  * 专供**已经被删掉的配置项**收尾：它已经不在注册表里，用户没法从设置页清掉它，
- * 而键还占着存储。键不存在时什么都不做（`remove` 本身是幂等的，这里只是省一次写）。
+ * 而键还占着存储。
  */
 export function removeValue(siteId: string, id: string): void {
-  const key = `value:${siteId}:${id}`;
-  if (read<undefined>(key, undefined) === undefined) return;
-  remove(key);
+  remove(`value:${siteId}:${id}`);
 }
 
 /** 测试用：清空注册表（不动存储） */

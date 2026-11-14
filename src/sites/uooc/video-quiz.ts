@@ -183,33 +183,21 @@ function videoQuizAnswers(): Map<string, readonly string[]> {
   return out;
 }
 
-/** 一次作答的结果，只用于日志与返回值 */
-export interface VideoQuizOutcome {
-  /** 这一层里认出来的题数 */
-  readonly questions: number;
-  /** 成功点选的题数 */
-  readonly answered: number;
-  /** 有没有点下去「确定」 */
-  readonly sure: boolean;
-}
-
 /**
  * 处理一个弹层：按 `answer_<id>` 把题对回答案 → 点选 → 点「确定」。
- *
- * 不抛异常。可能返回 `null`（这一层还没渲染出选项，等下一轮扫描再看）。
  */
 async function answerVideoQuizLayer(
   layer: HTMLElement,
   readyAfter: WeakMap<HTMLElement, number>,
   schedule: () => void,
-): Promise<VideoQuizOutcome | null> {
+): Promise<void> {
   const inputs = Array.from(layer.querySelectorAll<HTMLInputElement>(INPUT_SEL));
-  if (inputs.length === 0) return null; // 还没渲染出来，下一轮再说
+  if (inputs.length === 0) return; // 还没渲染出来，下一轮再说
 
   const answers = videoQuizAnswers();
   if (answers.size === 0) {
     log.warn('弹层里有题，但页面上找不到 quiz 数据（视频容器的 source 属性变了？），留给用户');
-    return null;
+    return;
   }
 
   // 按 quizId 分组：单选一组一个 input，多选一组多个
@@ -226,16 +214,16 @@ async function answerVideoQuizLayer(
   const selections = new Map<HTMLInputElement, boolean>();
   for (const [id, list] of groups) {
     const want = answers.get(id);
-    if (want === undefined) return null;
+    if (want === undefined) return;
     const wantSet = new Set(want);
     const match = list.filter((inp) => wantSet.has(inp.value.toUpperCase()));
-    if (match.length !== wantSet.size || (list.some((inp) => inp.type === 'radio') && match.length !== 1)) return null;
+    if (match.length !== wantSet.size || (list.some((inp) => inp.type === 'radio') && match.length !== 1)) return;
     for (const inp of list) {
       selections.set(inp, match.includes(inp));
     }
   }
 
-  if (selections.size === 0) return null;
+  if (selections.size === 0) return;
   let changed = false;
   for (const [inp, checked] of selections) {
     if (inp.checked !== checked && (checked || inp.type === 'checkbox')) {
@@ -246,12 +234,12 @@ async function answerVideoQuizLayer(
   if (changed || !readyAfter.has(layer)) readyAfter.set(layer, performance.now() + ANSWER_SETTLE_MS);
   if (performance.now() < (readyAfter.get(layer) ?? 0)) {
     schedule();
-    return null;
+    return;
   }
-  if ([...selections].some(([inp, checked]) => !inp.isConnected || inp.checked !== checked)) return null;
+  if ([...selections].some(([inp, checked]) => !inp.isConnected || inp.checked !== checked)) return;
 
   const sure = findConfirm(layer);
-  if (sure === undefined) return null;
+  if (sure === undefined) return;
 
   layer.setAttribute(DONE_ATTR, '1');
   sure.click();
@@ -265,7 +253,6 @@ async function answerVideoQuizLayer(
     log.warn('点了【确定】但小测弹层还在 —— 可能答案不对，交给用户处理（不重试）');
   }
 
-  return { questions: groups.size, answered: groups.size, sure: true };
 }
 
 /**

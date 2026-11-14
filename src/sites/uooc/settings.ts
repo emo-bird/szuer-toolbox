@@ -32,9 +32,12 @@
 import { registerValue, getValue as getStoredValue } from '../../common/core/settings.ts';
 import type { SiteToggleDef } from '../types.ts';
 import { scoped } from '../../common/core/log.ts';
-import { backendName, read, remove, write } from '../../common/core/storage.ts';
+import { backendName, listKeys, read, remove, write } from '../../common/core/storage.ts';
 import { validateLlmEndpoint } from './ai/llm.ts';
 import type { LlmConfig, LlmResponseFormat } from './ai/llm.ts';
+import { DEEPSEEK_FLASH, deepSeekModel, deepSeekOptions, deepSeekReferenceFile, isDeepSeekEndpoint,
+  type DeepSeekOptions, type DeepSeekReferenceFile } from './ai/deepseek.ts';
+import { courseIdFromLocation } from './catalog-model.ts';
 
 const log = scoped('uooc/settings');
 
@@ -236,6 +239,34 @@ export interface AiProfile {
   readonly concurrency: number;
   readonly responseFormat: LlmResponseFormat;
   readonly vision: boolean;
+  readonly deepSeek?: DeepSeekOptions;
+}
+
+function profileDeepSeek(baseUrl: string, value: unknown): { deepSeek?: DeepSeekOptions } {
+  const options = isDeepSeekEndpoint(baseUrl) ? deepSeekOptions(value) : undefined;
+  return options === undefined ? {} : { deepSeek: options };
+}
+
+export function referenceCourseId(page: Pick<Location, 'pathname' | 'hash'> | undefined =
+  typeof location === 'undefined' ? undefined : location): string | null {
+  if (!page || !/^\/home\/learn\/(?:index\/?$|new\/\d+(?:\/|$))/.test(page.pathname)) return null;
+  return courseIdFromLocation(page.pathname, page.hash);
+}
+
+export function courseReferenceFile(courseId: string | null): DeepSeekReferenceFile | undefined {
+  return courseId === null ? undefined : deepSeekReferenceFile(read<unknown>(`uooc:reference-file:${courseId}`, null));
+}
+
+export function setCourseReferenceFile(courseId: string, file?: DeepSeekReferenceFile): void {
+  if (file === undefined) remove(`uooc:reference-file:${courseId}`);
+  else write(`uooc:reference-file:${courseId}`, file);
+}
+
+export function removeReferenceFileBindings(fileId: string): void {
+  for (const key of listKeys()) {
+    if (key.startsWith('uooc:reference-file:') &&
+      deepSeekReferenceFile(read<unknown>(key, null))?.id === fileId) remove(key);
+  }
 }
 
 function legacyKey(id: string): string {
@@ -263,7 +294,7 @@ export function aiProfiles(): AiProfile[] {
   const profiles: AiProfile[] = [];
   for (const candidate of saved) {
     if (typeof candidate !== 'object' || candidate === null) continue;
-    const { id, name, baseUrl, model, timeoutMs, concurrency, responseFormat, vision } = candidate as Partial<AiProfile>;
+    const { id, name, baseUrl, model, timeoutMs, concurrency, responseFormat, vision, deepSeek } = candidate as Partial<AiProfile>;
     if (typeof id !== 'string' || !/^[\w-]{1,64}$/.test(id)
       || typeof name !== 'string' || typeof baseUrl !== 'string' || typeof model !== 'string'
       || typeof timeoutMs !== 'number' || !Number.isFinite(timeoutMs) || timeoutMs < 1000
@@ -272,6 +303,7 @@ export function aiProfiles(): AiProfile[] {
       id, name, baseUrl, model, timeoutMs, concurrency,
       responseFormat: responseFormat === 'json' ? 'json' : 'text',
       vision: vision === true,
+      ...profileDeepSeek(baseUrl, deepSeek),
     });
   }
   return profiles.length > 0 ? profiles : [{ ...legacyProfile(), baseUrl: '', model: '' }];
@@ -279,7 +311,7 @@ export function aiProfiles(): AiProfile[] {
 
 /** 仅导出已保存方案的公开字段，接口地址中的认证与临时参数一并移除。 */
 export function exportAiProfiles(): string {
-  const profiles = aiProfiles().map(({ id, name, baseUrl, model, timeoutMs, concurrency, responseFormat, vision }) => {
+  const profiles = aiProfiles().map(({ id, name, baseUrl, model, timeoutMs, concurrency, responseFormat, vision, deepSeek }) => {
     let endpoint = '';
     try {
       const url = new URL(baseUrl);
@@ -287,7 +319,8 @@ export function exportAiProfiles(): string {
         endpoint = `${url.origin}${url.pathname}`;
       }
     } catch { /* 无法解析的旧地址不写入导出文件 */ }
-    return { id, name, baseUrl: endpoint, model, timeoutMs, concurrency, responseFormat, vision };
+    const shareable = deepSeek === undefined ? undefined : { ...deepSeek, context: undefined, referenceFile: undefined };
+    return { id, name, baseUrl: endpoint, model, timeoutMs, concurrency, responseFormat, vision, ...profileDeepSeek(baseUrl, shareable) };
   });
   const activeId = read(AI_ACTIVE_KEY, DEFAULT_PROFILE_ID);
   const activeProfileId = profiles.some((profile) => profile.id === activeId) ? activeId : profiles[0]?.id;
@@ -345,8 +378,8 @@ export function saveAiProfile(profile: AiProfile, replacementKey?: string): void
   const sameOrigin = endpoint.url !== undefined && previous !== undefined
     && new URL(endpoint.url).origin === new URL(previous).origin;
   if (old !== undefined && !sameOrigin) setAiProfileSecret(profile.id, '');
-  const { id, name, baseUrl, model, timeoutMs, concurrency, responseFormat, vision } = profile;
-  const stored = { id, name, baseUrl, model, timeoutMs, concurrency, responseFormat, vision };
+  const { id, name, baseUrl, model, timeoutMs, concurrency, responseFormat, vision, deepSeek } = profile;
+  const stored = { id, name, baseUrl, model, timeoutMs, concurrency, responseFormat, vision, ...profileDeepSeek(baseUrl, deepSeek) };
   write(AI_PROFILES_KEY, old === undefined ? [...profiles, stored] : profiles.map((item) => item.id === id ? stored : item));
   if (replacementKey !== undefined) {
     setAiProfileSecret(id, replacementKey, endpoint.url === undefined ? undefined : new URL(endpoint.url).origin);
@@ -368,10 +401,13 @@ export function removeAiProfile(id: string): void {
  * 判据只要求「地址 + 模型名」：API Key 允许为空 —— 本地 ollama / vllm 不需要，
  * 而 OpenAI 那类会直接返回 401，报错信息已经足够清楚。
  */
-export function aiConfig(): LlmConfig | null {
+export function aiConfig(courseId = referenceCourseId()): LlmConfig | null {
   const profile = activeAiProfile();
   const endpoint = validateLlmEndpoint(profile.baseUrl);
   if (endpoint.url === undefined || profile.model.trim() === '') return null;
+  const { deepSeek } = profileDeepSeek(profile.baseUrl, profile.deepSeek);
+  const file = isDeepSeekEndpoint(profile.baseUrl) && deepSeekModel(profile.model.trim()) === DEEPSEEK_FLASH
+    ? courseReferenceFile(courseId) : undefined;
   return {
     baseUrl: profile.baseUrl,
     model: profile.model.trim(),
@@ -380,6 +416,7 @@ export function aiConfig(): LlmConfig | null {
     responseFormat: profile.responseFormat,
     profileId: profile.id,
     vision: profile.vision,
+    ...(file ? { deepSeek: { ...deepSeekOptions(deepSeek ?? {})!, referenceFile: file } } : deepSeek ? { deepSeek } : {}),
   };
 }
 

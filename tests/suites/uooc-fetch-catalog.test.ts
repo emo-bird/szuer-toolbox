@@ -230,7 +230,7 @@ describe('uooc/fetch-catalog · 重试循环', () => {
     assertEqual(res.failure.detail, 'Failed to fetch');
   });
 
-  it('shouldAbort 为真时立刻收敛为 aborted，且不再发请求', async () => {
+  it('已停止的接管不会发出目录请求', async () => {
     const { send, calls } = scripted([okResponse(null, 500)]);
     const { sleep } = fakeSleep();
     const res = await fetchCatalogPoints({
@@ -238,27 +238,37 @@ describe('uooc/fetch-catalog · 重试循环', () => {
       origin: ORIGIN,
       send,
       sleep,
-      shouldAbort: () => true,
+      signal: AbortSignal.abort(),
     });
     assert(!res.ok, '应失败');
     if (res.ok) return;
     assertEqual(res.failure.kind, 'aborted', '用户主动停止不该报成失败');
-    assertEqual(calls.length, 1, '第一次发完才发现已停止，就不要再发');
+    assertEqual(calls.length, 0);
   });
 
-  it('aborted 与真失败能分辨（弹窗只在真失败时弹）', async () => {
-    const { send } = scripted([okResponse(null, 500)]);
-    const { sleep } = fakeSleep();
+  it('停止接管会取消在途目录请求，且不重试', async () => {
+    const controller = new AbortController();
+    const { sleep, slept } = fakeSleep();
+    let requests = 0;
     const stopped = await fetchCatalogPoints({
       cid: CID,
       origin: ORIGIN,
-      send,
+      send: async (_url, _timeout, signal) => {
+        requests += 1;
+        assertEqual(signal, controller.signal);
+        return new Promise((_, reject) => {
+          signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
+          controller.abort();
+        });
+      },
       sleep,
-      shouldAbort: () => true,
+      signal: controller.signal,
     });
     assert(!stopped.ok, '应失败');
     if (stopped.ok) return;
     assert(stopped.failure.kind === 'aborted', '应判为 aborted');
+    assertEqual(requests, 1);
+    assertEqual(slept.length, 0);
   });
 
   it('成功时把原始响应一起带出来（给「未识别返回全量落档」留口子）', async () => {
@@ -474,34 +484,33 @@ describe('uooc/fetch-catalog · 资源列表取数', () => {
   });
 
   it('用户按停止 ⇒ aborted，不算失败（主循环不为它弹窗）', async () => {
-    // 口径：`shouldAbort` 只在**重试之间**被问（第一次发完就成功时不会再问，
-    // 因为那时已经没有「要不要再等 2 秒发一次」这个问题了）。
+    const controller = new AbortController();
     const { send, calls } = scripted([okResponse(null, 500)]);
     const res = await fetchUnitSources({
       cid: CID,
       point: point(),
       origin: ORIGIN,
       send,
-      sleep: fakeSleep().sleep,
-      shouldAbort: () => true,
+      sleep: async () => { controller.abort(); },
+      signal: controller.signal,
     });
     assert(!res.ok, '应失败');
     if (res.ok) return;
     assertEqual(res.failure.kind, 'aborted', '用户主动停止不该报成失败');
-    assertEqual(calls.length, 1, '第一次失败后才发现已停止，就不要再发第二次');
+    assertEqual(calls.length, 1, '重试等待被取消后不再发第二次');
   });
 
-  it('第一次就成功 ⇒ 不会因为 shouldAbort 把好数据丢掉', async () => {
-    const { send } = scripted([okResponse(unitPayload())]);
+  it('主动停止后丢弃迟到的资源结果', async () => {
+    const controller = new AbortController();
     const res = await fetchUnitSources({
       cid: CID,
       point: point(),
       origin: ORIGIN,
-      send,
+      send: async () => { controller.abort(); return okResponse(unitPayload()); },
       sleep: fakeSleep().sleep,
-      shouldAbort: () => true,
+      signal: controller.signal,
     });
-    assert(res.ok, '已经拿到手的成功响应不该被 shouldAbort 撤销');
+    assert(!res.ok && res.failure.kind === 'aborted', '旧接管的响应已失效');
   });
 
   it('重试的构造参数与取树那条路是同一套（attempts 上限就是 CATALOG_ATTEMPTS）', async () => {

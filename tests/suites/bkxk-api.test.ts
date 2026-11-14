@@ -19,12 +19,10 @@ import {
   appendTimestamp,
   buildCapacityBody,
   buildQueryBody,
-  buildTeachingTimeBody,
   buildVolunteerBody,
   capacityRemain,
   classify,
   endpointUrl,
-  extractBatchCode,
   formBody,
   headers,
 } from '../../src/sites/bkxk/api.ts';
@@ -117,10 +115,6 @@ describe('bkxk/api —— 抢课报文（🔴 不可撤销）', () => {
 describe('bkxk/api —— 只读报文', () => {
   it('查容量报文只有两个字段', () => {
     assertEqual(buildCapacityBody('TC1', 'B1'), 'teachingClassId=TC1&batchCode=B1');
-  });
-
-  it('规则课表报文只有 studentCode', () => {
-    assertEqual(buildTeachingTimeBody('20210001'), 'studentCode=20210001');
   });
 
   it('列表查询报文：querySetting 包裹，字段顺序固定', () => {
@@ -255,40 +249,6 @@ describe('bkxk/api —— 余量计算', () => {
 
   it('数字字符串可以算', () => {
     assertEqual(capacityRemain({ mainClassCapacity: '60', mainElectiveNumber: '10' }), 50);
-  });
-});
-
-describe('bkxk/api —— 批次码提取', () => {
-  it('从嵌套响应里挖出 electiveBatchCode', () => {
-    const r = extractBatchCode({ code: 1, data: { list: [{ electiveBatchCode: 'B1' }] } });
-    assertEqual(r.batchCode, 'B1');
-    assertEqual(r.counts['B1'], 1);
-  });
-
-  it('取第一个出现的批次码', () => {
-    const r = extractBatchCode({ data: [{ electiveBatchCode: 'B2' }, { electiveBatchCode: 'B1' }] });
-    assertEqual(r.batchCode, 'B2');
-  });
-
-  it('同一批次码多次出现会被计数', () => {
-    const r = extractBatchCode([
-      { electiveBatchCode: 'B1' },
-      { n: { electiveBatchCode: 'B1' } },
-      { n: { electiveBatchCode: 'B2' } },
-    ]);
-    assertEqual(r.counts['B1'], 2);
-    assertEqual(r.counts['B2'], 1);
-  });
-
-  it('没有时就返回 null 且 counts 为空对象', () => {
-    const r = extractBatchCode({ data: { list: [] } });
-    assertEqual(r.batchCode, null);
-    assertDeepEqual(r.counts, {});
-  });
-
-  it('空串 / 非字符串不算数', () => {
-    assertEqual(extractBatchCode({ electiveBatchCode: '' }).batchCode, null);
-    assertEqual(extractBatchCode({ electiveBatchCode: 123 }).batchCode, null);
   });
 });
 

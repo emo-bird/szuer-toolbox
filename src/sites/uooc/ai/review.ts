@@ -1,4 +1,4 @@
-import { read, write } from '../../../common/core/storage.ts';
+import { listKeys, read, remove, write } from '../../../common/core/storage.ts';
 import { containerFor, inputsFor, readQuestionAnswer, restoreQuestionAnswer } from './fill.ts';
 import type { ExamQuestion } from './paper.ts';
 
@@ -56,7 +56,15 @@ export function undoReviewAnswer(current: QuizReview, entry: ReviewEntry): boole
   return true;
 }
 
-const DRAFT_KEY = 'uooc:ai:quiz-draft';
+const LEGACY_DRAFT_KEY = 'uooc:ai:quiz-draft';
+const DRAFT_PREFIX = `${LEGACY_DRAFT_KEY}:`;
+const DRAFT_MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000;
+const DRAFT_LIMIT = 30;
+
+interface StoredDraft {
+  readonly savedAt: number;
+  readonly entries: readonly [string, string][];
+}
 
 function questionIdentity(question: ExamQuestion): readonly unknown[] {
   return [question.id, question.kind, question.stem, question.options, question.blankCount,
@@ -80,20 +88,68 @@ async function fingerprint(current: QuizReview): Promise<string> {
 }
 
 export async function saveReviewDraft(current: QuizReview): Promise<number> {
-  const entries = [...current.entries.values()]
-    .flatMap(({ question, suggestion }) => suggestion === undefined ? [] : [[question.id, suggestion]]);
-  if (entries.length === 0) return 0;
   const key = await fingerprint(current);
   if (!current.current()) return 0;
-  write(DRAFT_KEY, { key, entries });
+  const entries = [...current.entries.values()]
+    .flatMap(({ question, suggestion }): [string, string][] => suggestion === undefined ? [] : [[question.id, suggestion]]);
+  if (entries.length === 0) return 0;
+  storeDraft(key, entries);
+  if (legacyDraft()?.key === key) remove(LEGACY_DRAFT_KEY);
   return entries.length;
 }
 
 export async function loadReviewDraft(current: QuizReview): Promise<Map<string, string>> {
   const key = await fingerprint(current);
-  const stored = read<{ key?: string; entries?: unknown } | null>(DRAFT_KEY, null);
-  if (stored?.key !== key || !Array.isArray(stored.entries)) return new Map();
-  return new Map(stored.entries.filter((entry): entry is [string, string] =>
+  if (!current.current()) return new Map();
+  const storageKey = DRAFT_PREFIX + key;
+  const stored = savedDraft(storageKey);
+  if (stored !== null) {
+    if (isRecent(stored, Date.now())) return new Map(answerEntries(stored.entries));
+    remove(storageKey);
+    if (legacyDraft()?.key === key) remove(LEGACY_DRAFT_KEY);
+    return new Map();
+  }
+  const legacy = legacyDraft();
+  if (legacy?.key !== key) return new Map();
+  const entries = answerEntries(legacy.entries);
+  if (entries.length > 0) {
+    storeDraft(key, entries);
+    remove(LEGACY_DRAFT_KEY);
+  }
+  return new Map(entries);
+}
+
+function answerEntries(value: unknown): [string, string][] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((entry): entry is [string, string] =>
     Array.isArray(entry) && entry.length === 2 && typeof entry[0] === 'string' && typeof entry[1] === 'string',
-  ));
+  );
+}
+
+function legacyDraft(): { key?: unknown; entries?: unknown } | null {
+  return read<{ key?: unknown; entries?: unknown } | null>(LEGACY_DRAFT_KEY, null);
+}
+
+function savedDraft(storageKey: string): StoredDraft | null {
+  return read<StoredDraft | null>(storageKey, null);
+}
+
+function isRecent(draft: StoredDraft, now: number): boolean {
+  return Number.isFinite(draft.savedAt) && draft.savedAt > now - DRAFT_MAX_AGE_MS;
+}
+
+function storeDraft(fingerprintKey: string, entries: StoredDraft['entries']): void {
+  const key = DRAFT_PREFIX + fingerprintKey;
+  const now = Date.now();
+  write(key, { savedAt: now, entries });
+
+  const remaining: { key: string; savedAt: number }[] = [];
+  for (const storageKey of listKeys()) {
+    if (!storageKey.startsWith(DRAFT_PREFIX) || storageKey === key) continue;
+    const draft = savedDraft(storageKey);
+    if (draft !== null && isRecent(draft, now)) remaining.push({ key: storageKey, savedAt: draft.savedAt });
+    else remove(storageKey);
+  }
+  remaining.sort((a, b) => b.savedAt - a.savedAt);
+  for (const old of remaining.slice(DRAFT_LIMIT - 1)) remove(old.key);
 }

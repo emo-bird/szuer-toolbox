@@ -36,7 +36,7 @@ import {
   endpointUrl,
 } from './api.ts';
 import type { CategoryCode, RespKind } from './api.ts';
-import { fetchCategory, remainOf } from './courses.ts';
+import { fetchCategory, listFrom, remainOf } from './courses.ts';
 import type { BkxkClass, CategoryResult } from './courses.ts';
 import type { MonitorItem, MonitorStore } from './list-model.ts';
 import {
@@ -246,28 +246,29 @@ export async function pollOnce(): Promise<PollResult> {
 }
 
 async function pollSingle(start: MonitorStore): Promise<PollResult> {
-  let store = start;
   const rows: HitRow[] = [];
   for (const item of start.items) {
-    const r = await checkOne(store, item.teachingClassID);
-    store = r.store;
-    rows.push(r.row);
+    if (byId(loadMonitorStore(), item.teachingClassID) === null) continue;
+    const row = await checkOne(item.teachingClassID);
+    if (row !== null) rows.push(row);
   }
   return { checked: rows.length, hits: hitsOf(rows) };
 }
 
-async function checkOne(
-  store: MonitorStore,
-  tcId: string,
-): Promise<{ store: MonitorStore; row: HitRow }> {
+async function checkOne(tcId: string): Promise<HitRow | null> {
   const ctx = bkxkContext();
   if (ctx.batchCode === '') {
     log.warn(`查容量跳过 ${tcId}：批次码为空（请刷新选课页）`);
-    return {
-      store,
-      row: { teachingClassID: tcId, remain: null, kind: 'nobatch', msg: '批次码为空（请刷新选课页）' },
-    };
+    return { teachingClassID: tcId, remain: null, kind: 'nobatch', msg: '批次码为空（请刷新选课页）' };
   }
+
+  const record = (remain: number | null, kind: string, msg?: string): HitRow | null => {
+    const current = loadMonitorStore();
+    const { store } = applyCheck(current, tcId, remain, Date.now(), msg);
+    if (store === current) return null;
+    saveMonitorStore(store);
+    return { teachingClassID: tcId, remain, kind, msg };
+  };
 
   let kind: RespKind;
   let msg: string;
@@ -288,33 +289,26 @@ async function checkOne(
   } catch (err) {
     const text = err instanceof Error ? err.message : String(err);
     log.warn(`查容量请求异常：${tcId}`, err);
-    const applied = applyCheck(store, tcId, null, Date.now(), `请求异常：${text}`);
-    saveMonitorStore(applied.store);
-    return { store: applied.store, row: { teachingClassID: tcId, remain: null, kind: 'exception', msg: text } };
+    return record(null, 'exception', `请求异常：${text}`);
   }
 
   if (kind !== RESP_KIND.OK) {
     noteAuthLost(kind);
     log.warn(`查容量失败（${kind}）：${tcId} ${msg}`);
-    const applied = applyCheck(store, tcId, null, Date.now(), msg);
-    saveMonitorStore(applied.store);
-    return { store: applied.store, row: { teachingClassID: tcId, remain: null, kind, msg } };
+    return record(null, kind, msg);
   }
 
   // 成功路径**不写 lastMsg**（与旧仓库 `_apply` 一致）：上一次的失败文案留在那儿，
   // 反而能让用户看出「这条刚才是查不到，现在好了」
-  const applied = applyCheck(store, tcId, remain, Date.now());
-  saveMonitorStore(applied.store);
-  return { store: applied.store, row: { teachingClassID: tcId, remain, kind: 'ok' } };
+  return record(remain, 'ok');
 }
 
 /**
  * 类别模式：**按类别拉整页列表**再在本地比对，而不是逐个教学班查容量。
  * 逐个查会把请求数放大到「监控条数 × 轮询次数」。
- * @returns 成功时是整类教学班；一次都没拉到时返回 `null`（调用方据此区分
- *          「查不到该教学班」与「压根没查到」—— 前者是事实，后者是失败）
+ * 只有读到最后一页，才可以把缺席的教学班标为未找到。
  */
-async function fetchCategoryAll(category: string): Promise<readonly BkxkClass[] | null> {
+async function fetchCategoryAll(category: string): Promise<{ classes: readonly BkxkClass[]; complete: boolean }> {
   const ctx = bkxkContext();
   const out: BkxkClass[] = [];
   // ⚠️ 站点的 pageNumber **从 0 开始**（不是 1）。旧仓库 monitor.js:218 是 `var page = 0`，
@@ -335,18 +329,20 @@ async function fetchCategoryAll(category: string): Promise<readonly BkxkClass[] 
       });
     } catch (err) {
       log.warn(`类别 ${category} 请求异常（pageNumber=${String(page)}）`, err);
-      return out.length > 0 ? out : null;
+      return { classes: out, complete: false };
     }
     if (r.kind !== RESP_KIND.OK) {
       noteAuthLost(r.kind);
       log.warn(`类别 ${category} 拉取失败（pageNumber=${String(page)}，${r.kind}）：${r.msg}`);
-      return out.length > 0 ? out : null;
+      return { classes: out, complete: false };
     }
+    const pageItems = listFrom(r.raw?.cls.json);
+    if (pageItems === null) return { classes: out, complete: false };
     for (const c of r.classes) out.push(c);
-    if (r.classes.length < PAGE_SIZE) return out;
+    if (pageItems.length < PAGE_SIZE) return { classes: out, complete: true };
   }
   log.warn(`类别 ${category} 超过 ${String(MAX_PAGES)} 页上限，只用前 ${String(out.length)} 条比对`);
-  return out;
+  return { classes: out, complete: false };
 }
 
 async function pollCategory(start: MonitorStore): Promise<PollResult> {
@@ -359,40 +355,30 @@ async function pollCategory(start: MonitorStore): Promise<PollResult> {
     return { checked: 0, hits: [] };
   }
 
-  let store = start;
   const rows: HitRow[] = [];
 
   for (const group of groups) {
-    const classes = await fetchCategoryAll(group.category);
-    if (classes === null) {
-      // 这一类压根没查成：如实标 fail，**不要**标 notfound —— 那会让用户以为课没了
-      for (const it of group.items) {
-        rows.push({ teachingClassID: it.teachingClassID, remain: null, kind: 'fail' });
-        const applied = applyCheck(store, it.teachingClassID, null, Date.now(), '按类别查询失败');
-        store = applied.store;
-        saveMonitorStore(store);
-      }
-      continue;
-    }
-
+    const { classes, complete } = await fetchCategoryAll(group.category);
     const index = new Map<string, BkxkClass>();
     for (const c of classes) index.set(c.teachingClassID, c);
 
+    const current = loadMonitorStore();
+    let store = current;
+    const now = Date.now();
     for (const it of group.items) {
+      const live = byId(current, it.teachingClassID);
+      if (live === null || live.category !== group.category) continue;
       const cls = index.get(it.teachingClassID);
       const remain = cls === undefined ? null : remainOf(cls);
-      const applied =
-        cls === undefined
-          ? applyCheck(store, it.teachingClassID, null, Date.now(), '按类别查询未找到该教学班')
-          : applyCheck(store, it.teachingClassID, remain, Date.now());
-      store = applied.store;
-      saveMonitorStore(store);
+      const msg = cls !== undefined ? undefined : complete ? '按类别查询未找到该教学班' : '未能拉取完整类别，暂无法确认';
+      store = applyCheck(store, it.teachingClassID, remain, now, msg).store;
       rows.push({
         teachingClassID: it.teachingClassID,
         remain,
-        kind: cls === undefined ? 'notfound' : 'ok',
+        kind: cls !== undefined ? 'ok' : complete ? 'notfound' : 'fail',
       });
     }
+    if (store !== current) saveMonitorStore(store);
   }
 
   return { checked: rows.length, hits: hitsOf(rows) };

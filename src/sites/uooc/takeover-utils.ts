@@ -29,39 +29,31 @@ const VIDEO_MAX_MS = 6 * 60 * 60 * 1000;
 // ------------------------------------------------------------- 小工具
 
 /** 可被打断的 sleep */
-export function sleep(ms: number, t: { cancelled: boolean }): Promise<void> {
+export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted || ms <= 0) return Promise.resolve();
   return new Promise((resolve) => {
-    if (t.cancelled || ms <= 0) {
-      resolve();
-      return;
-    }
-    let done = false;
     const finish = (): void => {
-      if (done) return;
-      done = true;
       window.clearTimeout(timer);
-      window.clearInterval(iv);
+      signal?.removeEventListener('abort', finish);
       resolve();
     };
     const timer = window.setTimeout(finish, ms);
-    const iv = window.setInterval(() => {
-      if (t.cancelled) finish();
-    }, POLL_MS);
+    signal?.addEventListener('abort', finish, { once: true });
   });
 }
 
-/** 等到 `pred()` 为真；超时或被停止都返回 false（靠 `t.cancelled` 区分） */
+/** 等到 `pred()` 为真；超时或被停止都返回 false。 */
 async function waitFor(
   pred: () => boolean,
   timeoutMs: number,
-  t: { cancelled: boolean },
+  signal: AbortSignal,
 ): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
-    if (t.cancelled) return false;
+    if (signal.aborted) return false;
     if (pred()) return true;
     if (Date.now() >= deadline) return false;
-    await sleep(POLL_MS, t);
+    await sleep(POLL_MS, signal);
   }
 }
 
@@ -108,7 +100,7 @@ export async function gotoPoint(
   hash: string,
   kind: 'video' | 'quiz',
   label: string,
-  t: { cancelled: boolean },
+  signal: AbortSignal,
 ): Promise<boolean> {
   const needsChange = location.hash !== hash;
   const before = needsChange ? viewerSignature() : '';
@@ -120,53 +112,46 @@ export async function gotoPoint(
   }
 
   // §E.3：`WAIT_BEFORE_MS` = 改完 hash 后、开始等元素出现之前的固定 sleep
-  await sleep(waitBeforeMs(), t);
-  if (t.cancelled) return false;
+  await sleep(waitBeforeMs(), signal);
+  if (signal.aborted) return false;
 
   const ok = await waitFor(() => {
     if (!viewerReady(kind)) return false;
     // 要求「内容确实换了」——同一个点重入时 `needsChange` 为 false，不比较
     return !needsChange || viewerSignature() !== before;
-  }, waitTimeoutMs(), t);
+  }, waitTimeoutMs(), signal);
 
   if (ok) log.info(`内容已就绪：${label}`);
   return ok;
 }
 
 /** 等视频播完（听 `ended`）。返回是否真的播到底 */
-export function waitVideoEnd(video: HTMLVideoElement, t: { cancelled: boolean }): Promise<boolean> {
+export function waitVideoEnd(video: HTMLVideoElement, signal: AbortSignal): Promise<boolean> {
+  if (signal.aborted) return Promise.resolve(false);
+  if (video.ended) return Promise.resolve(true);
   return new Promise((resolve) => {
-    if (video.ended) {
-      resolve(true);
-      return;
-    }
     const rate = video.playbackRate > 0 ? video.playbackRate : 1;
     const remaining = Number.isFinite(video.duration) ? (video.duration - video.currentTime) / rate : 0;
     const budget = Math.min(VIDEO_MAX_MS, Math.max(VIDEO_MIN_MS, remaining * 1000 + VIDEO_SLACK_MS));
 
-    let done = false;
     const finish = (ok: boolean): void => {
-      if (done) return;
-      done = true;
       window.clearTimeout(timer);
-      window.clearInterval(iv);
       video.removeEventListener('ended', onEnded);
-      video.removeEventListener('error', onError);
+      video.removeEventListener('error', onStop);
+      signal.removeEventListener('abort', onStop);
       resolve(ok);
     };
     const onEnded = (): void => finish(true);
-    const onError = (): void => finish(false);
+    const onStop = (): void => finish(false);
     const timer = window.setTimeout(() => finish(video.ended), budget);
-    const iv = window.setInterval(() => {
-      if (t.cancelled) finish(false);
-    }, POLL_MS);
     video.addEventListener('ended', onEnded);
-    video.addEventListener('error', onError);
+    video.addEventListener('error', onStop);
+    signal.addEventListener('abort', onStop, { once: true });
   });
 }
 
 /** 给人看的位置，如 `第 2 章 第 3 节「1.3 绪论」` */
-export function pointLabel(point: TaskPoint): string {
+function pointLabel(point: TaskPoint): string {
   const parts = point.path.filter((s) => s !== '');
   const tail = point.name === '' ? '' : `「${point.name}」`;
   const head = parts.length === 0 ? '' : parts.join(' ');

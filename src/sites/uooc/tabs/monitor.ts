@@ -106,6 +106,7 @@ function mountReview(root: HTMLElement, ctx: TabContext): { draw: () => void; di
   let busy = false;
   let disposed = false;
   let startedAt = 0;
+  let timer: number | undefined;
 
   const action = (text: string, run: () => string | void | Promise<string | void>, danger = false): HTMLButtonElement =>
     el('button', {
@@ -160,48 +161,64 @@ function mountReview(root: HTMLElement, ctx: TabContext): { draw: () => void; di
   function createRow(qid: string) {
     const title = el('summary');
     const body = el('p');
+    const sources = el('ul', { attrs: { hidden: true } });
     const locate = action('定位原题', () => { if (!locateReviewQuestion(qid)) return '当前页面找不到该题'; });
     const generate = action('重新生成', () => runReview({ ids: [qid] }));
     const apply = action('应用建议', async () => (await applyReviewedAnswer(qid, ctx.host))
       ? '已将建议写入页面' : '未应用，页面答案可能已变动');
     const approve = action('标记已核对', () => markReviewedAnswer(qid) ? '已标记' : '请先在页面上完整填写该题');
     const undoOne = action('撤销回填', () => undoReviewedAnswers(qid) > 0 ? '已恢复原答案' : '页面答案已变动，无法撤销');
-    const node = el('details', { class: 'sztb-review-row' }, title, body,
+    const node = el('details', { class: 'sztb-review-row' }, title, body, sources,
       el('div', { class: 'sztb-review-actions' }, locate, generate, apply, approve, undoOne));
-    return { node, title, body, locate, generate, apply, approve, undoOne };
+    return { node, title, body, sources, locate, generate, apply, approve, undoOne,
+      citations: undefined as QuestionProgress['citations'] };
   }
   const rows = new Map<string, ReturnType<typeof createRow>>();
   let tid = '';
+  let countedQuestions: readonly QuestionProgress[] | undefined;
+  const counts = { answered: 0, review: 0, failed: 0, unsupported: 0, pending: 0, skipped: 0 };
 
-  function draw(): void {
+  function draw(summaryOnly = false): void {
     const quiz = monitorState().quiz;
     const review = currentReview();
     const running = isQuizRunning();
     const disabled = running || busy;
-    if (running && startedAt === 0) startedAt = Date.now();
-    if (!running) startedAt = 0;
+    if (running && timer === undefined) {
+      startedAt = Date.now();
+      timer = window.setInterval(() => draw(true), 1000);
+    } else if (!running && timer !== undefined) {
+      window.clearInterval(timer);
+      timer = undefined;
+      startedAt = 0;
+    }
     if ((quiz?.tid ?? '') !== tid) {
       tid = quiz?.tid ?? '';
       rows.clear();
       list.replaceChildren();
     }
     const questions = quiz?.questions ?? [];
-    const count = (status: QuestionProgress['status']): number => questions.filter((q) => q.status === status).length;
+    if (countedQuestions !== questions) {
+      countedQuestions = questions;
+      counts.answered = counts.review = counts.failed = counts.unsupported = counts.pending = counts.skipped = 0;
+      for (const q of questions) counts[q.status] += 1;
+    }
     const execution = quiz?.execution;
     const executionText = execution === undefined ? '' : ` · 请求 ${execution.requests}${execution.budget > 0 ? `/${execution.budget}` : ''}` +
-      (execution.usageResponses > 0 ? ` · ${execution.totalTokens} token（${execution.usageResponses} 次有统计）` : '');
+      (execution.usageResponses > 0 ? ` · ${execution.totalTokens} token（${execution.usageResponses} 次有统计）` : '') +
+      (execution.searches || execution.fetches ? ` · 搜索 ${execution.searches} 次 · 抓取 ${execution.fetches} 次` : '');
     const activity = execution?.phase === 'requesting' ? ' · 请求模型' : execution?.phase === 'retrying'
       ? ' · 等待重试' : execution?.phase === 'parsing' ? ' · 解析答案' : execution?.phase === 'cache' ? ' · 命中缓存' : '';
     const text = quiz === null ? '打开测验后开始作答，或恢复本机草稿。'
       : `${QUIZ_PHASE_TEXT[quiz.phase]} · ${quiz.done}/${quiz.total} 已处理${executionText}${running ? activity : ''}` +
         (startedAt ? ` · 已运行 ${Math.floor((Date.now() - startedAt) / 1000)} 秒` : '') +
-        `\n回填/核对 ${count('answered')} · 待核对 ${count('review')} · 失败 ${count('failed')} · 不支持 ${count('unsupported')}` +
+        `\n回填/核对 ${counts.answered} · 待核对 ${counts.review} · 失败 ${counts.failed} · 不支持 ${counts.unsupported}` +
         (quiz.message ? `\n${quiz.message}` : '');
     if (summary.textContent !== text) summary.textContent = text;
+    if (summaryOnly) return;
     progress.max = quiz?.total || 1;
     progress.value = quiz?.done ?? 0;
     const entries = review?.entries;
-    retry.disabled = disabled || entries === undefined || count('failed') === 0;
+    retry.disabled = disabled || entries === undefined || counts.failed === 0;
     restore.disabled = disabled;
     save.disabled = disabled || entries === undefined || ![...entries.values()].some((entry) => entry.suggestion !== undefined);
     undo.disabled = disabled || entries === undefined || ![...entries.values()].some((entry) => entry.applied !== undefined);
@@ -231,6 +248,13 @@ function mountReview(root: HTMLElement, ctx: TabContext): { draw: () => void; di
         q.note,
       ].filter(Boolean).join('\n');
       if (row.body.textContent !== details) row.body.textContent = details;
+      if (row.citations !== q.citations) {
+        row.citations = q.citations;
+        const citations = q.citations ?? [];
+        row.sources.hidden = citations.length === 0;
+        row.sources.replaceChildren(...citations.map(({ url, title }) => el('li', {},
+          el('a', { text: title || url, attrs: { href: url, target: '_blank', rel: 'noopener noreferrer' } }))));
+      }
       row.locate.disabled = entry === undefined;
       row.generate.disabled = disabled || entry === undefined || !isAnswerable(entry.question.kind);
       row.apply.disabled = disabled || entry?.suggestion === undefined;
@@ -238,8 +262,7 @@ function mountReview(root: HTMLElement, ctx: TabContext): { draw: () => void; di
       row.undoOne.disabled = disabled || entry?.applied === undefined;
     }
   }
-  filter.addEventListener('change', draw);
-  const timer = window.setInterval(() => { if (isQuizRunning()) draw(); }, 1000);
+  filter.addEventListener('change', () => draw());
   return { draw, dispose: () => { disposed = true; window.clearInterval(timer); } };
 }
 

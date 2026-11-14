@@ -202,6 +202,31 @@ describe('common/core/http —— 取消与独立模型队列', () => {
       globals['GM_xmlhttpRequest'] = previous;
     }
   });
+
+  it('GM 日志省略接口路径与正文，并显示二进制响应长度', async () => {
+    resetQueueForTest();
+    clearLog();
+    setLevel('debug');
+    const globals = globalThis as Record<string, unknown>;
+    const previous = globals['GM_xmlhttpRequest'];
+    const url = 'https://model.invalid/private-path-key?token=private-query-key';
+    try {
+      globals['GM_xmlhttpRequest'] = ({ onload }: { onload: (response: unknown) => void }) =>
+        onload({ status: 200, response: new ArrayBuffer(4), responseText: 'private-response' });
+      const response = await request({ url, channel: 'gm', responseType: 'arraybuffer' });
+      assertEqual(response.bytes?.byteLength, 4);
+      assert(entries().some((entry) => entry.message.includes('200') && entry.message.includes('4B')),
+        '日志应按实际二进制长度记录');
+
+      const [invalid] = await Promise.allSettled([request({ url, channel: 'gm', responseType: 'json' })]);
+      assert(invalid?.status === 'rejected' && invalid.reason instanceof HttpError, '仍应保留 JSON 解析错误');
+      const logText = JSON.stringify(entries());
+      assert(!logText.includes('private-'), '成功与失败日志都应省略端点和响应正文');
+    } finally {
+      globals['GM_xmlhttpRequest'] = previous;
+      setLevel('error');
+    }
+  });
 });
 
 describe('common/core/http —— 串行队列', () => {

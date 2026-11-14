@@ -22,7 +22,7 @@ import { readRichInput, type ExamImage } from './rich-input.ts';
 /** 题型。`blank` = 填空题（用户 m00107 起参与自动作答）；`other` = 主观题，**仍不参与**。 */
 export type QuestionKind = 'single' | 'multi' | 'judge' | 'blank' | 'other';
 
-export interface ExamOption {
+interface ExamOption {
   /** 选项字母（判断题就是 A/B） */
   readonly key: string;
   readonly text: string;
@@ -38,7 +38,7 @@ export interface ExamQuestion {
   readonly options: readonly ExamOption[];
   /** 题目含有无法读取的关键内容时，暂停该题的自动作答。 */
   readonly contentIssue?: string;
-  /** 仅含已验证的内嵌图片数据，供明确启用图片输入的模型使用。 */
+  /** 已验证的内嵌图片或优课公开图片地址，供明确启用图片输入的模型使用。 */
   readonly images?: readonly ExamImage[];
   readonly score: string;
   /**

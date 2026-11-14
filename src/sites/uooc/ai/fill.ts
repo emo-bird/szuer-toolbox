@@ -293,16 +293,6 @@ export function findSubmitButton(top?: Document): HTMLButtonElement | null {
 
 // ================================================================== 已答 / 清除（m04879）
 
-/** 这道题在 DOM 上已经勾了/填了答案吗（`student_answer` 之外的第二道判据） */
-export function isAnsweredInDom(qid: string, top: Document = document): boolean {
-  const roots = collectRoots(top);
-  for (const el of inputsFor(roots, qid)) {
-    if (el.checked) return true;
-  }
-  const controls = textControlsFor(roots, qid);
-  return controls.length > 0 && controls.every((el) => controlValue(el).trim() !== '');
-}
-
 /** 读取当前试卷答案快照。填空按控件顺序保留空位，选择题返回选中的字母。 */
 export function readQuestionAnswer(qid: string, kind: QuestionKind, top?: Document): string[] {
   const roots = top === undefined ? collectRoots() : [top];
@@ -419,7 +409,7 @@ export function clearQuestion(
 }
 
 /** 卷面上的一道题：题号元素 + 题目容器 + 反查出来的题目 id */
-export interface QuestionAnchor {
+interface QuestionAnchor {
   /** 题号文本，例如 `"1."` */
   readonly label: string;
   /** 题号元素（`div.index`）—— 小按钮插在它**前面** */

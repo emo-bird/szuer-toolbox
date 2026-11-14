@@ -97,7 +97,7 @@ export interface LegacySnapshot {
   tasks: string | null;
 }
 
-export interface PlannedEntry {
+interface PlannedEntry {
   readonly key: string;
   readonly value: unknown;
 }
