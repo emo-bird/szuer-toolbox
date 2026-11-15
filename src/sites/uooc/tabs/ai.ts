@@ -3,7 +3,7 @@ import { copyText } from '../../../common/utils/clipboard.ts';
 import { backendName } from '../../../common/core/storage.ts';
 import { renderSiteSettings } from '../../../common/ui/widgets/settings-form.ts';
 import type { TabContext, TabRegistration } from '../../types.ts';
-import { isQuizRunning, quizTidOnPage, runQuizAnswer, stopQuizAnswer, subscribeQuizRun } from '../ai/index.ts';
+import { isQuizRunning, isStandaloneQuizPage, quizTidOnPage, runQuizAnswer, stopQuizAnswer, subscribeQuizRun } from '../ai/index.ts';
 import { testConnection, validateLlmEndpoint } from '../ai/llm.ts';
 import {
   DEEPSEEK_FLASH, DEEPSEEK_MAX_LOCAL_INPUT, DEEPSEEK_MAX_OUTPUT, DEEPSEEK_ORIGIN, DEEPSEEK_PRO,
@@ -11,12 +11,13 @@ import {
 } from '../ai/deepseek.ts';
 import { mountDeepSeekTools } from '../ai/deepseek-tools-panel.ts';
 import { deleteDeepSeekFile } from '../ai/deepseek-tools.ts';
+import { cleanExpiredReferences } from '../ai/reference-cleanup.ts';
 import { monitorState, QUIZ_PHASE_TEXT, subscribeMonitor } from '../ai/monitor.ts';
 import { mountRunnerSettings } from '../ai/runner-settings.ts';
 import {
   GROUP, SITE_ID, activeAiProfile, aiConfig, aiProfiles, aiProfileSecret, exportAiProfiles,
-  courseReferenceFile, referenceCourseId, removeAiProfile, removeReferenceFileBindings, saveAiProfile,
-  selectAiProfile, setCourseReferenceFile,
+  courseReferenceFile, courseReferenceText, courseReferenceTextExpiry, referenceCourseId, removeAiProfile,
+  removeReferenceFileBindings, saveAiProfile, selectAiProfile, setCourseReferenceFile, setCourseReferenceText, trackReferenceFile,
 } from '../settings.ts';
 import type { AiProfile } from '../settings.ts';
 
@@ -82,12 +83,49 @@ function mountProvider(root: HTMLElement, ctx: TabContext): { hasChanges(): bool
     })));
   const search = el('input', { attrs: { type: 'checkbox' } });
   const readUrl = el('input', { attrs: { type: 'checkbox' } });
-  const safety = el('input', { attrs: { type: 'checkbox' } });
   const maxTokens = input('max-tokens', 'number', { min: '1', max: String(DEEPSEEK_MAX_OUTPUT), step: '1', placeholder: '跟随模型' });
   const inputLimit = input('input-limit', 'number', { min: '1', max: String(DEEPSEEK_MAX_LOCAL_INPUT), step: '1', placeholder: '留空由接口判断' });
   const context = el('textarea', {
     class: 'sztb-input', attrs: { id: 'sztb-ai-context', rows: 4, maxlength: DEEPSEEK_MAX_LOCAL_INPUT },
   });
+  const courseText = el('textarea', {
+    class: 'sztb-input', attrs: { id: 'sztb-ai-course-text', rows: 4, maxlength: DEEPSEEK_MAX_LOCAL_INPUT },
+  });
+  courseText.value = courseReferenceText(courseId);
+  const courseTextStatus = hint('', true);
+  const courseTextExpiry = hint();
+  const courseTextField = el('div', { class: 'sztb-field' },
+    el('label', { class: 'sztb-field-label', text: '课程文字资料', attrs: { for: courseText.id } }),
+    courseText,
+    el('div', { class: 'sztb-toolbar' },
+      button('保存课程资料', () => {
+        if (courseId === null || courseId !== referenceCourseId() || !isDeepSeekEndpoint(baseUrl.value)) return;
+        try {
+          setCourseReferenceText(courseId, courseText.value);
+          updatePreview();
+          courseTextStatus.textContent = courseText.value.trim() ? '课程文字资料已保存' : '课程文字资料已清除';
+        } catch {
+          courseTextStatus.textContent = '无法保存课程文字资料，请检查脚本存储设置';
+        }
+      }),
+      button('复制方案资料到本课程', () => {
+        if (!context.value.trim()) {
+          courseTextStatus.textContent = '当前方案没有文字资料可以复制';
+          return;
+        }
+        const combined = [...new Set([courseText.value.trim(), context.value.trim()].filter(Boolean))].join('\n\n');
+        if (combined.length > courseText.maxLength) {
+          courseTextStatus.textContent = '复制后会超过资料长度上限，请先缩短文字';
+          return;
+        }
+        courseText.value = combined;
+        courseTextStatus.textContent = '请点击「保存课程资料」';
+      }),
+    ),
+    hint('当前课程的测验和独立作业共用，保存后有效期 180 天。清空后保存即可移除。'),
+    courseTextExpiry,
+    courseTextStatus,
+  );
   const modelHint = hint();
   const fileHint = hint();
   const fileStatus = hint('', true);
@@ -150,7 +188,6 @@ function mountProvider(root: HTMLElement, ctx: TabContext): { hasChanges(): bool
     field('思考强度', thinking),
     checkboxRow(search, '联网搜索'),
     checkboxRow(readUrl, '阅读参考资料里的公开链接'),
-    checkboxRow(safety, '内容安全审核'),
     modelHint,
     field('最大输出 Token', maxTokens),
     field('文本输入上限（字符）', inputLimit),
@@ -158,9 +195,10 @@ function mountProvider(root: HTMLElement, ctx: TabContext): { hasChanges(): bool
     fileHint,
     el('div', { class: 'sztb-toolbar' }, uploadFile, removeFile, deleteFile),
     fileStatus,
+    courseTextField,
     el('label', { class: 'sztb-field-label', text: '作答参考资料', attrs: { for: context.id } }),
     context,
-    hint('参考资料会随每道题发送。联网工具可能另行计费，开启后使用兼容文本协议。'),
+    hint('作答参考资料随模型方案使用。想按课提供文字，请使用上方「课程文字资料」。'),
   );
   const endpointHint = hint();
   endpointHint.id = 'sztb-ai-endpoint-hint';
@@ -173,7 +211,9 @@ function mountProvider(root: HTMLElement, ctx: TabContext): { hasChanges(): bool
   const tools = mountDeepSeekTools(
     () => {
       const draft = readDraft();
-      return draft === null || !isDeepSeekEndpoint(draft.baseUrl) ? null : { ...draft, apiKey: draftKey(draft) };
+      return draft === null || !isDeepSeekEndpoint(draft.baseUrl) ? null : {
+        ...draft, apiKey: draftKey(draft), profileId: draft.id,
+      };
     },
     (reference) => {
       const next = [context.value.trim(), reference.trim()].filter(Boolean).join('\n\n');
@@ -198,6 +238,7 @@ function mountProvider(root: HTMLElement, ctx: TabContext): { hasChanges(): bool
         return '无法保存课程文件，请检查脚本存储设置';
       }
     },
+    trackReferenceFile,
   );
 
   function concealKey(): void {
@@ -231,11 +272,14 @@ function mountProvider(root: HTMLElement, ctx: TabContext): { hasChanges(): bool
     const selected = deepSeekModel(raw);
     const flash = selected === DEEPSEEK_FLASH;
     advanced.hidden = !official;
+    courseTextField.hidden = courseId === null;
     tools.node.hidden = !official;
-    search.disabled = readUrl.disabled = safety.disabled = official && !flash;
+    search.disabled = readUrl.disabled = official && !flash;
     thinking.disabled = official && !flash && selected !== DEEPSEEK_PRO;
     vision.disabled = official && selected === DEEPSEEK_PRO;
     const referenceFile = courseReferenceFile(courseId);
+    const textExpiry = courseReferenceTextExpiry(courseId);
+    courseTextExpiry.textContent = textExpiry === undefined ? '' : `到期日期：${new Date(textExpiry).toLocaleDateString()}`;
     uploadFile.disabled = deletingFile || !flash || courseId === null;
     removeFile.hidden = referenceFile === undefined;
     deleteFile.hidden = referenceFile === undefined;
@@ -243,8 +287,9 @@ function mountProvider(root: HTMLElement, ctx: TabContext): { hasChanges(): bool
     fileHint.textContent = courseId === null ? '请打开对应课程的学习页绑定文件。'
       : referenceFile === undefined ? '当前课程尚未绑定文件。可上传 PDF、Word 或 PPT。'
         : deepSeekFileExpired(referenceFile) ? `${referenceFile.name} 已过期，请重新上传或移除。`
-          : `${referenceFile.name} · 已绑定当前课程${flash ? '' : '，切换至 DeepSeek Flash 后启用'}`;
-    modelHint.textContent = !flash ? '联网、读链接和高级内容审核适用于 deepseek-flash。'
+          : `${referenceFile.name} · 已绑定当前课程${flash ? '' : '，切换至 DeepSeek Flash 后启用'}` +
+            (referenceFile.expiresAt === undefined ? '' : ` · ${new Date(referenceFile.expiresAt).toLocaleDateString()} 到期`);
+    modelHint.textContent = !flash ? '联网搜索和阅读链接适用于 deepseek-flash。'
       : raw !== selected ? `此旧模型 ID 会按 deepseek-flash 请求。`
       : search.checked || readUrl.checked ? '联网工具开启时，兼容文本协议会替代接口 JSON 模式。' : '';
   }
@@ -280,7 +325,6 @@ function mountProvider(root: HTMLElement, ctx: TabContext): { hasChanges(): bool
     thinking.value = next.deepSeek?.thinking ?? 'auto';
     search.checked = next.deepSeek?.search ?? false;
     readUrl.checked = next.deepSeek?.readUrl ?? false;
-    safety.checked = next.deepSeek?.safety ?? false;
     maxTokens.value = next.deepSeek?.maxTokens?.toString() ?? '';
     inputLimit.value = next.deepSeek?.inputLimit?.toString() ?? '';
     context.value = next.deepSeek?.context ?? '';
@@ -323,7 +367,7 @@ function mountProvider(root: HTMLElement, ctx: TabContext): { hasChanges(): bool
       return null;
     }
     const deepSeek = official ? deepSeekOptions({
-      thinking: thinking.value, search: search.checked, readUrl: readUrl.checked, safety: safety.checked,
+      thinking: thinking.value, search: search.checked, readUrl: readUrl.checked,
       maxTokens: maxTokens.valueAsNumber, inputLimit: inputLimit.valueAsNumber, context: context.value,
     }) : undefined;
     return {
@@ -423,6 +467,7 @@ function mountProvider(root: HTMLElement, ctx: TabContext): { hasChanges(): bool
     try {
       const key = apiKey.value.trim() || (removeKey ? '' : undefined);
       saveAiProfile(draft, key);
+      void cleanExpiredReferences();
       creating = false;
       load(activeAiProfile());
       status.textContent = '方案已保存，下次作答会使用此配置。';
@@ -476,7 +521,7 @@ function mountProvider(root: HTMLElement, ctx: TabContext): { hasChanges(): bool
     }
   });
   for (const control of [name, baseUrl, model, apiKey, timeout, maxTokens, inputLimit, context]) control.addEventListener('input', markDirty);
-  for (const control of [format, concurrency, vision, thinking, search, readUrl, safety]) control.addEventListener('change', markDirty);
+  for (const control of [format, concurrency, vision, thinking, search, readUrl]) control.addEventListener('change', markDirty);
 
   // 单独隔离密钥控件，避免宿主页面通过外层面板的开放 Shadow DOM 读到密码值。
   const secretHost = el('div');
@@ -518,6 +563,8 @@ function mountProvider(root: HTMLElement, ctx: TabContext): { hasChanges(): bool
     const next = referenceCourseId();
     if (next === courseId) return;
     courseId = next;
+    courseText.value = courseReferenceText(next);
+    courseTextStatus.textContent = '';
     fileStatus.textContent = '';
     tools.reset();
     updatePreview();
@@ -559,6 +606,7 @@ export const UOOC_AI_TAB: TabRegistration = {
         status.textContent = '请先保存接口地址和模型 ID。';
         return;
       }
+      if (mode !== 'draft' && isStandaloneQuizPage()) ctx.host.activateTab('uooc:monitor');
       void runQuizAnswer(tid, ctx.host, undefined, mode);
     }
 

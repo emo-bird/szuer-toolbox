@@ -1,6 +1,6 @@
 import { chatDetailed, chatUrl, LlmError, prepareLlmPrompt, type LlmCitation, type LlmConfig, type LlmUsage } from './llm.ts';
 import { DEEPSEEK_FLASH, DEEPSEEK_PRO, deepSeekFileExpired, deepSeekModel, isDeepSeekEndpoint } from './deepseek.ts';
-import { MAX_SAMPLES, parseModelAnswer } from './parse.ts';
+import { MAX_SAMPLES, parseEssayAnswer, parseModelAnswer } from './parse.ts';
 import { buildPrompt, TEMPLATES, type PromptTemplate } from './prompts.ts';
 import { questionInputIssue, type ExamQuestion } from './paper.ts';
 import { loadExamAsset } from './asset-image.ts';
@@ -204,6 +204,9 @@ function failurePolicy(err: unknown): { retry: boolean; wait?: number; global: b
     return { retry: err instanceof Error && (err.name === 'TimeoutError' || err instanceof TypeError), global: false };
   }
   if (err.category === 'refusal' || err.category === 'incomplete') return { retry: false, global: false };
+  if (err.category === 'request' && (err.status === 400 || err.status === 413 || err.status === 422)) {
+    return { retry: false, global: false };
+  }
   if (err.category === 'config' || err.category === 'quota' || err.category === 'auth' ||
       err.category === 'not-found' || err.category === 'format') {
     return { retry: false, global: true };
@@ -248,16 +251,18 @@ async function askOnce(
   let requests = 0;
   let error = '';
   let delay = 0;
+  let retryInstruction = '';
   const file = isDeepSeekEndpoint(cfg.baseUrl) ? cfg.deepSeek?.referenceFile : undefined;
-  let prompt: string;
-  try {
-    prompt = prepareLlmPrompt(cfg, buildPrompt([question], template, exclude || undefined, cfg.responseFormat, execution.settings.explain));
-  } catch (err) {
-    if (!(err instanceof LlmError)) throw err;
-    return { vote: null, requests, error: err.message, terminal: true };
-  }
+  const promptBody = buildPrompt([question], template, exclude || undefined, cfg.responseFormat, execution.settings.explain);
   for (let attempt = 0; attempt < (review ? 1 : ASK_ATTEMPTS); attempt += 1) {
     opts.signal?.throwIfAborted();
+    let prompt: string;
+    try {
+      prompt = prepareLlmPrompt(cfg, promptBody + retryInstruction);
+    } catch (err) {
+      if (!(err instanceof LlmError)) throw err;
+      return { vote: null, requests, error: err.message, terminal: true };
+    }
     await waitBeforeRequest(execution, delay, opts.signal);
     opts.signal?.throwIfAborted();
     if (file && deepSeekFileExpired(file)) {
@@ -277,11 +282,19 @@ async function askOnce(
       usage = result.usage;
       opts.signal?.throwIfAborted();
       execution.reportParsing();
-      const vote = parseModelAnswer(result.content, question);
+      const essay = question.kind === 'essay' ? parseEssayAnswer(result.content, question) : null;
+      const vote = essay === null ? parseModelAnswer(result.content, question) : 'answer' in essay ? essay.answer : null;
       if (vote !== null && vote.answer !== exclude) {
         return { vote: { ...vote, ...(result.citations ? { citations: result.citations } : {}) }, requests, error: '', terminal: false };
       }
-      error = vote === null ? '模型未返回有效答案格式' : '模型重复了已排除的答案';
+      if (essay !== null && 'error' in essay) {
+        error = essay.error;
+        retryInstruction = essay.overLimit
+          ? '\n上一次正文超过题目规定的字数。请精简例子和重复表述，保留每个要点，将正文明显缩短到上限以内。'
+          : '\n上一次回复缺少可解析的正文。请按指定的输出格式重新生成完整正文。';
+      } else {
+        error = vote === null ? '模型未返回有效答案格式' : '模型重复了已排除的答案';
+      }
       opts.onWarn?.(error);
       delay = 1000 * 2 ** attempt;
     } catch (err) {
@@ -343,6 +356,14 @@ export async function answerOne(
   }
 
   let key: string | undefined;
+  if (question.kind === 'essay') {
+    const result = await askOnce(question, cfg, TEMPLATES[0]!, '', opts, execution, images);
+    requests += result.requests;
+    error = result.error;
+    return result.vote === null
+      ? deliver()
+      : deliver({ ...result.vote, review: true, note: '主观题草稿，请核对正文后应用' });
+  }
   if (settings.cache && !retryMode && !question.images?.length && !cfg.deepSeek?.search && !cfg.deepSeek?.readUrl) {
     try { key = await cacheKey(question, cfg, settings); } catch { /* 无摘要能力时照常请求 */ }
   }

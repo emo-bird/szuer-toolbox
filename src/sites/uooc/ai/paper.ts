@@ -19,8 +19,7 @@
 import { PRIORITY, qs, request } from '../../../common/core/http.ts';
 import { readRichInput, type ExamImage } from './rich-input.ts';
 
-/** 题型。`blank` = 填空题（用户 m00107 起参与自动作答）；`other` = 主观题，**仍不参与**。 */
-export type QuestionKind = 'single' | 'multi' | 'judge' | 'blank' | 'other';
+export type QuestionKind = 'single' | 'multi' | 'judge' | 'blank' | 'essay' | 'other';
 
 interface ExamOption {
   /** 选项字母（判断题就是 A/B） */
@@ -64,7 +63,7 @@ export interface ExamQuestion {
  * （没有 name），答案按空序用 `|` 分隔，详见 `fill-dom.ts` / `fill.ts`。
  */
 export function isAnswerable(kind: QuestionKind): boolean {
-  return kind === 'single' || kind === 'multi' || kind === 'judge' || kind === 'blank';
+  return kind !== 'other';
 }
 
 export function questionInputIssue(question: ExamQuestion, allowImages = false): string | null {
@@ -89,6 +88,7 @@ export function kindOf(typeText: string, type: string): QuestionKind {
   if (t.includes('单选')) return 'single';
   if (t.includes('判断')) return 'judge';
   if (t.includes('填空')) return 'blank';
+  if (/论述|简答|问答|名词解释/.test(t)) return 'essay';
   switch (type) {
     case '10':
       return 'single';
@@ -182,6 +182,24 @@ export interface ExamPaper {
   readonly courseTitle: string;
 }
 
+/** 独立试卷的地址只有测验 ID，课程归属以同源 taskInfo 为准。 */
+export async function fetchExamCourse(tid: string, signal: AbortSignal): Promise<{ id: string; name: string } | null> {
+  try {
+    const res = await request({
+      url: `${location.origin}/exam/taskInfo?${qs({ tid })}`,
+      responseType: 'json', timeoutMs: 5000, priority: PRIORITY.HIGH, signal,
+    });
+    const body = res.json as { data?: { id?: unknown; course_id?: unknown; course_name?: unknown } } | null;
+    const data = body?.data;
+    const id = typeof data?.course_id === 'string' || typeof data?.course_id === 'number' ? String(data.course_id) : '';
+    if (res.status < 200 || res.status >= 300 || String(data?.id) !== tid || !/^\d+$/.test(id) || id === '0') return null;
+    return { id, name: typeof data?.course_name === 'string' ? data.course_name.trim().slice(0, 200) : '' };
+  } catch {
+    signal.throwIfAborted();
+    return null;
+  }
+}
+
 /** 拉一份试卷 */
 export async function fetchPaper(tid: string, signal?: AbortSignal): Promise<ExamPaper> {
   const res = await request({
@@ -203,5 +221,5 @@ export async function fetchPaper(tid: string, signal?: AbortSignal): Promise<Exa
     if (q !== null) questions.push(q);
   }
   const paper = (data?.['paper'] ?? null) as Record<string, unknown> | null;
-  return { questions, courseTitle: asString(paper?.['course_title']) };
+  return { questions, courseTitle: typeof paper?.['course_title'] === 'string' ? paper['course_title'].trim().slice(0, 200) : '' };
 }

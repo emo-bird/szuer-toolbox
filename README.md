@@ -40,7 +40,7 @@
 ## 安装与更新
 
 1. 在 Chrome、Edge 或 Firefox 中安装 Tampermonkey（篡改猴）或 Violentmonkey（暴力猴）。
-2. 打开 v1.2.13 的安装链接，在管理器弹出的页面确认安装。 [安装深大人工具箱 v1.2.13](https://raw.githubusercontent.com/Starverse032/szuer-toolbox/release-v1.2.13/dist/szuer-toolbox.user.js)
+2. 打开 v1.2.20 的安装链接，在管理器弹出的页面确认安装。 [安装深大人工具箱 v1.2.20](https://raw.githubusercontent.com/Starverse032/szuer-toolbox/release-v1.2.20/dist/szuer-toolbox.user.js)
 3. 打开或刷新优课课程页、本科选课页，点击悬浮球展开工具箱。
 
 安装后，脚本通过 `@updateURL` 从原仓库的 `master` 检查后续更新。
@@ -49,15 +49,21 @@
 
 **手动作答**。打开试卷，在【AI 作答】填写接口地址、模型 ID 和接口所需的 API Key，保存方案并测试连接。点【开始作答】生成并回填答案，再到【监视】核对结果。接口支持 JSON 模式时，可在「输出格式」选择 JSON。启用内嵌图片输入会把可读取的图片随题目发往所选接口。
 
-**DeepSeek 官方接口（v1.2.8 起）**。在【AI 作答】点「填入 DeepSeek 官方配置」，填写 API Key 并保存。默认选用 `deepseek-flash`，支持题图、联网搜索、阅读公开链接和内容安全审核。纯文字题也可以手动选择 `deepseek-v4-pro`。开启联网工具时，脚本改用兼容文本请求，可在【监视】查看模型返回的来源和用量。 [DeepSeek 联网工具文档](https://api-docs.deepseek.com/zh-cn/guides/web_tools/)
+**论述、简答、问答和名词解释**。AI 会生成一份待核对的正文。到【监视】展开该题，核对后点「应用建议」，正文会按段落填入答题框，段落之间只换行一次。题干明确写出数字形式的字数上限时，脚本会检查草稿长度。
+
+**DeepSeek 官方接口（v1.2.8 起）**。在【AI 作答】点「填入 DeepSeek 官方配置」，填写 API Key 并保存。默认选用 `deepseek-flash`，支持题图、联网搜索和阅读公开链接。纯文字题也可以手动选择 `deepseek-v4-pro`。开启联网工具时，脚本改用兼容文本请求，可在【监视】查看模型返回的来源和用量。 [DeepSeek 联网工具文档](https://api-docs.deepseek.com/zh-cn/guides/web_tools/)
 
 **思考与上下文**。每个官方方案可分别保存思考强度、最大输出 Token、文本输入上限和作答参考资料。思考强度支持跟随模型、关闭、低、高、最高；留空的最大输出 Token 由模型决定。文本输入上限按字符检查题目、作答提示和参考资料，超限会在【监视】标出。参考资料会随每题发给 DeepSeek，导出方案时会省略资料和密钥。 [DeepSeek 思考模式文档](https://api-docs.deepseek.com/zh-cn/guides/thinking_mode/)
 
-**直接引用作答参考文件**。打开对应课程的学习页，在 DeepSeek Flash 方案下点击「上传作答参考文件」，选择 PDF、Word 或 PPT 后运行上传，再点「用此文件辅助作答」。每门课程可绑定一份文件，绑定即时保存到脚本管理器，重启浏览器后仍可用。新文件在 DeepSeek 无到期时间，旧版上传的限时文件请重新上传并绑定。文档里的图表也要参与作答时，上传前选「图文混排解析」。 [DeepSeek 文件解析](https://api-docs.deepseek.com/guides/document_parsing/)
+**直接引用作答参考文件**。打开对应课程的学习页，在 DeepSeek Flash 方案下点击「上传作答参考文件」，选择 PDF、Word 或 PPT 后运行上传，再点「用此文件辅助作答」。每门课程可绑定一份文件，重启浏览器后仍可用。文档里的图表也要参与作答时，上传前选「图文混排解析」。 [DeepSeek 文件解析](https://api-docs.deepseek.com/guides/document_parsing/)
+
+**课程资料有效期**。文字自保存起有效 180 天，文件自通过脚本上传起有效 180 天。旧版存量自升级后首次读取起计时，已有更早到期时间的文件沿用原期限。到期后会停止引用，并在脚本运行时清理本机资料。DeepSeek 的云端自动到期最长为 30 天，因此 180 天文件由脚本在运行时凭可用的 API Key 尝试清理。方案级的通用参考文字仍随方案保存。 [DeepSeek 文件有效期](https://api-docs.deepseek.com/guides/files_api/)
 
 「解除课程绑定」只移除当前课程的引用。「删除云端文件」需要确认，DeepSeek 确认删除后会清理本机上引用同一文件的课程绑定。 [DeepSeek 文件删除接口](https://api-docs.deepseek.com/api/delete-file/)
 
 **试卷草稿和视频设置**。草稿按试卷独立保存，保留最近 30 份，保存后 90 天到期。关闭二倍速或静音时，播放器会立即恢复被脚本锁定前的设置。
+
+**独立作业或试卷页**。在对应课程学习页的【AI 作答 → DeepSeek 思考与上下文】填写「课程文字资料」并保存。已有的方案文字资料可复制到当前课程，原方案设置会保留。独立作业点击「开始作答」后，【监视】会显示优课返回的所属课程和已载入的课程资料。DeepSeek Flash 和 V4 Pro 都可读取该课文字，绑定的文件由 Flash 引用。标记为「待核对」的题可以展开看候选答案，确认后点「应用建议」。
 
 **DeepSeek 独立工具**。支持手动搜索、抓取、上传文件并提问、OCR、转写音频和合成语音。可以把工具输出加入当前方案的作答参考资料。 [DeepSeek 计费文档](https://api-docs.deepseek.com/zh-cn/quick_start/pricing/)
 

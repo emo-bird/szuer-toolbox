@@ -2,6 +2,8 @@ import { assert, assertEqual, describe, it } from '../harness.ts';
 import { read, remove, write } from '../../src/common/core/storage.ts';
 import { chatDetailed, chatUrl, LlmError, prepareLlmPrompt, testConnection } from '../../src/sites/uooc/ai/llm.ts';
 import { deleteDeepSeekFile, runDeepSeekTool } from '../../src/sites/uooc/ai/deepseek-tools.ts';
+import { COURSE_REFERENCE_LIFETIME_MS, courseReferenceFile, courseReferenceText, expiredReferenceFiles,
+  removeReferenceFileBindings, setCourseReferenceText, trackReferenceFile } from '../../src/sites/uooc/settings.ts';
 import { aiConfig, aiProfileSecret, aiProfiles, exportAiProfiles, referenceCourseId, removeAiProfile, saveAiProfile, selectAiProfile, setCourseReferenceFile } from '../../src/sites/uooc/settings.ts';
 
 describe('UOOC 模型方案', () => {
@@ -50,6 +52,34 @@ describe('UOOC 模型方案', () => {
 });
 
 describe('DeepSeek 官方 API', () => {
+  it('课程资料 180 天后停止引用，解除绑定的文件仍在云端清理队列中', () => {
+    const course = '987654321';
+    const file = { id: 'file-api-retention-test', name: '资料.pdf' };
+    const oldNow = Date.now;
+    let now = 1_800_000_000_000;
+    Date.now = () => now;
+    const textKey = `uooc:reference-text:${course}`;
+    try {
+      write(textKey, '旧版笔记');
+      assertEqual(courseReferenceText(course), '旧版笔记');
+      const tracked = trackReferenceFile(file, 'retention-profile');
+      assertEqual(tracked.expiresAt, now + COURSE_REFERENCE_LIFETIME_MS);
+      setCourseReferenceFile(course, file);
+      assertEqual(courseReferenceFile(course)?.id, file.id);
+      setCourseReferenceFile(course);
+      assertEqual(courseReferenceFile(course), undefined);
+      now += COURSE_REFERENCE_LIFETIME_MS;
+      assertEqual(courseReferenceText(course), '');
+      assertEqual(read(textKey, null), null);
+      assertEqual(expiredReferenceFiles().find((candidate) => candidate.id === file.id)?.profileId, 'retention-profile');
+      setCourseReferenceText(course, '本学期资料');
+      assertEqual(courseReferenceText(course), '本学期资料');
+    } finally {
+      removeReferenceFileBindings(file.id);
+      remove(textKey);
+      Date.now = oldNow;
+    }
+  });
   it('删除只发送到官方文件接口，并要求响应确认同一文件已删除', async () => {
     const globals = globalThis as Record<string, unknown>;
     const previous = globals['GM_xmlhttpRequest'];
@@ -85,7 +115,7 @@ describe('DeepSeek 官方 API', () => {
     const profile = {
       id: 'course-file-test', name: '课程测试', baseUrl: 'https://api.deepseek.com', model: 'deepseek-flash',
       timeoutMs: 5000, concurrency: 1, responseFormat: 'text' as const, vision: false,
-      deepSeek: { thinking: 'auto' as const, search: false, readUrl: false, safety: false,
+      deepSeek: { thinking: 'auto' as const, search: false, readUrl: false,
         referenceFile: { id: 'file-api-legacy', name: '旧文件.pdf', expiresAt: Date.now() + 3600000 } },
     };
     try {
@@ -99,7 +129,7 @@ describe('DeepSeek 官方 API', () => {
       setCourseReferenceFile('1', { id: 'file-api-first', name: '第一门课.pdf' });
       setCourseReferenceFile('2', { id: 'file-api-second', name: '第二门课.pdf' });
       assertEqual(aiConfig(first)?.deepSeek?.referenceFile?.id, 'file-api-first');
-      assertEqual(aiConfig(first)?.deepSeek?.referenceFile?.expiresAt, undefined);
+      assert((aiConfig(first)?.deepSeek?.referenceFile?.expiresAt ?? 0) > Date.now(), '首次绑定会设置到期时间');
       assertEqual(aiConfig(second)?.deepSeek?.referenceFile?.id, 'file-api-second');
       assertEqual(aiConfig(null)?.deepSeek?.referenceFile, undefined);
       assert(!exportAiProfiles().includes('file-api-'), '导出不包含文件 ID');
@@ -107,6 +137,8 @@ describe('DeepSeek 官方 API', () => {
       assertEqual(aiConfig(first)?.deepSeek?.referenceFile, undefined);
       assertEqual(aiConfig(second)?.deepSeek?.referenceFile?.id, 'file-api-second');
     } finally {
+      removeReferenceFileBindings('file-api-first');
+      removeReferenceFileBindings('file-api-second');
       removeAiProfile(profile.id);
       keys.forEach((key, index) => snapshot[index] === undefined ? remove(key) : write(key, snapshot[index]));
     }
@@ -119,7 +151,7 @@ describe('DeepSeek 官方 API', () => {
     maxTokens: 393216, inputLimit: 1000, context: '讲义摘录' };
   const globals = globalThis as Record<string, unknown>;
 
-  it('联网作答发送思考、上下文与审核配置，返回引用和独立工具用量', async () => {
+  it('联网作答忽略旧审核设置，发送思考与上下文并返回引用和用量', async () => {
     const previous = globals['GM_xmlhttpRequest'];
     const sent: Record<string, unknown>[] = [];
     try {
@@ -147,7 +179,7 @@ describe('DeepSeek 官方 API', () => {
       assertEqual(JSON.stringify(body['thinking']), '{"type":"enabled"}');
       assertEqual(body['max_tokens'], 393216);
       assertEqual(JSON.stringify(body['tools']), '[{"type":"deepseek_web_search"},{"type":"deepseek_read_url"}]');
-      assertEqual(JSON.stringify(body['safety_check']), '{"level":"high"}');
+      assertEqual(body['safety_check'], undefined);
       assertEqual(body['response_format'], undefined);
       assert(prompt.includes('讲义摘录') && prompt.endsWith('第 1 题\nA. 4\nB. 5'), '需完整保留题干和选项');
       assertEqual(result.citations?.length, 1);

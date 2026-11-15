@@ -17,6 +17,7 @@
  */
 
 import type { ExamQuestion } from './paper.ts';
+import { essayLengthLimit } from './parse.ts';
 
 export interface PromptTemplate {
   /** 稳定 id，日志与测试用 */
@@ -98,6 +99,21 @@ export function buildPrompt(
   format: 'text' | 'json' = 'text',
   explain = false,
 ): string {
+  const question = questions[0];
+  if (questions.length === 1 && question?.kind === 'essay') {
+    const limit = essayLengthLimit(question.stem);
+    return [
+      '请根据题目及相关课程资料起草一份可供核对的完整答案。逐项回应题目的要求，遵守题目给出的字数限制。',
+      ...(limit === undefined ? [] : [`正文最多 ${limit} 字，标点也计入。请在输出前核对字数并留出余量。`]),
+      '用纯文本分段作答。段落之间只换行一次，不留空行，段首和段尾不加空格。题干中的作答要求仅用于组织答案。不要虚构案例或引用。',
+      format === 'json'
+        ? '只返回一个 JSON 对象，形如 {"question":1,"answer":["完整正文"]}。answer 只放一个字符串，字符串内用 \\n 表示换行。'
+        : '只输出正文，保留段落换行，不添加题号、标题或代码块。',
+      ...(format === 'json' && explain ? ['可用 explanation 字段简述依据。'] : []),
+      '',
+      question.stem,
+    ].join('\n');
+  }
   const lines: string[] = [template.body, ''];
   if (format === 'json' && questions.length === 1) {
     lines.push(

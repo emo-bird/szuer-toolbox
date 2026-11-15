@@ -29,7 +29,7 @@ function answer(letter: string): FakeReply {
 }
 
 async function fakeModels(
-  responder: (model: string, index: number) => FakeReply,
+  responder: (model: string, index: number, body: string) => FakeReply,
   run: (models: string[]) => Promise<void>,
 ): Promise<void> {
   const globals = globalThis as Record<string, unknown>;
@@ -42,7 +42,7 @@ async function fakeModels(
     onload(response: { status: number; statusText: string; responseText: string; responseHeaders?: string }): void;
   }) => {
     const model = (JSON.parse(details.data) as { model: string }).model;
-    const reply = responder(model, models.length);
+    const reply = responder(model, models.length, details.data);
     models.push(model);
     details.onload({ status: reply.status, statusText: '', responseText: reply.text, responseHeaders: reply.headers });
     return { abort() {} };
@@ -58,6 +58,48 @@ async function fakeModels(
 }
 
 describe('UOOC 作答执行策略', () => {
+  it('论述题超字数时报告实际长度，重试要求缩短正文', async () => {
+    const warnings: string[] = [];
+    const essay: ExamQuestion = { ...question, kind: 'essay', typeText: '论述题', stem: '不超过５字', options: [] };
+    await fakeModels((_model, index, body) => {
+      const prompt = JSON.parse(body).messages[0].content as string;
+      assert(prompt.includes('正文最多 5 字'), '提示词应写出具体上限');
+      if (index > 0) assert(prompt.includes('上一次正文超过'), '重试提示应要求缩短');
+      return { status: 200, text: JSON.stringify({ choices: [{ message: { content: index === 0 ? '正文超过五个字。' : '两段。' } }] }) };
+    }, async (models) => {
+      const result = await answerOne(essay, config, { execution: createAnswerExecution(settings), onWarn: (warning) => warnings.push(warning) });
+      assertEqual(warnings[0], '论述题正文超出字数上限（8/5 字，含标点、不含空白）');
+      assertEqual(result.answer, '两段。');
+      assertEqual(result.review, true);
+      assertEqual(models.length, 2);
+    });
+  });
+  it('论述题生成一份多段草稿并要求人工核对', async () => {
+    const draft = '第一段。\n\n第二段。';
+    await fakeModels(() => ({ status: 200, text: JSON.stringify({ choices: [{ message: { content: draft } }] }) }),
+      async (models) => {
+        const essay: ExamQuestion = { ...question, kind: 'essay', typeText: '论述题', stem: '分两段讨论。', options: [] };
+        const result = await answerOne(essay, config, { execution: createAnswerExecution({ ...settings, cache: true }) });
+        assertEqual(result.answer, '第一段。\n第二段。');
+        assertEqual(result.review, true);
+        assertEqual(models.length, 1);
+      });
+  });
+  it('模型空答案或单题输入错误不会让后续题一起留空', async () => {
+    for (const first of [
+      { status: 200, text: '{"choices":[{"message":{"content":" "}}]}' },
+      { status: 400, text: '{"error":{"message":"bad input"}}' },
+    ]) {
+      await fakeModels((_model, index) => index === 0 ? first : answer('A'), async (models) => {
+        const execution = createAnswerExecution(settings);
+        const results = await answerQuestions([question, { ...question, id: 'next' }], { cfg: config, execution });
+        assertEqual(results[0]?.answer, '');
+        assertEqual(results[1]?.answer, 'A');
+        assertEqual(execution.terminalError, '');
+        assertEqual(models.length, 3);
+      });
+    }
+  });
   it('DeepSeek 作答引用已关联文件，过期或更换为不支持的模型时不发送请求', async () => {
     const globals = globalThis as Record<string, unknown>;
     const previous = globals['GM_xmlhttpRequest'];
@@ -68,7 +110,7 @@ describe('UOOC 作答执行策略', () => {
       return { abort() {} };
     };
     const referenceFile = { id: 'file-api-course', name: '讲义.pdf', expiresAt: Date.now() + 60_000 };
-    const deepSeek = { thinking: 'auto' as const, search: false, readUrl: false, safety: false, referenceFile };
+    const deepSeek = { thinking: 'auto' as const, search: false, readUrl: false, referenceFile };
     const cfg = { ...config, baseUrl: 'https://api.deepseek.com', model: 'deepseek-flash', deepSeek };
     try {
       const execution = createAnswerExecution(settings);
@@ -94,7 +136,7 @@ describe('UOOC 作答执行策略', () => {
   });
   it('DeepSeek 参考资料超限不消耗请求预算，截断的题仍统计用量', async () => {
     const cfg = { ...config, baseUrl: 'https://api.deepseek.com', model: 'deepseek-flash',
-      deepSeek: { thinking: 'max' as const, search: true, readUrl: false, safety: false, inputLimit: 5, context: '讲义' } };
+      deepSeek: { thinking: 'max' as const, search: true, readUrl: false, inputLimit: 5, context: '讲义' } };
     await fakeModels(() => ({
       status: 200,
       text: JSON.stringify({

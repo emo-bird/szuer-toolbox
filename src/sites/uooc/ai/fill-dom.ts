@@ -173,6 +173,23 @@ export function textControlsFor(roots: readonly Document[], qid: string): HTMLEl
   return out;
 }
 
+export function essayControlIn(box: HTMLElement): HTMLElement | null {
+  const editable = '[contenteditable="true"], [contenteditable="plaintext-only"]';
+  const editor = pickAll(box, editable).find(isVisible);
+  if (editor !== undefined) return editor;
+  for (const frame of box.querySelectorAll<HTMLIFrameElement>('iframe')) {
+    if (!isVisible(frame)) continue;
+    const body = frame.contentDocument?.body;
+    if (body?.isContentEditable) return body;
+  }
+  return pickAll(box, 'textarea:not(:disabled):not([readonly])').find(isVisible) ?? null;
+}
+
+export function essayControlFor(roots: readonly Document[], qid: string): HTMLElement | null {
+  const box = containerFor(roots, qid);
+  return box === null ? null : essayControlIn(box);
+}
+
 /** 在已收集的 roots 里找某个题目 id 的全部选项 input */
 export function inputsFor(roots: readonly Document[], qid: string): HTMLInputElement[] {
   const out: HTMLInputElement[] = [];

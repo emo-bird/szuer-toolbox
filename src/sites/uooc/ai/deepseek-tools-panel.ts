@@ -13,6 +13,7 @@ export function mountDeepSeekTools(
   config: () => LlmConfig | null,
   addReference: (reference: string) => boolean,
   attachFile: (file: DeepSeekReferenceFile) => string | null,
+  trackUpload: (file: DeepSeekReferenceFile, profileId?: string) => DeepSeekReferenceFile,
 ) {
   const select = el('select', { class: 'sztb-select', attrs: { 'aria-label': 'DeepSeek 工具' } },
     ...actions.map(([value, text]) => el('option', { text, attrs: { value } })));
@@ -122,9 +123,11 @@ export function mountDeepSeekTools(
             text: text.value, file: file.files?.[0], purpose: purpose.value as DeepSeekFilePurpose,
             voice: voice.value === 'tide' ? 'tide' : 'stella',
           }, cfg.apiKey, controller.signal);
+        const tracked = 'uploadedFile' in result && result.uploadedFile
+          ? trackUpload(result.uploadedFile, cfg.profileId) : undefined;
         if (pending !== controller) return;
-        if ('uploadedFile' in result && result.uploadedFile) {
-          uploaded = result.uploadedFile;
+        if (tracked) {
+          uploaded = tracked;
           fileId.value = uploaded.id;
           attach.hidden = false;
           select.value = 'ask';

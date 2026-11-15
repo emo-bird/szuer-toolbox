@@ -18,7 +18,7 @@ import { containersComplete, quizDomReady } from '../../src/sites/uooc/ai/fill.t
  */
 function fakeDoc(controlCounts: readonly number[]): Document {
   const boxes = controlCounts.map((n) => ({
-    querySelectorAll: () => ({ length: n }) as unknown as NodeListOf<Element>,
+    querySelectorAll: (selector: string) => selector === 'input[name], textarea' ? { length: n } : [],
   }));
   return {
     querySelectorAll: (sel: string) => (sel === 'div.queContainer' ? boxes : []),

@@ -27,7 +27,7 @@ import {
   asElement,
   clickOption,
   collectRoots,
-
+  essayControlFor,
   inputsFor,
   isVisible,
   textControlsFor,
@@ -82,6 +82,38 @@ function controlValue(el: HTMLElement): string {
   const v = (el as unknown as { value?: unknown }).value;
   if (typeof v === 'string') return v;
   return el.textContent ?? '';
+}
+
+function essayValue(editor: HTMLElement): string {
+  return editor.tagName === 'TEXTAREA'
+    ? controlValue(editor)
+    : editor.innerText.replace(/[\u200B\uFEFF]/g, '').trim();
+}
+
+interface RichEditor {
+  readonly body?: HTMLElement;
+  setContent(html: string): void;
+}
+
+function writeEssay(editor: HTMLElement, value: string): boolean {
+  if (essayValue(editor) === value) return true;
+  if (editor.tagName === 'TEXTAREA') return setControlValue(editor, value) && essayValue(editor) === value;
+  const view = editor.ownerDocument.defaultView;
+  const page = (editor === editor.ownerDocument.body ? view?.parent : view) as
+    | (Window & { UE?: { instants?: Record<string, RichEditor> } })
+    | undefined;
+  const instance = Object.values(page?.UE?.instants ?? {}).find((item) =>
+    item?.body === editor && typeof item.setContent === 'function');
+  if (instance !== undefined) {
+    const content = editor.ownerDocument.createElement('div');
+    content.innerText = value;
+    instance.setContent(content.innerHTML);
+  } else {
+    editor.innerText = value;
+    dispatch(editor, 'input');
+    dispatch(editor, 'change');
+  }
+  return essayValue(editor) === value;
 }
 
 /** 把答案写进一个文本框；值没变就不写、也不重复派发事件（幂等，重答不会打架） */
@@ -209,6 +241,13 @@ export function fillAnswers(targets: readonly FillTarget[], top?: Document): Fil
 
   const roots = top === undefined ? collectRoots() : [top];
   for (const t of targets) {
+    if (t.kind === 'essay') {
+      const editor = essayControlFor(roots, t.qid);
+      if (editor === null) missing.push(t.qid);
+      else if (t.text?.trim() && writeEssay(editor, t.text)) filled.push(t.qid);
+      else failed.push(t.qid);
+      continue;
+    }
     if (t.kind === 'blank') {
       const how = fillBlank(roots, t);
       if (how === 'filled') filled.push(t.qid);
@@ -296,6 +335,10 @@ export function findSubmitButton(top?: Document): HTMLButtonElement | null {
 /** 读取当前试卷答案快照。填空按控件顺序保留空位，选择题返回选中的字母。 */
 export function readQuestionAnswer(qid: string, kind: QuestionKind, top?: Document): string[] {
   const roots = top === undefined ? collectRoots() : [top];
+  if (kind === 'essay') {
+    const editor = essayControlFor(roots, qid);
+    return editor === null ? [] : [essayValue(editor)];
+  }
   if (kind === 'blank' || kind === 'other') return textControlsFor(roots, qid).map(controlValue);
   return inputsFor(roots, qid)
     .filter((input) => input.checked)
@@ -305,6 +348,10 @@ export function readQuestionAnswer(qid: string, kind: QuestionKind, top?: Docume
 
 /** 恢复当前试卷的逐项快照，保留原本为空的槽位及文本中的分隔字符。 */
 export function restoreQuestionAnswer(qid: string, kind: QuestionKind, values: readonly string[], doc: Document): boolean {
+  if (kind === 'essay') {
+    const editor = essayControlFor([doc], qid);
+    return editor !== null && writeEssay(editor, values[0] ?? '');
+  }
   if (kind === 'blank') return writeBlankValues(textControlsFor([doc], qid), values);
   if (kind === 'other') return false;
   if (values.length === 0) {
@@ -369,6 +416,10 @@ export function clearQuestion(
 ): 'ngModel' | 'dom' | 'missing' {
   const roots = top === undefined ? collectRoots() : [top];
 
+  if (kind === 'essay') {
+    const editor = essayControlFor(roots, qid);
+    return editor !== null && writeEssay(editor, '') ? 'dom' : 'missing';
+  }
   // 填空题先走文本框：它没有 input，走下面的路只会拿到 'missing'
   if (kind === 'blank') {
     const controls = textControlsFor(roots, qid);

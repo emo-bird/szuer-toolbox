@@ -113,6 +113,9 @@ export type QuizPhase = 'idle' | 'fetching' | 'answering' | 'filling' | 'reviewi
 
 interface QuizProgress {
   readonly tid: string;
+  readonly courseLabel?: string;
+  readonly hasCourseContext?: boolean;
+  readonly referenceFileName?: string;
   readonly total: number;
   /** 已处理的题数（含失败、待核对与跳过） */
   readonly done: number;
@@ -178,6 +181,9 @@ export function quizBegin(
   tid: string,
   questions: readonly { id: string; typeText: string; hasAnswer: boolean }[],
   preserve: boolean = false,
+  courseLabel?: string,
+  hasCourseContext?: boolean,
+  referenceFileName?: string,
 ): void {
   const previous = preserve && quiz?.tid === tid ? new Map(quiz.questions.map((q) => [q.qid, q])) : new Map();
   const items: QuestionProgress[] = questions.map((q, i) => previous.get(q.id) ?? ({
@@ -192,6 +198,9 @@ export function quizBegin(
   }));
   quiz = {
     tid,
+    courseLabel: courseLabel || (preserve && quiz?.tid === tid ? quiz.courseLabel : undefined),
+    hasCourseContext,
+    referenceFileName,
     total: questions.length,
     done: items.filter((q) => q.status !== 'pending').length,
     phase: 'fetching',

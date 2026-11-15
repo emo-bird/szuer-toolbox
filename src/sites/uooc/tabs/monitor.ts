@@ -210,6 +210,9 @@ function mountReview(root: HTMLElement, ctx: TabContext): { draw: () => void; di
       ? ' · 等待重试' : execution?.phase === 'parsing' ? ' · 解析答案' : execution?.phase === 'cache' ? ' · 命中缓存' : '';
     const text = quiz === null ? '打开测验后开始作答，或恢复本机草稿。'
       : `${QUIZ_PHASE_TEXT[quiz.phase]} · ${quiz.done}/${quiz.total} 已处理${executionText}${running ? activity : ''}` +
+        (quiz.courseLabel ? `\n所属课程：${quiz.courseLabel}` : '') +
+        (quiz.hasCourseContext || quiz.referenceFileName
+          ? `\n课程资料：${[quiz.hasCourseContext ? '文字资料' : '', quiz.referenceFileName].filter(Boolean).join('、')}` : '') +
         (startedAt ? ` · 已运行 ${Math.floor((Date.now() - startedAt) / 1000)} 秒` : '') +
         `\n回填/核对 ${counts.answered} · 待核对 ${counts.review} · 失败 ${counts.failed} · 不支持 ${counts.unsupported}` +
         (quiz.message ? `\n${quiz.message}` : '');

@@ -32,10 +32,10 @@ export interface DeepSeekOptions {
   readonly thinking: ThinkingMode;
   readonly search: boolean;
   readonly readUrl: boolean;
-  readonly safety: boolean;
   readonly maxTokens?: number;
   readonly inputLimit?: number;
   readonly context?: string;
+  readonly courseContext?: string;
   readonly referenceFile?: DeepSeekReferenceFile;
 }
 
@@ -46,7 +46,6 @@ export function deepSeekOptions(value: unknown): DeepSeekOptions | undefined {
     thinking: options.thinking !== undefined && THINKING_MODES.includes(options.thinking) ? options.thinking : 'auto',
     search: options.search === true,
     readUrl: options.readUrl === true,
-    safety: options.safety === true,
     ...bounded('maxTokens', options.maxTokens, DEEPSEEK_MAX_OUTPUT),
     ...bounded('inputLimit', options.inputLimit, DEEPSEEK_MAX_LOCAL_INPUT),
     ...(typeof options.context === 'string' && options.context.trim()
@@ -82,7 +81,6 @@ export function deepSeekParams(model: string, options?: DeepSeekOptions): Record
     ...(thinking === 'auto' ? {} : { thinking: { type: thinking === 'off' ? 'disabled' : 'enabled' } }),
     ...(thinking === 'auto' || thinking === 'off' ? {} : { reasoning_effort: thinking }),
     ...(tools.length === 0 ? {} : { tools }),
-    ...(current === DEEPSEEK_FLASH && options?.safety ? { safety_check: { level: 'high' } } : {}),
     ...(options?.maxTokens ? { max_tokens: options.maxTokens } : {}),
   };
 }

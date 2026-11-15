@@ -28,6 +28,7 @@
 import { scoped } from '../../common/core/log.ts';
 import type { PanelApi, SiteAdapter } from '../types.ts';
 import { installUoocIntercept } from './intercept.ts';
+import { cleanExpiredReferences } from './ai/reference-cleanup.ts';
 import { noticeBind } from './notice.ts';
 import { SITE_ID, UOOC_TOGGLES, applyUoocSettings, registerUoocSettings } from './settings.ts';
 import { UOOC_AI_TAB } from './tabs/ai.ts';
@@ -135,6 +136,8 @@ export const uoocAdapter: SiteAdapter = {
   /** 挂载期：DOM 已就绪，可以开始接管播放器。 */
   init(ctx) {
     applyUoocSettings();
+    void cleanExpiredReferences();
+    window.setInterval(() => { void cleanExpiredReferences(); }, 60 * 60 * 1000);
     // 提示流（notice.ts）要一个 Toast 出口；站点模块拿不到 shadow root，只能在这里绑
     noticeBind(ctx.panel);
 

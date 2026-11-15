@@ -35,7 +35,7 @@ import { scoped } from '../../common/core/log.ts';
 import { backendName, listKeys, read, remove, write } from '../../common/core/storage.ts';
 import { validateLlmEndpoint } from './ai/llm.ts';
 import type { LlmConfig, LlmResponseFormat } from './ai/llm.ts';
-import { DEEPSEEK_FLASH, deepSeekModel, deepSeekOptions, deepSeekReferenceFile, isDeepSeekEndpoint,
+import { DEEPSEEK_FLASH, DEEPSEEK_MAX_LOCAL_INPUT, DEEPSEEK_PRO, deepSeekModel, deepSeekOptions, deepSeekReferenceFile, isDeepSeekEndpoint,
   type DeepSeekOptions, type DeepSeekReferenceFile } from './ai/deepseek.ts';
 import { courseIdFromLocation } from './catalog-model.ts';
 
@@ -253,20 +253,106 @@ export function referenceCourseId(page: Pick<Location, 'pathname' | 'hash'> | un
   return courseIdFromLocation(page.pathname, page.hash);
 }
 
+export const COURSE_REFERENCE_LIFETIME_MS = 180 * 24 * 60 * 60 * 1000;
+const REFERENCE_TEXT = 'uooc:reference-text:';
+const REFERENCE_FILE = 'uooc:reference-file:';
+const CLOUD_FILE = 'uooc:reference-cloud:';
+
+function referenceTextRecord(key: string): { text: string; expiresAt: number } | undefined {
+  const stored = read<unknown>(key, null);
+  if (typeof stored === 'string' && stored.trim()) {
+    const migrated = { text: stored.slice(0, DEEPSEEK_MAX_LOCAL_INPUT), expiresAt: Date.now() + COURSE_REFERENCE_LIFETIME_MS };
+    write(key, migrated);
+    return migrated;
+  }
+  if (!stored || typeof stored !== 'object' || !('text' in stored) || typeof stored.text !== 'string' ||
+      !('expiresAt' in stored) || typeof stored.expiresAt !== 'number' || !Number.isSafeInteger(stored.expiresAt)) return undefined;
+  if (stored.expiresAt <= Date.now()) {
+    remove(key);
+    return undefined;
+  }
+  return { text: stored.text.slice(0, DEEPSEEK_MAX_LOCAL_INPUT), expiresAt: stored.expiresAt };
+}
+
+export function courseReferenceTextExpiry(courseId: string | null): number | undefined {
+  return courseId === null ? undefined : referenceTextRecord(REFERENCE_TEXT + courseId)?.expiresAt;
+}
+
+export function courseReferenceText(courseId: string | null): string {
+  return courseId === null ? '' : referenceTextRecord(REFERENCE_TEXT + courseId)?.text ?? '';
+}
+
+export function setCourseReferenceText(courseId: string, text: string): void {
+  const key = REFERENCE_TEXT + courseId;
+  const value = text.trim().slice(0, DEEPSEEK_MAX_LOCAL_INPUT);
+  if (value === '') remove(key);
+  else write(key, { text: value, expiresAt: Date.now() + COURSE_REFERENCE_LIFETIME_MS });
+}
+
+type TrackedFile = DeepSeekReferenceFile & { expiresAt: number; profileId?: string; retryAt?: number };
+
+export function trackReferenceFile(file: DeepSeekReferenceFile, profileId?: string): TrackedFile {
+  const key = CLOUD_FILE + file.id;
+  const tracked = read<TrackedFile | null>(key, null);
+  const expiresAt = Math.min(file.expiresAt ?? Infinity, tracked?.expiresAt ?? Date.now() + COURSE_REFERENCE_LIFETIME_MS);
+  const next = { ...file, expiresAt, profileId: tracked?.profileId ?? profileId, retryAt: tracked?.retryAt };
+  if (tracked === null || tracked.expiresAt !== expiresAt || tracked.profileId !== next.profileId) write(key, next);
+  return next;
+}
+
+function readReferenceFile(key: string): DeepSeekReferenceFile | undefined {
+  const file = deepSeekReferenceFile(read<unknown>(key, null));
+  if (file === undefined) return undefined;
+  const tracked = trackReferenceFile(file);
+  if (tracked.expiresAt <= Date.now()) {
+    remove(key);
+    return undefined;
+  }
+  if (file.expiresAt !== tracked.expiresAt) write(key, { ...file, expiresAt: tracked.expiresAt });
+  return { ...file, expiresAt: tracked.expiresAt };
+}
+
 export function courseReferenceFile(courseId: string | null): DeepSeekReferenceFile | undefined {
-  return courseId === null ? undefined : deepSeekReferenceFile(read<unknown>(`uooc:reference-file:${courseId}`, null));
+  return courseId === null ? undefined : readReferenceFile(REFERENCE_FILE + courseId);
 }
 
 export function setCourseReferenceFile(courseId: string, file?: DeepSeekReferenceFile): void {
-  if (file === undefined) remove(`uooc:reference-file:${courseId}`);
-  else write(`uooc:reference-file:${courseId}`, file);
+  const key = REFERENCE_FILE + courseId;
+  // Keep the cloud cleanup record when the course is unbound or a file is replaced.
+  readReferenceFile(key);
+  if (file === undefined) remove(key);
+  else {
+    const tracked = trackReferenceFile(file);
+    if (tracked.expiresAt <= Date.now()) throw new Error('参考文件已到期');
+    write(key, { ...file, expiresAt: tracked.expiresAt });
+  }
+}
+
+export function expiredReferenceFiles(): TrackedFile[] {
+  const keys = listKeys();
+  for (const key of keys) {
+    if (key.startsWith(REFERENCE_FILE)) readReferenceFile(key);
+    else if (key.startsWith(REFERENCE_TEXT)) referenceTextRecord(key);
+  }
+  const now = Date.now();
+  return listKeys().filter((key) => key.startsWith(CLOUD_FILE)).flatMap((key) => {
+    const file = read<TrackedFile | null>(key, null);
+    return file && deepSeekReferenceFile(file) && file.expiresAt <= now && (file.retryAt ?? 0) <= now ? [file] : [];
+  });
+}
+
+export function deferReferenceCleanup(id: string): void {
+  const key = CLOUD_FILE + id;
+  const file = read<TrackedFile | null>(key, null);
+  if (file) write(key, { ...file, retryAt: Date.now() + 24 * 60 * 60 * 1000 });
 }
 
 export function removeReferenceFileBindings(fileId: string): void {
   for (const key of listKeys()) {
-    if (key.startsWith('uooc:reference-file:') &&
+    if (key.startsWith(REFERENCE_FILE) &&
       deepSeekReferenceFile(read<unknown>(key, null))?.id === fileId) remove(key);
   }
+  remove(CLOUD_FILE + fileId);
 }
 
 function legacyKey(id: string): string {
@@ -401,14 +487,22 @@ export function removeAiProfile(id: string): void {
  * 判据只要求「地址 + 模型名」：API Key 允许为空 —— 本地 ollama / vllm 不需要，
  * 而 OpenAI 那类会直接返回 401，报错信息已经足够清楚。
  */
+export function withCourseReference(cfg: LlmConfig, courseId: string | null): LlmConfig {
+  if (!isDeepSeekEndpoint(cfg.baseUrl)) return cfg;
+  const model = deepSeekModel(cfg.model);
+  if (model !== DEEPSEEK_FLASH && model !== DEEPSEEK_PRO) return cfg;
+  const file = model === DEEPSEEK_FLASH ? courseReferenceFile(courseId) : undefined;
+  const courseContext = courseReferenceText(courseId);
+  if (!file && !courseContext) return cfg;
+  return { ...cfg, deepSeek: { ...deepSeekOptions(cfg.deepSeek ?? {})!, referenceFile: file, courseContext } };
+}
+
 export function aiConfig(courseId = referenceCourseId()): LlmConfig | null {
   const profile = activeAiProfile();
   const endpoint = validateLlmEndpoint(profile.baseUrl);
   if (endpoint.url === undefined || profile.model.trim() === '') return null;
   const { deepSeek } = profileDeepSeek(profile.baseUrl, profile.deepSeek);
-  const file = isDeepSeekEndpoint(profile.baseUrl) && deepSeekModel(profile.model.trim()) === DEEPSEEK_FLASH
-    ? courseReferenceFile(courseId) : undefined;
-  return {
+  return withCourseReference({
     baseUrl: profile.baseUrl,
     model: profile.model.trim(),
     apiKey: aiProfileSecret(profile.id, profile.baseUrl),
@@ -416,8 +510,8 @@ export function aiConfig(courseId = referenceCourseId()): LlmConfig | null {
     responseFormat: profile.responseFormat,
     profileId: profile.id,
     vision: profile.vision,
-    ...(file ? { deepSeek: { ...deepSeekOptions(deepSeek ?? {})!, referenceFile: file } } : deepSeek ? { deepSeek } : {}),
-  };
+    ...(deepSeek ? { deepSeek } : {}),
+  }, courseId);
 }
 
 /** AI 作答的并发数，夹在 1~8（上限是防呆，不是性能调优） */

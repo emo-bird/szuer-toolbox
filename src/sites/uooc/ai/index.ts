@@ -44,14 +44,14 @@ import {
   type FillTarget,
 } from './fill.ts';
 import type { LlmConfig } from './llm.ts';
-import { fetchPaper, isAnswerable, type ExamQuestion } from './paper.ts';
+import { fetchExamCourse, fetchPaper, isAnswerable, type ExamQuestion } from './paper.ts';
 import { parseQuestionAnswer } from './parse.ts';
 import { answerOne, answerQuestions, createAnswerExecution, type AnswerExecution, type AnswerOutcome } from './runner.ts';
 import { monitorState, quizBegin, quizEnd, quizExecution, quizPatch, quizPhase, quizSetIncomplete } from './monitor.ts';
 import { quizOverlayClose, quizOverlayOpen } from './overlay.ts';
 import { playQuizAlertSound, prepareQuizAlertSound, watchVerificationPrompt } from './verification-notice.ts';
 import { currentReview, loadReviewDraft, openReview, sameAnswer, sameReviewPaper, undoReviewAnswer, type QuizReview } from './review.ts';
-import { aiConcurrency, aiConfig, waitTimeoutMs } from '../settings.ts';
+import { aiConcurrency, aiConfig, waitTimeoutMs, withCourseReference } from '../settings.ts';
 import { noticePost } from '../notice.ts';
 import { hasOpenVideoQuiz } from '../video-quiz.ts';
 
@@ -180,6 +180,7 @@ function lettersOf(answer: string): string[] {
  * 两套字段不混用，`fill.ts` 按 `kind` 分流（用户 m00107）。
  */
 function fillTargetFor(q: ExamQuestion, answer: string): FillTarget {
+  if (q.kind === 'essay') return { qid: q.id, kind: q.kind, letters: [], text: answer };
   if (q.kind === 'blank') {
     return { qid: q.id, kind: q.kind, letters: [], text: answer, preserveFilledBlanks: true };
   }
@@ -224,6 +225,10 @@ export function quizTidOnPage(): string | null {
     if (tid !== null) return tid;
   }
   return tidFromLocation();
+}
+
+export function isStandaloneQuizPage(): boolean {
+  return /^\/exam\//.test(location.pathname) && tidFromLocation() !== null;
 }
 
 /**
@@ -505,8 +510,13 @@ async function runQuizAnswerBody(
   auto: boolean,
 ): Promise<AiQuizResult> {
   if (cfg !== null) log.info(`开始 AI 作答：tid=${tid}，模型=${cfg.model}`);
-  const paper = await fetchPaper(tid, run.signal);
+  const [paper, course] = await Promise.all([
+    fetchPaper(tid, run.signal),
+    isStandaloneQuizPage() ? fetchExamCourse(tid, run.signal) : null,
+  ]);
   run.checkPage();
+  if (cfg !== null && course !== null) cfg = withCourseReference(cfg, course.id);
+  const courseLabel = course?.name || paper.courseTitle || (course ? `课程 ID ${course.id}` : '');
 
   const all = paper.questions;
   const priorReview = currentReview();
@@ -529,6 +539,9 @@ async function runQuizAnswerBody(
     tid,
     all.map((q) => ({ id: q.id, typeText: q.typeText, hasAnswer: alreadyIds.has(q.id) })),
     preserve,
+    courseLabel,
+    cfg?.deepSeek?.courseContext !== undefined && cfg.deepSeek.courseContext !== '',
+    cfg?.deepSeek?.referenceFile?.name,
   );
   for (const q of already) {
     if (!preserve) quizPatch(q.id, { status: 'skipped', note: '页面上已有答案，不重复请求' });
@@ -543,7 +556,7 @@ async function runQuizAnswerBody(
 
   log.info(
     `拿到 ${all.length} 道题：页面上已有答案 ${already.length} 道（跳过），` +
-      `可自动作答 ${todo.length} 道，跳过 ${skippedKind} 道主观题`,
+      `可生成答案 ${todo.length} 道，跳过 ${skippedKind} 道不支持的题型`,
   );
 
   /** 我们实际填进去/提交的答案（重答时要拿它做排除） */
@@ -571,6 +584,14 @@ async function runQuizAnswerBody(
       : fillAnswers([fillTargetFor(question, outcome.answer)], run.doc);
     const ok = (report?.filled.length ?? 0) > 0;
     const after = ok ? readAnswer(question, run) : [];
+    const note = [
+      !same || hasCurrentAnswer ? '保留了页面原答案' : '',
+      needsReview && outcome.answer !== '' ? '建议尚未回填，请核对后应用' : '',
+      report?.missing.includes(question.id) ? '页面找不到对应答题控件' : '',
+      report?.failed.includes(question.id) ? '选项或填空与页面控件不匹配，或站点未保留写入' : '',
+      outcome.note,
+      outcome.error,
+    ].filter(Boolean).join('；');
     if (ok) {
       answers.set(question.id, outcome.answer);
       if (entry !== undefined) {
@@ -581,15 +602,14 @@ async function runQuizAnswerBody(
       priorVotes.set(question.id, outcome.samples.filter((value): value is string => value !== null));
     }
     quizPatch(question.id, {
-      status: ok ? 'answered' : outcome.unsupported ? 'unsupported' : needsReview ? 'review' : 'failed',
+      status: ok ? 'answered' : outcome.unsupported ? 'unsupported' : needsReview && outcome.answer !== '' ? 'review' : 'failed',
       answer: ok ? after.join(question.kind === 'blank' ? ' | ' : ',') : outcome.answer,
       requests: outcome.requests,
       samples: outcome.samples,
       explanation: outcome.explanation,
       citations: outcome.citations,
       cached: outcome.cached,
-      note: !same || hasCurrentAnswer ? '保留了页面原答案，请核对建议'
-        : outcome.note || outcome.error || (ok ? '' : '未能回填到当前试卷'),
+      note: note || (ok ? '' : '未能回填到当前试卷'),
     });
   };
   if (intent === 'draft') {
@@ -598,7 +618,9 @@ async function runQuizAnswerBody(
     for (const question of all) {
       const saved = draft.get(question.id);
       if (saved === undefined || !isAnswerable(question.kind)) continue;
-      const answer = parseQuestionAnswer(`1. ${saved}`, question);
+      const answer = question.kind === 'essay'
+        ? parseQuestionAnswer(JSON.stringify({ question: 1, answer: [saved] }), question)
+        : parseQuestionAnswer(`1. ${saved}`, question);
       if (answer === null) continue;
       recordAnswer(question, { qid: question.id, answer, requests: 0, samples: [], error: '',
         note: '来自本机草稿', review: alreadyIds.has(question.id) });
@@ -660,8 +682,14 @@ async function runQuizAnswerBody(
   const incomplete = auditAnswers(all, run);
   const reportIncomplete = (count: number): void => {
     const message = `已检查 ${all.length} 道题，${count} 道为空或未填完整。请在【监视】定位并补齐后提交。`;
-    quizPhase('reviewing', message);
-    if (auto || intent === 'submit') noticePost(message, 'warn');
+    const held = monitorState().quiz?.questions.filter((q) => q.incomplete && q.status === 'review').length ?? 0;
+    const details = [
+      held > 0 ? `${held} 道已有建议，待核对后应用。` : '',
+      summarizeFailures(failures),
+    ].filter(Boolean);
+    const summary = [message, ...details].join('\n');
+    quizPhase('reviewing', summary);
+    if (auto || intent === 'submit' || (isStandaloneQuizPage() && intent !== 'draft')) noticePost(summary, 'warn');
   };
   if (incomplete > 0) {
     reportIncomplete(incomplete);
@@ -677,7 +705,7 @@ async function runQuizAnswerBody(
     `当前页面：${all.length}/${all.length} 道题已填完整。`,
   ];
   if (reviewCount > 0) bodyLines.push(`${reviewCount} 道题有待核对的建议。`);
-  if (skippedKind > 0) bodyLines.push(`跳过 ${skippedKind} 道主观题（名词解释/问答/论述）。`);
+  if (skippedKind > 0) bodyLines.push(`跳过 ${skippedKind} 道不支持的题型。`);
   if (filled < todo.length) bodyLines.push(`有 ${todo.length - filled} 道没填进去（见【监视】页的逐题表）。`);
   if (failure !== '') bodyLines.push(failure);
   bodyLines.push('');
