@@ -1,0 +1,64 @@
+name: CI
+
+# 触发时机：
+#   - 任何 PR（含 draft）：合并前就能看到绿勾/红叉
+#   - 推到 master：确认合并后的主线本身是好的
+#   - 手动：Actions 页面点「Run workflow」
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+# 同一分支连续推送时，取消上一次还在跑的检查，省 runner 时间也不刷屏
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: 类型检查 / 测试 / 构建 / 产物自检
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # 必须 ≥ 22.18：tests/run.ts 直接 import .ts 源码，靠 Node 原生的类型擦除，
+      # 低版本会在第一条 import 就语法报错。本机开发用的是 Node 24，这里对齐。
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      # 用 ci 而不是 install：严格按 package-lock.json 装，PR 若改了依赖但忘了提交
+      # lock 文件，这一步就会失败，而不是悄悄装出另一套版本。
+      # --ignore-scripts 与 README 里的本地做法一致：不跑第三方安装脚本。
+      # esbuild 的平台二进制本身就在 optionalDependencies 包里，不需要它的 postinstall。
+      - name: 安装依赖
+        run: npm ci --ignore-scripts
+
+      - name: 类型检查
+        run: npm run typecheck
+
+      - name: 单元测试
+        run: npm test
+
+      # dist/ 是入库的（自动更新要 raw 链接），所以「改了源码忘了重新构建」
+      # 光跑测试是发现不了的：测试跑源码全绿，用户装的产物还是旧的。
+      # 下面三步把已提交的产物存一份 → 重建 → 逐行对比，不一致就报错。
+      - name: 存档已提交的产物
+        run: npm run dist:save
+
+      - name: 构建
+        run: npm run build
+
+      - name: 产物与源码是否同步
+        run: npm run dist:check
+
+      # 头部字段、@grant、适配器注册等结构性断言 —— 防「脚本能跑但什么都不做」
+      - name: 产物结构自检
+        run: npm run verify

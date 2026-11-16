@@ -2,6 +2,7 @@
 
 面向深圳大学校园站点的油猴脚本。在优课联盟和本科选课系统中，通过同一个悬浮窗使用各站点的工具。脚本打包成单个文件，无运行时依赖。
 
+[![CI](https://github.com/emo-bird/szuer-toolbox/actions/workflows/ci.yml/badge.svg)](https://github.com/emo-bird/szuer-toolbox/actions/workflows/ci.yml)
 [![Stars](https://img.shields.io/github/stars/emo-bird/szuer-toolbox?style=flat-square)](https://github.com/emo-bird/szuer-toolbox/stargazers)
 [![Last Commit](https://img.shields.io/github/last-commit/emo-bird/szuer-toolbox?style=flat-square)](https://github.com/emo-bird/szuer-toolbox/commits/master)
 [![Issues](https://img.shields.io/github/issues/emo-bird/szuer-toolbox?style=flat-square)](https://github.com/emo-bird/szuer-toolbox/issues)
@@ -99,6 +100,16 @@ npm run check                  # typecheck + 测试 + 构建 + 产物自检
 | `npm run check` | 以上四步串起来（提交前跑它） |
 | `npm run graph` | 生成交互式架构依赖图 `docs/architecture.html` |
 | `npm run knip` | 查未使用的文件 / 导出 / 依赖 |
+
+`npm run check` 里还夹着一对 `dist:save` / `dist:check`：先给已提交的产物存一份档，重新构建后再逐行比，
+用来抓「改了源码却忘了重新构建」——那种情况下测试跑源码依旧全绿，但用户装到的还是旧产物。
+
+### 持续集成（CI）
+
+PR 会由 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) 自动跑一遍：安装依赖 → 类型检查 → 单元测试
+→ 存档旧产物 → 构建 → 产物同步自检 → 产物结构自检。结果直接显示在 PR 页面的 Checks 里，
+全部通过才能放心合并。CI 与本地 `npm run check` 跑的是同一套命令，本地过了线上基本也会过。
+
 
 **开发要点**（改代码前请读 [`docs/开发文档.md`](docs/开发文档.md)）：
 
