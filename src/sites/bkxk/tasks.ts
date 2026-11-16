@@ -119,7 +119,7 @@ export function isTaskRunning(): boolean {
   return running;
 }
 
-export type StartReason = 'write-disabled' | 'already-running' | 'no-task' | '';
+type StartReason = 'write-disabled' | 'already-running' | 'no-task' | '';
 
 export interface StartResult {
   readonly ok: boolean;

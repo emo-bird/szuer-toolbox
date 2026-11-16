@@ -37,6 +37,8 @@ describe('uooc/ai · 题型判定', () => {
     assertEqual(kindOf('多选题', '11'), 'multi');
     assertEqual(kindOf('判断题', '20'), 'judge');
     assertEqual(kindOf('填空题', '30'), 'blank');
+    assertEqual(kindOf('一、论述题', '10'), 'essay');
+    assertEqual(kindOf('简答题', '40'), 'essay');
     // 站点真给的是「一、单选题」这种带序号的，必须也能认
     assertEqual(kindOf('一、单选题', '10'), 'single');
     // 中文与数字打架时听中文的
@@ -56,12 +58,24 @@ describe('uooc/ai · 题型判定', () => {
     assertEqual(kindOf('计算题', '50'), 'other');
   });
 
-  it('单选/多选/判断/填空能自动作答，主观题不能（填空自用户 m00107 起纳入）', () => {
+  it('支持客观题、填空和主观文本题，未知题型保持不支持', () => {
     assert(isAnswerable('single'), 'single 应该可作答');
     assert(isAnswerable('multi'), 'multi 应该可作答');
     assert(isAnswerable('judge'), 'judge 应该可作答');
     assert(isAnswerable('blank'), 'blank 现在应该可作答');
-    assert(!isAnswerable('other'), 'other（名词解释/问答/论述）不该被算进自动作答');
+    assert(isAnswerable('essay'), '主观文本题可生成待审核建议');
+    assert(!isAnswerable('other'), '未知题型不参与作答');
+  });
+
+  it('论述题保留段落，支持 JSON 正文并检查题目明确规定的字数上限', () => {
+    const essay = toExamQuestion({ id: '1', type_text: '论述题', question: '说明成因，不超过5字' })!;
+    assertEqual(parseQuestionAnswer('　甲段 \r\n　\r\n 乙段 ', essay), '甲段\n乙段');
+    assertEqual(parseQuestionAnswer('{"question":1,"answer":["甲段\\n乙段"]}', essay), '甲段\n乙段');
+    assertEqual(parseQuestionAnswer('{"question":1,"answer":[" 甲段 ","　乙段"]}', essay), '甲段\n乙段');
+    assertEqual(parseQuestionAnswer(' 用 AI \n\n 乙 ', essay), '用 AI\n乙');
+    assertEqual(parseQuestionAnswer('{"question":1,"answer":"甲段"}', essay), '甲段');
+    assertEqual(parseQuestionAnswer('{"question":1,"answer":["甲段",42]}', essay), null);
+    assertEqual(parseQuestionAnswer('超过题目的上限', essay), null);
   });
 
   it('空数：接口给对象、页面给数组，两种都数得对', () => {

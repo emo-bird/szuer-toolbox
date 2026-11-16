@@ -35,7 +35,8 @@ import { read, write } from '../core/storage.ts';
 import { scoped } from '../core/log.ts';
 import { TabView } from './tabs.ts';
 import { applyDisplayPreferences } from './display.ts';
-import { COMMON_SITE_ID, activeTabKey, pageScopeOf, resolveActiveTab } from './tab-order.ts';
+import { activeTabKey, pageScopeOf, resolveActiveTab } from './tab-order.ts';
+import type { TabOrderInput } from './tab-order.ts';
 import {
   BALL_SIZE,
   DEFAULT_SIZE,
@@ -51,15 +52,12 @@ import { ToastStack } from './widgets/toast.ts';
 import { showConfirm } from './widgets/confirm.ts';
 import { showAuthAlert } from './widgets/auth-alert.ts';
 import { closeModalAlerts, showModalAlert } from './widgets/modal.ts';
-import type { ConfirmOptions, PanelApi, TabContext, TabRegistration } from '../../sites/types.ts';
+import type { PanelApi } from '../../sites/types.ts';
 
 const log = scoped('ui/panel');
 
 /** 一个待挂载的标签页 + 它归属的站点 id（公共标签页用 'common'） */
-export interface TabEntry {
-  readonly siteId: string;
-  readonly tab: TabRegistration;
-}
+export type TabEntry = TabOrderInput;
 
 export interface PanelOptions {
   /** 标题栏右侧显示的站点名；null 表示只显示「深大人工具箱」 */
@@ -67,12 +65,8 @@ export interface PanelOptions {
 }
 
 export interface PanelHandle extends PanelApi {
-  /** 重建标签页集合 */
-  setTabs(entries: readonly TabEntry[]): void;
   /** 完全销毁（页面卸载前调用） */
   destroy(): void;
-  /** 当前页面标题等运行期信息，供调试 */
-  readonly element: HTMLElement;
 }
 
 const SIZE_KEY = 'ui:size';
@@ -85,8 +79,8 @@ const COLLAPSED_KEY = 'ui:collapsed';
  */
 const PANEL_POS_KEY = 'ui:panel-pos';
 
-function readPos(key: string): Pos | null {
-  const raw = read<Pos | null>(key, null);
+function readPanelPos(): Pos | null {
+  const raw = read<Pos | null>(PANEL_POS_KEY, null);
   return isPos(raw) ? raw : null;
 }
 
@@ -117,7 +111,7 @@ function clampPosition(pos: Pos, width: number, height: number): Pos {
 /** 指针拖拽的通用封装：pointerdown 之后跟到 pointerup 为止 */
 function startDrag(
   ev: PointerEvent,
-  onMove: (dx: number, dy: number, e: PointerEvent) => void,
+  onMove: (dx: number, dy: number) => void,
   onEnd: () => void,
 ): void {
   ev.preventDefault();
@@ -129,7 +123,7 @@ function startDrag(
   const move = (e: PointerEvent): void => {
     if (e.pointerId !== pointerId) return;
     e.preventDefault();
-    onMove(e.clientX - startX, e.clientY - startY, e);
+    onMove(e.clientX - startX, e.clientY - startY);
   };
   const up = (e: PointerEvent): void => {
     if (e.pointerId !== pointerId) return;
@@ -211,19 +205,8 @@ export function createPanel(
     collapseBtn,
   );
 
-  const tabView = new TabView(shadow, {
-    // 记住「用户上次停留的标签页」需要知道本页面属于哪个 scope。
-    // 这里只把 id 转交给 setTabs 装的闭包（它手上有 scope），
-    // 不在这里直接读 storage —— 落盘时机对顺序很敏感，原因见 setTabs 里的注释。
-    onActivate: (tabId) => {
-      // 内存态的「当前标签页」：重建标签集时（适配器二次注册）用它，
-      // 免得又去读一次 storage —— 那会把用户从当前这一页拽回站点键里的旧值。
-      currentTabId = tabId;
-      // 重建标签页时那次**自动**激活不算「用户的选择」，此时不写盘
-      if (restoring) return;
-      remember?.(tabId);
-    },
-  });
+  const tabKey = activeTabKey(pageScopeOf(entries));
+  const tabView = new TabView(shadow, (tabId) => write(tabKey, tabId));
   const resizeHandle = el('div', { class: 'sztb-resize', attrs: { title: '拖拽调整大小' } });
 
   const panelEl = el('div', { class: 'sztb-panel' }, head, tabView.tabbar, tabView.body, resizeHandle);
@@ -233,29 +216,15 @@ export function createPanel(
 
   const toasts = new ToastStack(shadow);
 
-  /**
-   * 「上次停留的标签页」的落盘闸门，每次重建标签页时由 setTabs 重装。
-   *
-   * ⚠️ 关键是把「用户点标签页」与「setTabs 内部那次自动激活」分开：
-   * 后者只是把上次的记忆恢复出来，不是新选择，写盘会把它抹成回退值。
-   * （初版把闸门写成「存的值已等于当前值才写盘」，于是首次访问之后
-   *   用户的所有点击都不落盘，记忆永远冻在第一次写入的值上。）
-   */
-  let restoring = false;
-  let remember: ((tabId: string) => void) | undefined;
-  /** 内存里的当前标签页；只在**首次**建标签集时才去读 storage 的记忆 */
-  let currentTabId: string | null = null;
-
   // ------------------------------------------------------------ 状态
   //
   // 折叠状态的取值优先级（需求变更 v0.8）：
   //   1. 用户上次手动设置的折叠态（跨站点共用）
   //   2. 没有记录时 ⇒ **默认展开**（初次访问任何匹配站点都显示悬浮窗）
-  const storedCollapsed = read<boolean | null>(COLLAPSED_KEY, null);
-  let collapsed = storedCollapsed ?? false;
+  let collapsed = read(COLLAPSED_KEY, false);
 
   let size = readSize();
-  let panelPos: Pos = readPos(PANEL_POS_KEY) ?? defaultPanelPos();
+  let panelPos: Pos = readPanelPos() ?? defaultPanelPos();
   // 球的位置：永远由面板位置 + 尺寸推出「折叠按钮中心」，收起时球正好落在原地
   let ballPos: Pos = ballPosFromPanel(panelPos, size);
 
@@ -280,11 +249,10 @@ export function createPanel(
     root.dataset['collapsed'] = String(collapsed);
   }
 
-  function setCollapsed(next: boolean, persist = true): void {
-    if (next !== collapsed) {
-      collapsed = next;
-      if (persist) write(COLLAPSED_KEY, collapsed);
-    }
+  function setCollapsed(next: boolean): void {
+    if (next === collapsed) return;
+    collapsed = next;
+    write(COLLAPSED_KEY, collapsed);
     if (collapsed) {
       // 收起：球落到标题栏折叠按钮的**中心**（用户拍板：两者同坐标，
       // 收起 / 展开看上去是在同一个点上的「缩 / 放」而不是「移动」）。
@@ -332,14 +300,13 @@ export function createPanel(
   /**
    * 给某个元素装上拖拽。
    * @param readPos 取当前位置
-   * @param applyPos 拖动过程中应用新位置（是否落盘由调用方决定）
-   * @param sizeOf 当前元素尺寸（用于视口钳制）
+   * @param moveTo 拖动过程中只更新内存坐标，由 applyGeometry 约束到视口
    */
   function makeDraggable(
     handle: HTMLElement,
     read: () => Pos,
-    write: (p: Pos) => void,
-    sizeOf: () => { w: number; h: number },
+    moveTo: (p: Pos) => void,
+    onEnd?: () => void,
   ): void {
     handle.addEventListener('pointerdown', (ev) => {
       const origin = read();
@@ -348,12 +315,11 @@ export function createPanel(
         ev,
         (dx, dy) => {
           if (Math.abs(dx) > 2 || Math.abs(dy) > 2) dragged = true;
-          const { w, h } = sizeOf();
-          write(clampPosition({ left: origin.left + dx, top: origin.top + dy }, w, h));
+          moveTo({ left: origin.left + dx, top: origin.top + dy });
           applyGeometry();
         },
         () => {
-          if (dragged) write(read());
+          if (dragged) onEnd?.();
         },
       );
     });
@@ -367,17 +333,13 @@ export function createPanel(
       // 存下来就会与下一次折叠的对齐结果打架。拖动仅在本次会话内有效。
       ballPos = p;
     },
-    () => ({ w: BALL_SIZE, h: BALL_SIZE }),
   );
 
   makeDraggable(
     head,
     () => panelPos,
-    (p) => {
-      panelPos = p;
-      write(PANEL_POS_KEY, p);
-    },
-    () => ({ w: size.width, h: size.height }),
+    (p) => { panelPos = p; },
+    () => write(PANEL_POS_KEY, panelPos),
   );
 
   resizeHandle.addEventListener('pointerdown', (ev) => {
@@ -411,45 +373,14 @@ export function createPanel(
 
   // ------------------------------------------------------------ PanelApi
   const api: PanelHandle = {
-    element: host,
     collapse: () => setCollapsed(true),
     expand: () => setCollapsed(false),
     isCollapsed: () => collapsed,
     toast: (message, kind, options) => toasts.show(message, kind ?? 'info', options ?? {}),
-    confirm: (opts: ConfirmOptions) => showConfirm(shadow, opts),
+    confirm: (opts) => showConfirm(shadow, opts),
     alert: (opts) => showModalAlert(shadow, opts),
     alertAuthExpired: () => showAuthAlert(shadow),
     activateTab: (tabId) => tabView.activate(tabId),
-    setTabs: (next: readonly TabEntry[]) => {
-      const siteToId = new Map<string, string>();
-      for (const entry of next) siteToId.set(entry.tab.id, entry.siteId);
-
-      // 记忆是**按页面分键**的：`ui:active-tab:<scope>`，scope = 本页面的站点
-      // （有适配器就是它的 id，纯公共页面是 'common'）。记的是「我在这个页面上最后
-      // 看的是哪个标签页」—— 站点标签页与公共标签页一视同仁（用户 m00593 要求：
-      // 在本科选课页面停在【日志】，刷新后必须还在【日志】，不能被站点组抢回去）。
-      const scope = pageScopeOf(next);
-
-      // 记忆的**读**：只在首次建标签集时发生。之后一律用内存里的当前标签页 ——
-      // 否则适配器二次注册时会又去读一遍 storage，把用户拽回本页旧值。
-      const preferred =
-        currentTabId ?? resolveActiveTab(next, (key) => read<string | null>(key, null));
-
-      // 记忆的**写**：只在用户真的点了标签页时发生（restoring 闸门在 onActivate 里）。
-      // ⚠️ 必须每次重建都换掉这个闭包：它捕获了本轮的 scope。
-      remember = (tabId) => {
-        if (!tabView.has(tabId)) return; // 理论上不会走到：activate 对未知 id 直接返回
-        write(activeTabKey(scope), tabId);
-      };
-
-      restoring = true;
-      try {
-        // 整条 entries 交给 TabView：分组要用 siteId，丢掉了就只能全局按 order 平铺
-        tabView.setTabs(next, makeContext(siteToId), preferred);
-      } finally {
-        restoring = false;
-      }
-    },
     destroy: () => {
       window.removeEventListener('resize', applyGeometry);
       closeModalAlerts(shadow);
@@ -463,25 +394,10 @@ export function createPanel(
     },
   };
 
-  /** 每个标签页拿到自己的 siteId */
-  function makeContext(siteToId: Map<string, string>): TabContext {
-    return {
-      get siteId(): string {
-        const active = tabView.activeTabId();
-        return active !== null ? (siteToId.get(active) ?? COMMON_SITE_ID) : COMMON_SITE_ID;
-      },
-      host: api,
-    };
-  }
-
   applyGeometry();
-  api.setTabs(entries);
+  tabView.mount(entries, api, resolveActiveTab(entries, (key) => read<string | null>(key, null)));
 
   (document.documentElement ?? document.body).appendChild(host);
-
-  // 需求变更 v0.8：初次访问任何匹配站点都**显示悬浮窗**（而不是悬浮球）。
-  // 只有用户自己折叠过之后，后续页面才按保存的折叠态显示。
-  if (storedCollapsed === null) write(COLLAPSED_KEY, false);
 
   log.info(
     `悬浮窗已装载：${entries.length} 个标签页，初始${collapsed ? '折叠（沿用上次）' : '展开'}，` +

@@ -37,13 +37,10 @@ import { PAGE_MARK, SITE_ID, TOGGLE, VALUE } from './settings.ts';
 import { loadMonitorStore, subscribeMonitor, updateMonitor } from './monitor.ts';
 import { loadTaskStore, subscribeTasks, updateTasks } from './tasks.ts';
 import {
-  addMonitor,
   grabButtonLabel,
-  hasMonitor,
-  hasTask,
   idLineText,
   monitorButtonLabel,
-  removeMonitor,
+  toggleMonitor,
   toggleTask,
   CLASS_COLLECTION_IMG,
   CLASS_DELETE_VOLUNTEER,
@@ -84,13 +81,19 @@ const ROW_SELECTOR = '.cv-row';
 const BODY_SELECTOR = '.cv-body';
 const SETTING_COL_SELECTOR = '.cv-setting-col';
 
-interface Ctx {
+interface ScanContext {
   readonly panel: PanelApi;
+  membership(): ReturnType<typeof readMembership>;
   /** 本次扫描已注入的块数 */
   budget: number;
 }
 
-
+function readMembership() {
+  return {
+    tasks: new Set(loadTaskStore().items.map((item) => item.teachingClassID)),
+    monitors: new Set(loadMonitorStore().items.map((item) => item.teachingClassID)),
+  };
+}
 // ------------------------------------------------------------ 交互
 
 function targetText(info: TargetInfo): string {
@@ -121,13 +124,15 @@ async function copyId(tcId: string, panel: PanelApi): Promise<void> {
 
 /** 把抢课按钮刷成 `on` 的状态（点击后、引擎通知后都走这里） */
 function applyGrabButton(btn: HTMLButtonElement, on: boolean): void {
-  btn.textContent = grabButtonLabel(on);
+  const label = grabButtonLabel(on);
+  if (btn.textContent !== label) btn.textContent = label;
   btn.classList.toggle('sztb-bkxk-btn-on', on);
 }
 
 /** 把监控按钮刷成 `on` 的状态 */
 function applyMonitorButton(btn: HTMLButtonElement, on: boolean): void {
-  btn.textContent = monitorButtonLabel(on);
+  const label = monitorButtonLabel(on);
+  if (btn.textContent !== label) btn.textContent = label;
   btn.classList.toggle('sztb-bkxk-btn-on', on);
 }
 
@@ -145,18 +150,17 @@ function applyMonitorButton(btn: HTMLButtonElement, on: boolean): void {
 function syncInjectedButtons(): void {
   const blocks = document.querySelectorAll<HTMLElement>('[data-sztb-tcid]');
   if (blocks.length === 0) return;
-  const tasks = loadTaskStore();
-  const monitors = loadMonitorStore();
+  const { tasks, monitors } = readMembership();
   for (const block of blocks) {
     const tcId = block.getAttribute('data-sztb-tcid') ?? '';
     const grab = block.querySelector<HTMLButtonElement>('button[data-role="grab"]');
-    if (grab !== null) applyGrabButton(grab, hasTask(tasks, tcId));
+    if (grab !== null) applyGrabButton(grab, tasks.has(tcId));
     const mon = block.querySelector<HTMLButtonElement>('button[data-role="monitor"]');
-    if (mon !== null) applyMonitorButton(mon, hasMonitor(monitors, tcId));
+    if (mon !== null) applyMonitorButton(mon, monitors.has(tcId));
   }
 }
 
-function onGrab(info: TargetInfo, ctx: Ctx, btn: HTMLButtonElement): void {
+function onGrab(info: TargetInfo, panel: PanelApi, btn: HTMLButtonElement): void {
   // 判定与改动在同一次 updateTasks 里完成（与 onMonitorToggle 同理由）：在回调之外
   // 先判「在不在」再写盘，中间隔着一个 await 点（抢课循环可能刚写过），判定就过期了。
   //
@@ -176,39 +180,38 @@ function onGrab(info: TargetInfo, ctx: Ctx, btn: HTMLButtonElement): void {
   applyGrabButton(btn, nowOn);
   if (nowOn) {
     log.info(`已加入抢课队列：${targetText(info)}（本轮只入队，不会发送任何请求）`);
-    ctx.panel.toast(
+    panel.toast(
       `已加入抢课队列：${info.courseName === '' ? info.tcId : info.courseName}`,
       'success',
     );
   } else {
     log.info(`已移出抢课队列：${targetText(info)}（站点上已经选到的课不会被退掉）`);
-    ctx.panel.toast('已移出抢课队列（不会退掉已经选上的课）', 'info');
+    panel.toast('已移出抢课队列（不会退掉已经选上的课）', 'info');
   }
 }
 
-function onMonitorToggle(info: TargetInfo, ctx: Ctx, btn: HTMLButtonElement): void {
+function onMonitorToggle(info: TargetInfo, panel: PanelApi, btn: HTMLButtonElement): void {
   // 判定与改动在同一次 updateMonitor 里完成：在回调之外先判「在不在」再写盘，
   // 中间隔着一个 await 点（监控轮询可能刚写过），判定就过期了。
   let nowOn = false;
   updateMonitor((store) => {
-    if (hasMonitor(store, info.tcId)) {
-      nowOn = false;
-      return removeMonitor(store, info.tcId).store;
-    }
-    nowOn = true;
-    return addMonitor(store, { ...info, now: Date.now() }).store;
+    const result = toggleMonitor(store, info);
+    nowOn = result.on;
+    return result.store;
   });
   applyMonitorButton(btn, nowOn);
   if (nowOn) {
     log.info(`已加入监控列表：${targetText(info)}（到监控页点【开始监控】才会轮询）`);
-    ctx.panel.toast('已加入监控', 'success');
+    panel.toast('已加入监控', 'success');
   } else {
     log.info(`已移出监控列表：${targetText(info)}`);
-    ctx.panel.toast('已移出监控', 'info');
+    panel.toast('已移出监控', 'info');
   }
 }
 
-function buildBlock(info: TargetInfo, ctx: Ctx): HTMLElement {
+function buildBlock(info: TargetInfo, ctx: ScanContext): HTMLElement {
+  const { panel } = ctx;
+  const { tasks, monitors } = ctx.membership();
   const idLine = el('div', {
     class: 'sztb-bkxk-id',
     text: idLineText(info.tcId),
@@ -216,12 +219,12 @@ function buildBlock(info: TargetInfo, ctx: Ctx): HTMLElement {
     on: {
       click: (ev) => {
         swallow(ev);
-        void copyId(info.tcId, ctx.panel);
+        void copyId(info.tcId, panel);
       },
     },
   });
 
-  const queued = hasTask(loadTaskStore(), info.tcId);
+  const queued = tasks.has(info.tcId);
   const grab = el('button', {
     class: `sztb-bkxk-btn${queued ? ' sztb-bkxk-btn-on' : ''}`,
     text: grabButtonLabel(queued),
@@ -229,12 +232,12 @@ function buildBlock(info: TargetInfo, ctx: Ctx): HTMLElement {
     on: {
       click: (ev) => {
         swallow(ev);
-        onGrab(info, ctx, grab);
+        onGrab(info, panel, grab);
       },
     },
   });
 
-  const monitored = hasMonitor(loadMonitorStore(), info.tcId);
+  const monitored = monitors.has(info.tcId);
   const mon = el('button', {
     class: `sztb-bkxk-btn${monitored ? ' sztb-bkxk-btn-on' : ''}`,
     text: monitorButtonLabel(monitored),
@@ -242,7 +245,7 @@ function buildBlock(info: TargetInfo, ctx: Ctx): HTMLElement {
     on: {
       click: (ev) => {
         swallow(ev);
-        onMonitorToggle(info, ctx, mon);
+        onMonitorToggle(info, panel, mon);
       },
     },
   });
@@ -267,7 +270,7 @@ function injectStyle(): void {
 }
 
 /** 卡片形态：注入单元是 `.cv-info`（= 一个教学班） */
-function enhanceUnit(unit: HTMLElement, ctx: Ctx): void {
+function enhanceUnit(unit: HTMLElement, ctx: ScanContext): void {
   if (ctx.budget >= MAX_BLOCKS_PER_SCAN) return;
   if (ownsBlock(unit)) return;
   const tcId = tcIdIn(unit);
@@ -283,14 +286,10 @@ function enhanceUnit(unit: HTMLElement, ctx: Ctx): void {
   // 放到 `.cv-info` 的第一个子位置，块就成了卡片的普通块级子元素，宽度自然被卡片约束。
   unit.insertBefore(block, unit.firstChild);
   ctx.budget += 1;
-  // 站点自己的节点（星标 / 退选按钮）也要摆到用户要的位置。
-  // 这里做一次是为了「开关刚打开 / 页面刚加载」时就位；站点重绘后的补摆位
-  // 由扫描末尾的 syncRelocation() 兜底（那条路径不受「已有块就 return」影响）。
-  relocateInUnit(unit);
 }
 
 /** 列表形态：注入单元是整行，块放在行末新加的一列里 */
-function enhanceRow(row: HTMLElement, ctx: Ctx): void {
+function enhanceRow(row: HTMLElement, ctx: ScanContext): void {
   if (ctx.budget >= MAX_BLOCKS_PER_SCAN) return;
   // 卡片页的行：教学班在卡片里，由 enhanceUnit 负责，这里不重复插列
   if (row.querySelector(CARD_SELECTOR) !== null) return;
@@ -392,20 +391,6 @@ function reorderH5(h5: HTMLElement): void {
 }
 
 /**
- * 没被注入过的教学班也要摆位（幂等兜底）。
- *
- * 为什么需要这一步：`relocateInUnit()` 挂在 `enhanceUnit()` 里，而 `enhanceUnit()`
- * 遇到「已经有我们的块」会**提前 return** —— 于是站点重绘把退选按钮放回原位后，
- * 那个教学班因为「块还在」而永远不会被重新摆位，用户看到的是「搬一次就失效」。
- * 所以扫描末尾单独过一遍**全部教学班**，只做摆位、不碰注入。
- */
-function syncRelocation(): void {
-  for (const unit of document.querySelectorAll<HTMLElement>(`${CARD_SELECTOR} ${INFO_SELECTOR}`)) {
-    relocateInUnit(unit);
-  }
-}
-
-/**
  * 把我们注入的节点全部摘掉（关开关时用）。
  *
  * 只认带 `sztb-bkxk-` 前缀的类名 —— 站点自己的类都是 `cv-` 开头，
@@ -419,21 +404,23 @@ function removeInjected(): void {
   log.info(`列表注入开关已关闭：移除 ${String(nodes.length)} 个注入节点`);
 }
 
-function scan(ctx: Ctx): void {
+function scan(panel: PanelApi): void {
   if (!isEnabled(SITE_ID, TOGGLE.LIST_INJECT)) {
     removeInjected();
     return;
   }
-  ctx.budget = 0;
+  let membership: ReturnType<typeof readMembership> | undefined;
+  const ctx: ScanContext = { panel, budget: 0, membership: () => membership ??= readMembership() };
   injectStyle();
   for (const unit of document.querySelectorAll<HTMLElement>(`${CARD_SELECTOR} ${INFO_SELECTOR}`)) {
     enhanceUnit(unit, ctx);
+    // 站点会把操作按钮放回原处，已有注入块的教学班也需要校正位置。
+    relocateInUnit(unit);
   }
   for (const row of document.querySelectorAll<HTMLElement>(`${BODY_SELECTOR} > ${ROW_SELECTOR}`)) {
     enhanceRow(row, ctx);
   }
   syncHeads();
-  syncRelocation();
 }
 
 /**
@@ -448,11 +435,6 @@ export function startListInjection(panel: PanelApi): () => void {
     return () => undefined;
   }
 
-  const ctx: Ctx = {
-    panel,
-    budget: 0,
-  };
-
   let observer: MutationObserver | null = null;
   let timer: number | null = null;
 
@@ -460,7 +442,7 @@ export function startListInjection(panel: PanelApi): () => void {
     if (timer !== null) return;
     timer = window.setTimeout(() => {
       timer = null;
-      scan(ctx);
+      scan(panel);
     }, RESCAN_DELAY_MS);
   };
 
@@ -469,7 +451,7 @@ export function startListInjection(panel: PanelApi): () => void {
   const unsubscribes = [subscribeTasks(syncInjectedButtons), subscribeMonitor(syncInjectedButtons)];
 
   whenDomReady(() => {
-    scan(ctx);
+    scan(panel);
     // 站点的页签切换 / 翻页全是 XHR + 重绘，必须跟着补注入
     observer = new MutationObserver(schedule);
     observer.observe(document.body, { childList: true, subtree: true });

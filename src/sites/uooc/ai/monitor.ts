@@ -84,7 +84,9 @@ export interface QuestionProgress {
   /** 备注：重答模式会说「模型没听排除」之类的 */
   readonly note: string;
   readonly explanation?: string;
+  readonly citations?: readonly import('./llm.ts').LlmCitation[] | undefined;
   readonly cached?: boolean;
+  readonly incomplete?: boolean;
 }
 
 /** 课程（连播）进度 */
@@ -109,8 +111,11 @@ export interface CourseProgress {
 /** 答题阶段（监视页顶部一句话） */
 export type QuizPhase = 'idle' | 'fetching' | 'answering' | 'filling' | 'reviewing' | 'confirming' | 'submitting' | 'retrying' | 'done' | 'error';
 
-export interface QuizProgress {
+interface QuizProgress {
   readonly tid: string;
+  readonly courseLabel?: string;
+  readonly hasCourseContext?: boolean;
+  readonly referenceFileName?: string;
   readonly total: number;
   /** 已处理的题数（含失败、待核对与跳过） */
   readonly done: number;
@@ -176,6 +181,9 @@ export function quizBegin(
   tid: string,
   questions: readonly { id: string; typeText: string; hasAnswer: boolean }[],
   preserve: boolean = false,
+  courseLabel?: string,
+  hasCourseContext?: boolean,
+  referenceFileName?: string,
 ): void {
   const previous = preserve && quiz?.tid === tid ? new Map(quiz.questions.map((q) => [q.qid, q])) : new Map();
   const items: QuestionProgress[] = questions.map((q, i) => previous.get(q.id) ?? ({
@@ -190,6 +198,9 @@ export function quizBegin(
   }));
   quiz = {
     tid,
+    courseLabel: courseLabel || (preserve && quiz?.tid === tid ? quiz.courseLabel : undefined),
+    hasCourseContext,
+    referenceFileName,
     total: questions.length,
     done: items.filter((q) => q.status !== 'pending').length,
     phase: 'fetching',
@@ -218,6 +229,14 @@ export function quizPatch(qid: string, patch: Partial<Omit<QuestionProgress, 'qi
   if (!hit) return;
   const done = questions.filter((q) => q.status !== 'pending').length;
   quiz = { ...quiz, questions, done };
+  publishQuiz();
+}
+
+/** 记录当前试卷的回读结果，保留每道题的 AI 作答状态和建议。 */
+export function quizSetIncomplete(ids: ReadonlySet<string>): void {
+  if (quiz === null) return;
+  const questions = quiz.questions.map((q) => ({ ...q, incomplete: ids.has(q.qid) }));
+  quiz = { ...quiz, questions };
   publishQuiz();
 }
 

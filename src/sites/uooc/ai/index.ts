@@ -31,7 +31,6 @@
  */
 
 import { scoped } from '../../../common/core/log.ts';
-import { safePath } from '../../../common/core/http.ts';
 import { pageOrSelf } from '../../../common/utils/page.ts';
 import type { PanelApi } from '../../types.ts';
 import { installUoocIntercept, isCommitHttpOk, waitCommit, type CommitResult } from '../intercept.ts';
@@ -44,15 +43,15 @@ import {
   readQuestionAnswer,
   type FillTarget,
 } from './fill.ts';
-import { chatUrl, type LlmConfig } from './llm.ts';
-import { fetchPaper, isAnswerable, type ExamQuestion } from './paper.ts';
+import type { LlmConfig } from './llm.ts';
+import { fetchExamCourse, fetchPaper, isAnswerable, type ExamQuestion } from './paper.ts';
 import { parseQuestionAnswer } from './parse.ts';
 import { answerOne, answerQuestions, createAnswerExecution, type AnswerExecution, type AnswerOutcome } from './runner.ts';
-import { monitorState, quizBegin, quizEnd, quizExecution, quizPatch, quizPhase } from './monitor.ts';
+import { monitorState, quizBegin, quizEnd, quizExecution, quizPatch, quizPhase, quizSetIncomplete } from './monitor.ts';
 import { quizOverlayClose, quizOverlayOpen } from './overlay.ts';
 import { playQuizAlertSound, prepareQuizAlertSound, watchVerificationPrompt } from './verification-notice.ts';
 import { currentReview, loadReviewDraft, openReview, sameAnswer, sameReviewPaper, undoReviewAnswer, type QuizReview } from './review.ts';
-import { aiConcurrency, aiConfig, waitTimeoutMs } from '../settings.ts';
+import { aiConcurrency, aiConfig, waitTimeoutMs, withCourseReference } from '../settings.ts';
 import { noticePost } from '../notice.ts';
 import { hasOpenVideoQuiz } from '../video-quiz.ts';
 
@@ -115,7 +114,8 @@ export async function applyReviewedAnswer(id: string, host: PanelApi): Promise<b
   if (result.filled.length === 0) return false;
   if (entry.applied === undefined || !sameAnswer(entry.applied, before)) entry.original = before;
   entry.applied = readQuestionAnswer(id, q.kind, review.doc);
-  quizPatch(id, { status: 'answered', answer: entry.applied.join(q.kind === 'blank' ? ' | ' : ','), note: '已审核并应用' });
+  quizPatch(id, { status: 'answered', answer: entry.applied.join(q.kind === 'blank' ? ' | ' : ','),
+    incomplete: !isAnswerComplete(q, entry.applied), note: '已审核并应用' });
   return true;
 }
 
@@ -127,7 +127,9 @@ export function undoReviewedAnswers(id?: string): number {
     if (id !== undefined && entry.question.id !== id) continue;
     if (undoReviewAnswer(review, entry)) {
       restored += 1;
-      quizPatch(entry.question.id, { status: 'review', answer: entry.suggestion ?? '', note: '已恢复回填前的答案' });
+      const q = entry.question;
+      quizPatch(q.id, { status: 'review', answer: entry.suggestion ?? '',
+        incomplete: !isAnswerComplete(q, readQuestionAnswer(q.id, q.kind, review.doc)), note: '已恢复回填前的答案' });
     }
   }
   return restored;
@@ -139,9 +141,9 @@ export function markReviewedAnswer(id: string): boolean {
   if (review === null || entry === undefined || isQuizRunning()) return false;
   const q = entry.question;
   const values = readQuestionAnswer(id, q.kind, review.doc);
-  if (values.length === 0 || values.some((value) => value.trim() === '') ||
-    (q.kind === 'blank' && q.blankCount && q.blankCount !== values.length)) return false;
-  quizPatch(id, { status: 'answered', answer: values.join(q.kind === 'blank' ? ' | ' : ','), note: '已人工核对' });
+  if (!isAnswerComplete(q, values)) return false;
+  quizPatch(id, { status: 'answered', answer: values.join(q.kind === 'blank' ? ' | ' : ','),
+    incomplete: false, note: '已人工核对' });
   return true;
 }
 
@@ -178,6 +180,7 @@ function lettersOf(answer: string): string[] {
  * 两套字段不混用，`fill.ts` 按 `kind` 分流（用户 m00107）。
  */
 function fillTargetFor(q: ExamQuestion, answer: string): FillTarget {
+  if (q.kind === 'essay') return { qid: q.id, kind: q.kind, letters: [], text: answer };
   if (q.kind === 'blank') {
     return { qid: q.id, kind: q.kind, letters: [], text: answer, preserveFilledBlanks: true };
   }
@@ -224,6 +227,10 @@ export function quizTidOnPage(): string | null {
   return tidFromLocation();
 }
 
+export function isStandaloneQuizPage(): boolean {
+  return /^\/exam\//.test(location.pathname) && tidFromLocation() !== null;
+}
+
 /**
  * 当前页面上那份试卷的 iframe —— **进度遮罩要盖的就是它**（`./overlay.ts`）。
  *
@@ -254,6 +261,18 @@ async function waitForQuizDocument(
 
 function readAnswer(q: ExamQuestion, run: QuizRun): string[] {
   return readQuestionAnswer(q.id, q.kind, run.doc);
+}
+
+function isAnswerComplete(question: ExamQuestion, values: readonly string[]): boolean {
+  return values.length > 0 && values.every((value) => value.trim() !== '') &&
+    (question.kind !== 'blank' || !question.blankCount || values.length === question.blankCount);
+}
+
+function auditAnswers(questions: readonly ExamQuestion[], run: QuizRun): number {
+  run.checkPage();
+  const incomplete = new Set(questions.filter((q) => !isAnswerComplete(q, readAnswer(q, run))).map((q) => q.id));
+  quizSetIncomplete(incomplete);
+  return incomplete.size;
 }
 
 /** 把「没答出来」的原因汇总成一行，放进确认框与日志 */
@@ -383,6 +402,7 @@ async function retryLowScore(
       requests: o.requests,
       samples: o.samples,
       explanation: o.explanation,
+      citations: o.citations,
       note: unchanged ? (o.note ?? (ok ? '' : '重答未能回填')) : '页面答案已修改，请人工核对',
     });
     if (ok) {
@@ -489,9 +509,14 @@ async function runQuizAnswerBody(
   intent: QuizIntent | undefined,
   auto: boolean,
 ): Promise<AiQuizResult> {
-  if (cfg !== null) log.info(`开始 AI 作答：tid=${tid}，接口=${safePath(chatUrl(cfg.baseUrl))}，模型=${cfg.model}`);
-  const paper = await fetchPaper(tid, run.signal);
+  if (cfg !== null) log.info(`开始 AI 作答：tid=${tid}，模型=${cfg.model}`);
+  const [paper, course] = await Promise.all([
+    fetchPaper(tid, run.signal),
+    isStandaloneQuizPage() ? fetchExamCourse(tid, run.signal) : null,
+  ]);
   run.checkPage();
+  if (cfg !== null && course !== null) cfg = withCourseReference(cfg, course.id);
+  const courseLabel = course?.name || paper.courseTitle || (course ? `课程 ID ${course.id}` : '');
 
   const all = paper.questions;
   const priorReview = currentReview();
@@ -502,14 +527,7 @@ async function runQuizAnswerBody(
   }
   const review = preserve ? priorReview : openReview(tid, run.doc, run.isCurrentPage, all);
   const initial = new Map(all.map((q) => [q.id, readAnswer(q, run)]));
-  const already = all.filter((q) => {
-    const current = initial.get(q.id) ?? [];
-    if (q.kind === 'blank') {
-      const slots = q.blankCount || current.length;
-      return slots > 0 && slots === current.length && current.every((value) => value.trim() !== '');
-    }
-    return current.length > 0 || q.studentAnswer.length > 0;
-  });
+  const already = all.filter((q) => isAnswerComplete(q, initial.get(q.id) ?? []));
   const alreadyIds = new Set(already.map((q) => q.id));
   const selected = typeof intent === 'object' ? new Set(intent.ids) : null;
   const todo = all.filter((q) => isAnswerable(q.kind) && (
@@ -521,6 +539,9 @@ async function runQuizAnswerBody(
     tid,
     all.map((q) => ({ id: q.id, typeText: q.typeText, hasAnswer: alreadyIds.has(q.id) })),
     preserve,
+    courseLabel,
+    cfg?.deepSeek?.courseContext !== undefined && cfg.deepSeek.courseContext !== '',
+    cfg?.deepSeek?.referenceFile?.name,
   );
   for (const q of already) {
     if (!preserve) quizPatch(q.id, { status: 'skipped', note: '页面上已有答案，不重复请求' });
@@ -535,7 +556,7 @@ async function runQuizAnswerBody(
 
   log.info(
     `拿到 ${all.length} 道题：页面上已有答案 ${already.length} 道（跳过），` +
-      `可自动作答 ${todo.length} 道，跳过 ${skippedKind} 道主观题`,
+      `可生成答案 ${todo.length} 道，跳过 ${skippedKind} 道不支持的题型`,
   );
 
   /** 我们实际填进去/提交的答案（重答时要拿它做排除） */
@@ -563,6 +584,14 @@ async function runQuizAnswerBody(
       : fillAnswers([fillTargetFor(question, outcome.answer)], run.doc);
     const ok = (report?.filled.length ?? 0) > 0;
     const after = ok ? readAnswer(question, run) : [];
+    const note = [
+      !same || hasCurrentAnswer ? '保留了页面原答案' : '',
+      needsReview && outcome.answer !== '' ? '建议尚未回填，请核对后应用' : '',
+      report?.missing.includes(question.id) ? '页面找不到对应答题控件' : '',
+      report?.failed.includes(question.id) ? '选项或填空与页面控件不匹配，或站点未保留写入' : '',
+      outcome.note,
+      outcome.error,
+    ].filter(Boolean).join('；');
     if (ok) {
       answers.set(question.id, outcome.answer);
       if (entry !== undefined) {
@@ -573,14 +602,14 @@ async function runQuizAnswerBody(
       priorVotes.set(question.id, outcome.samples.filter((value): value is string => value !== null));
     }
     quizPatch(question.id, {
-      status: ok ? 'answered' : outcome.unsupported ? 'unsupported' : needsReview ? 'review' : 'failed',
+      status: ok ? 'answered' : outcome.unsupported ? 'unsupported' : needsReview && outcome.answer !== '' ? 'review' : 'failed',
       answer: ok ? after.join(question.kind === 'blank' ? ' | ' : ',') : outcome.answer,
       requests: outcome.requests,
       samples: outcome.samples,
       explanation: outcome.explanation,
+      citations: outcome.citations,
       cached: outcome.cached,
-      note: !same || hasCurrentAnswer ? '保留了页面原答案，请核对建议'
-        : outcome.note || outcome.error || (ok ? '' : '未能回填到当前试卷'),
+      note: note || (ok ? '' : '未能回填到当前试卷'),
     });
   };
   if (intent === 'draft') {
@@ -589,7 +618,9 @@ async function runQuizAnswerBody(
     for (const question of all) {
       const saved = draft.get(question.id);
       if (saved === undefined || !isAnswerable(question.kind)) continue;
-      const answer = parseQuestionAnswer(`1. ${saved}`, question);
+      const answer = question.kind === 'essay'
+        ? parseQuestionAnswer(JSON.stringify({ question: 1, answer: [saved] }), question)
+        : parseQuestionAnswer(`1. ${saved}`, question);
       if (answer === null) continue;
       recordAnswer(question, { qid: question.id, answer, requests: 0, samples: [], error: '',
         note: '来自本机草稿', review: alreadyIds.has(question.id) });
@@ -624,7 +655,7 @@ async function runQuizAnswerBody(
       applied.delete(qid);
       const entry = review.entries.get(qid);
       if (entry !== undefined) delete entry.applied;
-      quizPatch(qid, { status: 'pending', answer: '', note: '答案已清除' });
+      quizPatch(qid, { status: 'pending', answer: '', incomplete: true, note: '答案已清除' });
       refreshButtons();
       log.info(`清除第 ${qid} 题的答案（${how}）`);
     },
@@ -636,7 +667,7 @@ async function runQuizAnswerBody(
         applied.delete(q.id);
         const entry = review.entries.get(q.id);
         if (entry !== undefined) delete entry.applied;
-        quizPatch(q.id, { status: 'pending', answer: '', note: '答案已清除' });
+      quizPatch(q.id, { status: 'pending', answer: '', incomplete: true, note: '答案已清除' });
       }
       refreshButtons();
       log.info('清除全部答案');
@@ -646,27 +677,39 @@ async function runQuizAnswerBody(
   refreshButtons();
 
   const filled = answers.size;
+  const pendingResult: AiQuizResult = { total: all.length, alreadyAnswered: already.length, answered: filled,
+    filled, submitted: false, commit: null, retried: 0 };
+  const incomplete = auditAnswers(all, run);
+  const reportIncomplete = (count: number): void => {
+    const message = `已检查 ${all.length} 道题，${count} 道为空或未填完整。请在【监视】定位并补齐后提交。`;
+    const held = monitorState().quiz?.questions.filter((q) => q.incomplete && q.status === 'review').length ?? 0;
+    const details = [
+      held > 0 ? `${held} 道已有建议，待核对后应用。` : '',
+      summarizeFailures(failures),
+    ].filter(Boolean);
+    const summary = [message, ...details].join('\n');
+    quizPhase('reviewing', summary);
+    if (auto || intent === 'submit' || (isStandaloneQuizPage() && intent !== 'draft')) noticePost(summary, 'warn');
+  };
+  if (incomplete > 0) {
+    reportIncomplete(incomplete);
+    return pendingResult;
+  }
   if (!auto && intent !== 'submit') {
-    if (intent !== 'draft') quizPhase('reviewing', '请到【监视】核对答案，再决定是否提交');
-    return { total: all.length, alreadyAnswered: already.length, answered: answers.size,
-      filled, submitted: false, commit: null, retried: 0 };
+    if (intent !== 'draft') quizPhase('reviewing', `已检查 ${all.length} 道题，全部已填写。请到【监视】核对答案，再决定是否提交`);
+    return pendingResult;
   }
   const failure = summarizeFailures(failures);
-  const complete = all.filter((question) => {
-    const values = readAnswer(question, run);
-    return values.length > 0 && values.every((value) => value.trim() !== '') &&
-      (question.kind !== 'blank' || !question.blankCount || values.length === question.blankCount);
-  }).length;
   const reviewCount = monitorState().quiz?.questions.filter((q) => q.status === 'review').length ?? 0;
   const bodyLines = [
-    `当前页面：${complete}/${all.length} 道题已填完整，${all.length - complete} 道为空或未填完整。`,
+    `当前页面：${all.length}/${all.length} 道题已填完整。`,
   ];
   if (reviewCount > 0) bodyLines.push(`${reviewCount} 道题有待核对的建议。`);
-  if (skippedKind > 0) bodyLines.push(`跳过 ${skippedKind} 道主观题（名词解释/问答/论述）。`);
+  if (skippedKind > 0) bodyLines.push(`跳过 ${skippedKind} 道不支持的题型。`);
   if (filled < todo.length) bodyLines.push(`有 ${todo.length - filled} 道没填进去（见【监视】页的逐题表）。`);
   if (failure !== '') bodyLines.push(failure);
   bodyLines.push('');
-  bodyLines.push('点【开始提交】后脚本会点站点的提交按钮，接着会弹人机验证码，需要你手动点一下。');
+  bodyLines.push('点【开始提交】后，请手动完成站点验证码。验证成功后站点会继续提交，脚本会等待交卷结果。');
   bodyLines.push('未通过时，脚本可重答本次填入的低分题。再次提交前会请你确认。');
 
   checkVideoQuizClosed();
@@ -699,6 +742,11 @@ async function runQuizAnswerBody(
     };
   }
 
+  const remaining = auditAnswers(all, run);
+  if (remaining > 0) {
+    reportIncomplete(remaining);
+    return pendingResult;
+  }
   buttons.remove();
   const first = await submitAndRead(run);
   let commit = first.commit;
@@ -709,6 +757,11 @@ async function runQuizAnswerBody(
     const r = await retryLowScore(commit, all, answers, priorVotes, cfg, run, applied, review, execution);
     retried = r.retried;
     if (r.changed > 0) {
+      const retryIncomplete = auditAnswers(all, run);
+      if (retryIncomplete > 0) {
+        reportIncomplete(retryIncomplete);
+        return { ...pendingResult, submitted: true, commit, retried, cancelled: true };
+      }
       checkVideoQuizClosed();
       quizPhase('confirming', `已修改 ${r.changed} 道题，等待你确认再次提交`);
       const reconfirmation = host.confirm({
@@ -721,6 +774,11 @@ async function runQuizAnswerBody(
       const resubmit = await reconfirmation;
       run.checkPage();
       if (resubmit) {
+        const retryRemaining = auditAnswers(all, run);
+        if (retryRemaining > 0) {
+          reportIncomplete(retryRemaining);
+          return { ...pendingResult, submitted: true, commit, retried, cancelled: true };
+        }
         const again = await submitAndRead(run);
         if (again.submitted) commit = again.commit;
       } else {

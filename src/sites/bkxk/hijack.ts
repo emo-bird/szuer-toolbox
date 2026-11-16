@@ -7,8 +7,7 @@
  *
  * 【为什么挂 XHR 而不是自己再发一次】站点所有请求走
  * `BH_UTILS.doAjax → jQuery.$.ajax → XMLHttpRequest`，而本站模块自己的请求走
- * `fetch`（`common/core/http.ts`，带 `init.__szuSkip = true`）⇒ 挂 XHR 天然只命中站点请求。
- * fetch 也挂一层纯属防御（站点将来改用 fetch 时不用改这里）。
+ * `fetch`（`common/core/http.ts`），所以只需要监听站点的 XHR。
  *
  * 【为什么 readystatechange 一定是「先于站点」】监听器在 XHR **构造时**注册，
  * 站点（jQuery）的监听是之后才 `addEventListener` 的 ⇒ 取值顺序在前。
@@ -245,39 +244,10 @@ export function transformResponse(
   return JSON.stringify(res.json);
 }
 
-/**
- * 运行期入口：读开关 + 读自定义课程，再改写。
- *
- * 顺手记一笔「我们真的改写成功过课表响应」——`timetable.ts` 的晚到补偿靠它区分
- * 「站点画出来的课表里已有我们的课」与「站点画完了、我们压根没赶上那条响应」。
- */
+/** 读最新开关和自定义课程。 */
 export function transformCurrentResponse(kind: HijackKind, text: string): string | null {
   if (!kindEnabled(kind)) return null;
-  const next = transformResponse(kind, text, readEnabledCustomCourses());
-  if (next !== null && kind === 'timetable') rewroteTimetable = true;
-  return next;
-}
-
-// ------------------------------------------------------------ 改写痕迹
-
-/**
- * 我们是否**真的**改写过一条课表响应。
- *
- * 为什么需要它：用户脚本由 Tampermonkey 异步投进页面，**可能晚于页面自己的首次请求**
- * （v0.27 前实测：暖缓存下普通刷新时 `teachingTime.do` 在第 75ms 就发出去了，
- * 而我们的包装装上时它早已在飞）。那种情况下站点画出来的课表里没有自定义课程，
- * 而我们从界面上看不出区别 —— 只能靠这个标记判断，再重新触发一次站点的请求。
- */
-let rewroteTimetable = false;
-
-/** 是否改写过课表响应（`timetable.ts` 的补偿判据之一） */
-export function didRewriteTimetable(): boolean {
-  return rewroteTimetable;
-}
-
-/** 复位（档 1 测试用；站点运行期不需要） */
-export function resetRewriteFlags(): void {
-  rewroteTimetable = false;
+  return transformResponse(kind, text, readEnabledCustomCourses());
 }
 
 // ------------------------------------------------------------ 安装层（IO）
@@ -298,7 +268,7 @@ type XhrCtor = new () => XhrLike;
  * 改写一个已经完成的 XHR。返回是否真的改了。
  *
  * 站点用 jQuery，`responseType` 通常是空串（走 `responseText`）；
- * 若它要 `'json'`，则连 `response` getter 一起换掉，否则 jQuery 读到的还是旧值。
+ * JSON 模式只读写 `response`，浏览器会拒绝访问 `responseText`。
  */
 export function rewriteXhr(xhr: XhrLike): boolean {
   const kind = kindOf(typeof xhr.responseURL === 'string' ? xhr.responseURL : null);
@@ -309,7 +279,7 @@ export function rewriteXhr(xhr: XhrLike): boolean {
 
   let text: string;
   try {
-    text = typeof xhr.responseText === 'string' ? xhr.responseText : '';
+    text = rt === 'json' ? JSON.stringify(xhr.response ?? null) : xhr.responseText ?? '';
   } catch {
     return false;
   }
@@ -319,12 +289,14 @@ export function rewriteXhr(xhr: XhrLike): boolean {
   if (next === null) return false;
 
   try {
-    Object.defineProperty(xhr, 'responseText', { configurable: true, get: () => next });
     if (rt === 'json') {
-      Object.defineProperty(xhr, 'response', { configurable: true, get: () => JSON.parse(next) as unknown });
+      const parsed: unknown = JSON.parse(next);
+      Object.defineProperty(xhr, 'response', { configurable: true, get: () => parsed });
+    } else {
+      Object.defineProperty(xhr, 'responseText', { configurable: true, get: () => next });
     }
   } catch {
-    log.warn('接管响应失败（无法改写 responseText）');
+    log.warn('接管响应失败（无法改写 XHR 响应）');
     return false;
   }
   return true;
@@ -354,59 +326,15 @@ export function installXhr(target: unknown = pageRealm()): boolean {
   return true;
 }
 
-interface FetchResLike {
-  readonly status: number;
-  readonly statusText: string;
-  readonly headers: unknown;
-  text(): Promise<string>;
-}
-
-type FetchInit = { __szuSkip?: boolean } & Record<string, unknown>;
-type FetchLike = (input: unknown, init?: FetchInit) => Promise<FetchResLike>;
-
-/** 装 fetch 接管（防御性：站点改用 fetch 时不必再改这里） */
-export function installFetch(target: unknown = pageRealm()): boolean {
-  const t = target as Record<string, unknown>;
-  if (t['__szuFetchInstalled'] === true) return false;
-  const orig = t['fetch'];
-  if (typeof orig !== 'function') return false;
-
-  const ResponseCtor = t['Response'];
-  const patched: FetchLike = (input, init) => {
-    const p = (orig as FetchLike)(input, init);
-    // 我们自己发的请求带 __szuSkip（core/http.ts），必须原样放行
-    if (init !== undefined && init !== null && init['__szuSkip'] === true) return p;
-    const url = typeof input === 'string' ? input : ((input as { url?: string } | null)?.url ?? '');
-    const kind = kindOf(url);
-    if (kind === null) return p;
-    return p.then(async (res) => {
-      const text = await res.text();
-      const next = transformCurrentResponse(kind, text);
-      if (next === null) return res;
-      if (typeof ResponseCtor !== 'function') {
-        log.warn('接管响应失败（环境里没有 Response 构造器）');
-        return res;
-      }
-      const Ctor = ResponseCtor as new (body: string, init: unknown) => FetchResLike;
-      return new Ctor(next, { status: res.status, statusText: res.statusText, headers: res.headers });
-    });
-  };
-
-  t['fetch'] = patched;
-  t['__szuFetchInstalled'] = true;
-  return true;
-}
-
 /**
- * 装上两类接管。**无论开关是否打开都装** —— 开关在每次响应时单独判断，
+ * 装上站点 XHR 接管。开关在每次响应时判断，
  * 这样用户在面板里拨开关不需要刷新页面。
  *
  * 默认目标是**页面 realm**（`pageRealm()`，即 unsafeWindow），
  * 传 `target` 只给档 1 测试用（塞一个假的全局对象）。
  */
 export function installHijack(target: unknown = pageRealm()): boolean {
-  const xhr = installXhr(target);
-  const fetch = installFetch(target);
-  if (xhr || fetch) log.info(`响应接管已安装（XHR=${String(xhr)} fetch=${String(fetch)}）`);
-  return xhr || fetch;
+  const installed = installXhr(target);
+  if (installed) log.info('站点 XHR 响应接管已安装');
+  return installed;
 }

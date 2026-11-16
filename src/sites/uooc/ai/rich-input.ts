@@ -1,9 +1,11 @@
 /** 提取试卷中的可读内容。只处理字符串，不加载或执行页面资源。 */
-export interface ExamImage {
-  readonly dataUrl: string;
+export type ExamImage = {
   readonly alt: string;
   readonly scope: string;
-}
+} & ({ readonly dataUrl: string; readonly assetUrl?: never } | { readonly assetUrl: string; readonly dataUrl?: never });
+
+export const MAX_ASSET_BYTES = 512 * 1024;
+export const MAX_IMAGE_DATA_URL_LENGTH = 32 + 4 * Math.ceil(MAX_ASSET_BYTES / 3);
 
 interface RichInput {
   readonly text: string;
@@ -45,8 +47,8 @@ const IMAGE_PREFIX: Readonly<Record<string, string>> = {
   png: 'iVBORw0KGgo', jpeg: '/9j/', gif: 'R0lGOD', webp: 'UklGR',
 };
 
-function inlineImage(src: string): string | null {
-  if (src.length > 262144) return null;
+export function inlineImage(src: string, limit = 262144): string | null {
+  if (src.length > limit) return null;
   const match = IMAGE_DATA.exec(src);
   const type = match?.[1]?.toLowerCase();
   const data = match?.[2];
@@ -54,6 +56,12 @@ function inlineImage(src: string): string | null {
   if (!data.startsWith(IMAGE_PREFIX[type]!)) return null;
   if (type === 'webp' && atob(data.slice(0, 16)).slice(8) !== 'WEBP') return null;
   return 'data:image/' + type + ';base64,' + data;
+}
+
+/** 只接收优课公开上传目录中的图片地址。 */
+export function uoocAssetUrl(src: string): string | null {
+  if (!/^(?:https?:)?\/\/assets\.uooconline\.com\/upload\/[a-z0-9_/-]+\.(?:png|jpe?g|gif|webp)$/i.test(src)) return null;
+  return new URL(src, 'https://assets.uooconline.com').href.replace(/^http:/, 'https:');
 }
 
 const VOID_TAGS = new Set(['br', 'hr', 'img', 'input', 'meta', 'link', 'source', 'wbr', 'area', 'col', 'base']);
@@ -129,9 +137,13 @@ export function readRichInput(source: string, scope: string): RichInput {
     }
     if (name === 'img') {
       const alt = safeText(attribute(tag, 'alt')).trim().slice(0, 300);
-      const dataUrl = inlineImage(attribute(tag, 'src'));
-      if (dataUrl === null || images.length >= 4) issue ??= '题目含有无法安全读取的图片';
-      else images.push({ dataUrl, alt, scope });
+      const src = decodeEntities(attribute(tag, 'src'));
+      const dataUrl = inlineImage(src);
+      const assetUrl = dataUrl === null ? uoocAssetUrl(src) : null;
+      if (images.length >= 4) issue ??= '题目图片数量超出处理上限';
+      else if (dataUrl !== null) images.push({ dataUrl, alt, scope });
+      else if (assetUrl !== null) images.push({ assetUrl, alt, scope });
+      else issue ??= '题目含有无法安全读取的图片';
       emit(alt === '' ? ' [图片] ' : ' [图片：' + alt + '] ');
       continue;
     }

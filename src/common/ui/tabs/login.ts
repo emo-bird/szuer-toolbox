@@ -18,14 +18,14 @@
 import { el, clear } from '../../utils/dom.ts';
 import type { TabRegistration } from '../../../sites/types.ts';
 
-export interface LoginField {
+interface LoginField {
   readonly label: string;
   readonly value: string;
   /** 敏感字段（学号 / 令牌等）显示时打码 */
   readonly secret?: boolean;
 }
 
-export interface LoginState {
+interface LoginState {
   /** 是否已登录；unknown 表示探测不出（例如没有抓包、站点改版） */
   readonly loggedIn: boolean | 'unknown';
   /** 站点侧给出的补充信息 */

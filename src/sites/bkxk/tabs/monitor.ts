@@ -189,11 +189,15 @@ function mountMonitorTab(root: HTMLElement, ctx: TabContext): () => void {
   /** 只改会随时间变的文本（「多久之前」），不重建 DOM */
   function tick(): void {
     const now = Date.now();
-    for (const [tcId, node] of agoNodes) {
-      const item = loadMonitorStore().items.find((m) => m.teachingClassID === tcId);
-      node.textContent = agoText(item, now);
+    const store = loadMonitorStore();
+    for (const item of store.items) {
+      const node = agoNodes.get(item.teachingClassID);
+      if (node === undefined) continue;
+      const text = agoText(item, now);
+      if (node.textContent !== text) node.textContent = text;
     }
-    summary.textContent = summaryText(loadMonitorStore(), now);
+    const text = summaryText(store, now);
+    if (summary.textContent !== text) summary.textContent = text;
   }
 
   function agoText(item: MonitorItem | undefined, now: number): string {

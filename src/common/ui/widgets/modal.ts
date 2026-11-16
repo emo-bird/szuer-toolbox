@@ -22,9 +22,9 @@ export function closeModalAlerts(shadowRoot: ShadowRoot): void {
 }
 
 /** 按钮配色：`primary` 蓝、`danger` 红、不给则中性灰 */
-export type ModalActionVariant = 'primary' | 'danger';
+type ModalActionVariant = 'primary' | 'danger';
 
-export interface ModalAction {
+interface ModalAction {
   /** 用户点了这个按钮时 resolve 出来的值 */
   key: string;
   label: string;

@@ -536,30 +536,6 @@ describe('courses · fetchCategory（假 send）', () => {
     assertEqual((setting['data'] as Record<string, unknown>)['campus'], '02', '显式校区应生效');
   });
 
-  it('学到的批次码从响应里回交给调用方', async () => {
-    const send = fakeSend(reply('1', { dataList: NO_ARRANGED.dataList, totalCount: 2 }));
-    const r = await fetchCategory({
-      category: 'FANKC',
-      studentCode: STUDENT,
-      batchCode: 'old-old-old',
-      origin: ORIGIN,
-      send: send.fn,
-    });
-    assertEqual(r.batchCode, BATCH_FROM_SAMPLE, '响应里的 electiveBatchCode 应被提取出来');
-  });
-
-  it('响应里没有批次码时给 null（不要瞎猜）', async () => {
-    const send = fakeSend(JSON.stringify(PROGRAM));
-    const r = await fetchCategory({
-      category: 'FANKC',
-      studentCode: STUDENT,
-      batchCode: BATCH_FROM_SAMPLE,
-      origin: ORIGIN,
-      send: send.fn,
-    });
-    assertEqual(r.batchCode, null, 'programCourse 响应里没有 electiveBatchCode');
-  });
-
   it('业务拒绝（code=2）时不算成功，也不解析列表', async () => {
     const send = fakeSend(reply('2', {}, '不在选课时间内'), 200);
     const r = await fetchCategory({

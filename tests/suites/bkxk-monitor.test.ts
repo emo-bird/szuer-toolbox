@@ -18,6 +18,7 @@
 
 import { describe, it, assert, assertEqual, assertDeepEqual } from '../harness.ts';
 import { clearAll, write } from '../../src/common/core/storage.ts';
+import { resetQueueForTest } from '../../src/common/core/http.ts';
 import {
   registerToggles,
   resetRegistry as resetSettings,
@@ -391,6 +392,51 @@ describe('bkxk 监控引擎 —— 不发请求的那几条路径', () => {
     assertEqual(res.hits.length, 0);
     assertEqual(pollStats().pollCount, 1);
     assert(pollStats().lastPollAt !== null, '应当记下上次检查时间');
+  });
+
+  it('分页失败保留已查到的结果，未拉到的班级保持未知，且不会恢复被删除的记录', async () => {
+    clearAll();
+    bootSettings();
+    __resetMonitorRuntime();
+    const globals = globalThis as Record<string, unknown>;
+    const previousPage = globals['unsafeWindow'];
+    const previousLocation = globals['location'];
+    let requests = 0;
+    globals['location'] = { origin: 'https://mock.example' };
+    globals['unsafeWindow'] = {
+      sessionStorage: { getItem: (key: string) => key === 'studentInfo'
+        ? '{"code":"mock-student","electiveBatch":{"code":"mock-batch"}}' : null },
+      fetch: async () => {
+        requests++;
+        if (requests === 1) {
+          // 分页大小按站点返回的课程条数判断，嵌套的教学班数可能不同。
+          const dataList = Array.from({ length: PAGE_SIZE }, (_, i) => ({
+            tcList: i === 0 ? [{ teachingClassID: 'found', classCapacity: 8, numberOfFirstVolunteer: 8 }] : [],
+          }));
+          return new Response(JSON.stringify({ code: '1', dataList }));
+        }
+        updateMonitor((monitor) => removeMonitorItem(monitor, 'removed').store);
+        throw new Error('模拟第二页失败');
+      },
+    };
+    try {
+      write(BKXK_STORE_KEY.MONITOR, store(
+        mon({ teachingClassID: 'found' }),
+        mon({ teachingClassID: 'unconfirmed' }),
+        mon({ teachingClassID: 'removed' }),
+      ));
+      const result = await pollOnce();
+      const current = loadMonitorStore();
+      assertEqual(requests, 2);
+      assertEqual(result.checked, 2);
+      assertEqual(byId(current, 'found')?.remain, 0);
+      assertEqual(byId(current, 'unconfirmed')?.lastMsg, '未能拉取完整类别，暂无法确认');
+      assertEqual(byId(current, 'removed'), null);
+    } finally {
+      globals['unsafeWindow'] = previousPage;
+      globals['location'] = previousLocation;
+      resetQueueForTest();
+    }
   });
 
   it('grabNow：写开关未开 → write-disabled，且不上网', async () => {

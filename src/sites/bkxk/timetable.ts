@@ -16,7 +16,7 @@
 import { scoped } from '../../common/core/log.ts';
 import { el, whenDomReady } from '../../common/utils/dom.ts';
 import { readEnabledCustomCourses } from './custom.ts';
-import { didRewriteTimetable, kindEnabled } from './hijack.ts';
+import { kindEnabled } from './hijack.ts';
 import { pageRecord } from './page-realm.ts';
 import { TT_CSS, TT_STYLE_ID } from './timetable-style.ts';
 import {
@@ -102,18 +102,14 @@ function injectTagStyle(): void {
  */
 function askSiteToRefetch(reason: string): boolean {
   const mod = pageRecord()[SITE_TIMETABLE_MODULE] as { init?: unknown } | undefined;
-  if (mod === undefined || typeof mod.init !== 'function') {
+  if (typeof mod?.init !== 'function') {
     log.warn(
       `站点没有 ${SITE_TIMETABLE_MODULE}.init（改版了？）—— 这一轮的自定义课程不会出现，刷新页面可重来`,
     );
     return false;
   }
-  log.info(
-    `请站点重新请求一次课表（${reason}；上一发响应${
-      didRewriteTimetable() ? '已被我们改写' : '我们没赶上'
-    }）⇒ ${SITE_TIMETABLE_MODULE}.init()`,
-  );
-  (mod.init as () => void).call(mod);
+  log.info(`请站点重新请求一次课表（${reason}）`);
+  mod.init();
   return true;
 }
 
@@ -156,15 +152,14 @@ function autoRefetchIfNeeded(table: HTMLElement): boolean {
  * 不会触发，用户在课表页会以为「加了课却没出现」。旧仓库 `ui.js:485,508,523,534`
  * 每处改完都调一次重画，同一原因。
  *
- * 返回 1 表示已经请站点重画（调用方可据此提示），0 表示无事可做
- * （不在课表页 / 没有启用的自定义课程 / 接管开关关着 / 站点改版）。
+ * 表里留着旧标签时也要刷新，用户可能刚删掉或停用了最后一门自定义课程。
  */
-export function refreshTimetable(): number {
+export function refreshTimetable(): void {
   const table = findTable();
-  if (table === null) return 0;
-  if (readEnabledCustomCourses().length === 0) return 0;
-  if (!kindEnabled('timetable')) return 0;
-  return askSiteToRefetch('你在【自定义】里改了课程') ? 1 : 0;
+  if (table === null) return;
+  if (table.querySelector(TT_TAG_SELECTOR) === null &&
+      !(kindEnabled('timetable') && readEnabledCustomCourses().length > 0)) return;
+  askSiteToRefetch('你在【自定义】里改了课程');
 }
 
 // ------------------------------------------------------------ 启动

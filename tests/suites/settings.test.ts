@@ -6,7 +6,7 @@
  */
 
 import { describe, it, assert, assertEqual } from '../harness.ts';
-import { clearAll } from '../../src/common/core/storage.ts';
+import { clearAll, read, write } from '../../src/common/core/storage.ts';
 import {
   registerToggles,
   registerValue,
@@ -19,6 +19,7 @@ import {
   valuesOf,
   getValue,
   setValue,
+  removeValue,
   storedSettingKeys,
   coerceInput,
   checkInput,
@@ -79,6 +80,14 @@ describe('common/core/settings —— 风险门禁', () => {
     assertEqual(isEnabled('demo', 'ro'), false, '显式关闭必须压过 default');
   });
 
+  it('非布尔存储值不启用默认关闭的开关', () => {
+    fresh();
+    write('toggle:demo:irr', 'false');
+    assertEqual(isEnabled('demo', 'irr'), false);
+    write('toggle:demo:ro', 'false');
+    assertEqual(isEnabled('demo', 'ro'), true);
+  });
+
   it('needsConfirm 只对 irreversible 为真', () => {
     assertEqual(needsConfirm('safe'), false);
     assertEqual(needsConfirm('trace'), false);
@@ -120,8 +129,19 @@ describe('common/core/settings —— 普通配置项', () => {
 
   it('未注册的配置项返回 undefined', () => {
     fresh();
+    write('value:demo:ghost', '未注册的旧配置');
     assertEqual(valuesOf('demo').length, 0);
     assertEqual(getValue('demo', 'ghost'), undefined);
+  });
+
+  it('清理已废弃的配置键时可删除字符串或数字', () => {
+    fresh();
+    write('value:demo:old-text', 'old');
+    write('value:demo:old-number', 5);
+    removeValue('demo', 'old-text');
+    removeValue('demo', 'old-number');
+    assertEqual(read('value:demo:old-text', null), null);
+    assertEqual(read('value:demo:old-number', null), null);
   });
 
   it('registerValue 同 id 覆盖而不是追加', () => {

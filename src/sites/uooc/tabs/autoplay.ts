@@ -13,6 +13,7 @@
 
 import { el } from '../../../common/utils/dom.ts';
 import type { TabContext, TabRegistration } from '../../types.ts';
+import { isStandaloneQuizPage } from '../ai/index.ts';
 import { SITE_ID } from '../settings.ts';
 import { subscribeTakeover, takeoverStart, takeoverStatus, takeoverStop } from '../takeover.ts';
 
@@ -21,7 +22,7 @@ export const UOOC_AUTOPLAY_TAB: TabRegistration = {
   id: `${SITE_ID}:autoplay`,
   title: '接管',
   order: 210,
-  mount(root: HTMLElement, ctx: TabContext): void {
+  mount(root: HTMLElement, ctx: TabContext): () => void {
     const startBtn = el('button', {
       class: 'sztb-btn',
       text: '开始接管',
@@ -34,6 +35,10 @@ export const UOOC_AUTOPLAY_TAB: TabRegistration = {
     });
 
     startBtn.addEventListener('click', () => {
+      if (isStandaloneQuizPage()) {
+        ctx.host.activateTab('uooc:ai');
+        return;
+      }
       takeoverStart(ctx.host);
     });
     // 【停止接管】立刻停（用户拍板：不等待、不留收尾）
@@ -41,28 +46,29 @@ export const UOOC_AUTOPLAY_TAB: TabRegistration = {
       takeoverStop();
     });
 
-    const statusLine = el('div', { class: 'sztb-field-desc' });
+    const statusLine = el('div', { class: 'sztb-field-desc', attrs: { role: 'status' } });
 
     const sync = (): void => {
       const s = takeoverStatus();
-      statusLine.textContent = s.text;
+      const standalone = isStandaloneQuizPage();
+      startBtn.textContent = standalone ? '前往 AI 作答' : '开始接管';
+      statusLine.textContent = standalone ? '当前是独立作业或试卷页。打开「AI 作答」，点击「开始作答」。课程连播请返回学习页。' : s.text;
       // 跑着的时候别让人重复点【开始接管】；没跑的时候【停止接管】没有意义
       startBtn.disabled = s.running;
       stopBtn.disabled = !s.running;
     };
     sync();
 
-    // 状态行跟 DOM 变；面板被拆掉时自动退订（ctx 没有卸载钩子，只能靠 isConnected）
-    const off = subscribeTakeover(() => {
-      if (!root.isConnected) {
-        off();
-        return;
-      }
-      sync();
-    });
+    const off = subscribeTakeover(sync);
+    window.addEventListener('popstate', sync);
+    window.addEventListener('hashchange', sync);
 
     root.appendChild(el('div', { class: 'sztb-toolbar' }, startBtn, stopBtn));
     root.appendChild(statusLine);
-    // §E.5：设置组整组搬走了，这里**刻意不渲染** `renderSiteSettings`
+    return () => {
+      off();
+      window.removeEventListener('popstate', sync);
+      window.removeEventListener('hashchange', sync);
+    };
   },
 };

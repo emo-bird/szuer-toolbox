@@ -101,12 +101,16 @@ describe('common/core/log —— 缓冲与过滤', () => {
     const log = scoped('t');
     for (let i = 0; i < 620; i += 1) log.info(`m${i}`);
     const list = entries();
-    assert(list.length <= 500, `缓冲应受限，实际 ${list.length}`);
+    assertEqual(list.length, 500);
+    assertEqual(list[0]?.message, 'm120', '必须先淘汰最早的 120 条');
     assertEqual(list[list.length - 1]?.message, 'm619', '最新一条必须是最后写入的');
     const seqs = list.map((e) => e.seq);
     for (let i = 1; i < seqs.length; i += 1) {
       assert((seqs[i] ?? 0) > (seqs[i - 1] ?? 0), 'seq 必须严格递增');
     }
+    clear();
+    log.info('first');
+    assertEqual(entries()[0]?.message, 'first');
   });
 
   it('subscribe 能收到增量，退订后不再收到', () => {

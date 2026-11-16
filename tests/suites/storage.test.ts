@@ -43,6 +43,13 @@ describe('common/core/storage', () => {
     assertEqual(read('unit:num', 0), 42, '类型一致时应正常读回');
   });
 
+  it('undefined 与 null 默认值可读取已存的数据', () => {
+    clearAll();
+    write('unit:num', 42);
+    assertEqual(read<unknown>('unit:num', undefined), 42);
+    assertEqual(read<unknown>('unit:num', null), 42);
+  });
+
   it('remove / listKeys / clearAll', () => {
     clearAll();
     write('unit:a', 1);

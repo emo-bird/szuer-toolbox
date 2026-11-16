@@ -15,7 +15,7 @@
  */
 
 import { describe, it, assert, assertEqual, assertDeepEqual } from '../harness.ts';
-import { pickCopyMethod, copyMethodOrder } from '../../src/common/utils/clipboard.ts';
+import { copyMethodOrder } from '../../src/common/utils/clipboard.ts';
 import type { CopyEnv } from '../../src/common/utils/clipboard.ts';
 
 function env(hasGm: boolean, hasExec: boolean, hasClipboard: boolean): CopyEnv {
@@ -30,12 +30,12 @@ const PLAIN_HTTP = env(false, true, false);
 
 describe('剪贴板：写入方式优先级', () => {
   it('首选是 GM_setClipboard', () => {
-    assertEqual(pickCopyMethod(ALL), 'gm');
-    assertEqual(pickCopyMethod(BKXK_HTTP), 'gm');
+    assertEqual(copyMethodOrder(ALL)[0], 'gm');
+    assertEqual(copyMethodOrder(BKXK_HTTP)[0], 'gm');
   });
 
   it('没有 GM 时退到 execCommand', () => {
-    assertEqual(pickCopyMethod(PLAIN_HTTP), 'exec');
+    assertEqual(copyMethodOrder(PLAIN_HTTP)[0], 'exec');
   });
 
   it('execCommand 也排在现代剪贴板 API 之前（同步、不挑安全上下文）', () => {
@@ -48,12 +48,10 @@ describe('剪贴板：写入方式优先级', () => {
   });
 
   it('什么都不可用时是 none，且顺序为空', () => {
-    assertEqual(pickCopyMethod(env(false, false, false)), 'none');
     assertDeepEqual(copyMethodOrder(env(false, false, false)), []);
   });
 
   it('只有现代 API 时也能用它', () => {
-    assertEqual(pickCopyMethod(env(false, false, true)), 'modern');
     assertDeepEqual(copyMethodOrder(env(false, false, true)), ['modern']);
   });
 

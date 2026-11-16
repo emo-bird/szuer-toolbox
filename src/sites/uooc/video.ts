@@ -36,7 +36,7 @@
  */
 
 import { scoped } from '../../common/core/log.ts';
-import { isEnabled } from '../../common/core/settings.ts';
+import { isEnabled, subscribeToggle } from '../../common/core/settings.ts';
 import { SITE_ID, TOGGLE } from './settings.ts';
 
 const log = scoped('uooc/video');
@@ -61,8 +61,8 @@ const FIGHT_COOLDOWN_MS = 5000;
 
 /** 我们对每个 video 元素做过什么 —— 关开关时只回退**我们改过**的那部分 */
 interface Applied {
-  rate: boolean;
-  mute: boolean;
+  rate?: number;
+  mute?: boolean;
 }
 
 const applied = new WeakMap<HTMLVideoElement, Applied>();
@@ -158,40 +158,55 @@ function findVideo(): HTMLVideoElement | null {
   return null;
 }
 
-/** 按当前设置应用一次；开关关掉时只回退我们改过的部分 */
-function apply(v: HTMLVideoElement): void {
-  const state: Applied = applied.get(v) ?? { rate: false, mute: false };
-
-  // 「已经播过」的判定：接手时它就在播，也算播过
-  if (!v.paused && !v.ended) hasStarted.add(v);
-
-  const wantRate = isEnabled(SITE_ID, TOGGLE.RATE_2X);
+function applyRate(v: HTMLVideoElement, state: Applied, wantRate: boolean): void {
   if (wantRate) {
-    if (v.playbackRate !== TARGET_RATE) {
+    state.rate ??= v.playbackRate;
+    if (v.playbackRate !== TARGET_RATE && rateGuard()) {
       try {
         v.playbackRate = TARGET_RATE;
-        state.rate = true;
       } catch {
         // 个别浏览器在 readyState 过低时会拒绝设置速率，下一次事件再试
       }
     }
-  } else if (state.rate && v.playbackRate === TARGET_RATE) {
-    v.playbackRate = 1;
-    state.rate = false;
-  }
-
-  const wantMute = isEnabled(SITE_ID, TOGGLE.MUTE);
-  if (wantMute) {
-    if (!v.muted) {
-      v.muted = true;
-      state.mute = true;
+  } else if (state.rate !== undefined) {
+    const previous = state.rate;
+    delete state.rate;
+    if (v.playbackRate === TARGET_RATE && previous !== TARGET_RATE) {
+      try {
+        v.playbackRate = previous;
+      } catch {
+        log.warn('播放器未接受原有倍速');
+      }
     }
-  } else if (state.mute && v.muted) {
-    v.muted = false;
-    state.mute = false;
   }
+}
 
+function applyMute(v: HTMLVideoElement, state: Applied, wantMute: boolean): void {
+  if (wantMute) {
+    state.mute ??= v.muted;
+    if (!v.muted && muteGuard()) {
+      v.muted = true;
+    }
+  } else if (state.mute !== undefined) {
+    if (v.muted) v.muted = state.mute;
+    delete state.mute;
+  }
+}
+
+function stateFor(v: HTMLVideoElement): Applied {
+  const state = applied.get(v) ?? {};
   applied.set(v, state);
+  return state;
+}
+
+/** 按当前设置应用一次。 */
+function apply(v: HTMLVideoElement): void {
+  if (!v.paused && !v.ended) hasStarted.add(v);
+  const state = stateFor(v);
+  const wantRate = isEnabled(SITE_ID, TOGGLE.RATE_2X);
+  const wantMute = isEnabled(SITE_ID, TOGGLE.MUTE);
+  applyRate(v, state, wantRate);
+  applyMute(v, state, wantMute);
 
   if (!announced.has(v)) {
     announced.add(v);
@@ -241,20 +256,11 @@ function onMediaEvent(ev: Event): void {
       return;
 
     case 'ratechange':
-      // 站点（或用户）把速率改了 → 立刻锁回去
-      if (isEnabled(SITE_ID, TOGGLE.RATE_2X) && v.playbackRate !== TARGET_RATE && rateGuard()) {
-        try {
-          v.playbackRate = TARGET_RATE;
-        } catch {
-          /* 忽略：下一个事件再试 */
-        }
-      }
+      applyRate(v, stateFor(v), isEnabled(SITE_ID, TOGGLE.RATE_2X));
       return;
 
     case 'volumechange':
-      if (isEnabled(SITE_ID, TOGGLE.MUTE) && !v.muted && muteGuard()) {
-        v.muted = true;
-      }
+      applyMute(v, stateFor(v), isEnabled(SITE_ID, TOGGLE.MUTE));
       return;
 
     default:
@@ -272,11 +278,38 @@ const MEDIA_EVENTS: readonly string[] = ['play', 'playing', 'pause', 'ratechange
 export function startVideoAssist(): () => void {
   let timer: number | null = null;
   let stopped = false;
+  let video: HTMLVideoElement | null = null;
+  let mediaDoc: Document = document;
+
+  const onPlayerEvent = (ev: Event): void => {
+    if (ev.target === video) onMediaEvent(ev);
+  };
+
+  function listen(target: Document, enabled: boolean): void {
+    for (const type of MEDIA_EVENTS) {
+      if (enabled) target.addEventListener(type, onPlayerEvent, true);
+      else target.removeEventListener(type, onPlayerEvent, true);
+    }
+  }
 
   const scan = (): void => {
     if (stopped) return;
-    const v = findVideo();
-    if (v !== null) apply(v);
+    const found = findVideo();
+    if (found !== video) {
+      if (video !== null) {
+        const state = stateFor(video);
+        applyRate(video, state, false);
+        applyMute(video, state, false);
+      }
+      video = found;
+      const nextDoc = video?.ownerDocument ?? document;
+      if (nextDoc !== mediaDoc) {
+        listen(mediaDoc, false);
+        mediaDoc = nextDoc;
+        listen(mediaDoc, true);
+      }
+    }
+    if (video !== null) apply(video);
   };
 
   const schedule = (): void => {
@@ -287,7 +320,10 @@ export function startVideoAssist(): () => void {
     }, RESCAN_DEBOUNCE_MS);
   };
 
+  listen(mediaDoc, true);
   scan();
+  const offRate = subscribeToggle(SITE_ID, TOGGLE.RATE_2X, scan);
+  const offMute = subscribeToggle(SITE_ID, TOGGLE.MUTE, scan);
 
   const observer = new MutationObserver(schedule);
   observer.observe(document.documentElement, { childList: true, subtree: true });
@@ -296,12 +332,6 @@ export function startVideoAssist(): () => void {
   const onLoad = (): void => scan();
   document.addEventListener('loadstart', onLoad, true);
   document.addEventListener('loadedmetadata', onLoad, true);
-
-  document.addEventListener('play', onMediaEvent, true);
-  document.addEventListener('playing', onMediaEvent, true);
-  document.addEventListener('pause', onMediaEvent, true);
-  document.addEventListener('ratechange', onMediaEvent, true);
-  document.addEventListener('volumechange', onMediaEvent, true);
 
   // 站内 hash 路由换集不会重载页面
   window.addEventListener('hashchange', schedule);
@@ -318,7 +348,14 @@ export function startVideoAssist(): () => void {
     observer.disconnect();
     document.removeEventListener('loadstart', onLoad, true);
     document.removeEventListener('loadedmetadata', onLoad, true);
-    for (const type of MEDIA_EVENTS) document.removeEventListener(type, onMediaEvent, true);
+    offRate();
+    offMute();
+    listen(mediaDoc, false);
+    if (video !== null) {
+      const state = stateFor(video);
+      applyRate(video, state, false);
+      applyMute(video, state, false);
+    }
     window.removeEventListener('hashchange', schedule);
     window.removeEventListener('popstate', schedule);
   };

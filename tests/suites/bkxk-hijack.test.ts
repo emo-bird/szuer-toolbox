@@ -5,7 +5,7 @@
  *   1. **只接管该接管的端点** —— 课程查询 / 课表两类，其它（登录、容量查询…）一律不碰；
  *   2. **只增加，绝不清除**站点算好的 `isConflict` / `conflictDesc`（原有描述必须被追加）；
  *   3. **开关关掉就完全不接管**（用户要有办法立刻退回站点原始响应）；
- *   4. **我们自己发的请求必须放行**（`__szuSkip`），否则脚本自己的请求会被自己改写。
+ *   4. 不包装 fetch，保留调用方对原响应正文的读取。
  *
  * 主力用例吃 `tests/fixtures/` 里的真实响应样本（脱敏裁剪版，见 tests/fixtures/README.md）：
  * 课表用 `bkxk-teachingTime.json`、列表用 `bkxk-programCourse.json`（嵌套）与
@@ -27,13 +27,10 @@ import {
   augmentTimetable,
   conflictDescFor,
   customConflicts,
-  didRewriteTimetable,
-  installFetch,
   installHijack,
   installXhr,
   kindEnabled,
   kindOf,
-  resetRewriteFlags,
   rewriteXhr,
   transformCurrentResponse,
   transformResponse,
@@ -453,51 +450,27 @@ describe('bkxk/hijack —— transformResponse 的早退条件', () => {
   });
 });
 
-// ------------------------------------------------- 改写痕迹（晚到补偿的判据，v0.27）
-
-describe('bkxk/hijack —— 是否真的改写过课表响应（v0.27 晚到补偿用）', () => {
+describe('bkxk/hijack —— 使用当前的自定义课与设置', () => {
   const mine = item('c1', '我的课', '5-18周星期一9-10节 自定义教室');
   const ok = textOf({ code: '1', totalCount: 14, dataList: TIMETABLE.dataList });
 
-  it('初始是「没改写」——课表补偿据此判断站点画的是不是含我们课的版本', () => {
-    boot();
-    resetRewriteFlags();
-    assertEqual(didRewriteTimetable(), false, '刚启动时当然没改写过');
-  });
-
-  it('跑一次真正改写的课表响应 → 记上；复位后回到 false', () => {
-    boot();
-    setEnabled(SITE_ID, TOGGLE.HIJACK_TIMETABLE, true);
-    write(CUSTOM_COURSES_KEY, [mine]);
-    resetRewriteFlags();
-    const out = transformCurrentResponse('timetable', ok);
-    assert(out !== null, '这次应当改写成功');
-    assertEqual(didRewriteTimetable(), true, '成功改写要记上一笔');
-    resetRewriteFlags();
-    assertEqual(didRewriteTimetable(), false, '复位后回到 false（档 1 之间互不污染）');
-  });
-
-  it('响应原样放行（没有可改的行）→ 不算「接管到了」', () => {
+  it('自定义课的时间不足以排进课表时保留原响应', () => {
     boot();
     setEnabled(SITE_ID, TOGGLE.HIJACK_TIMETABLE, true);
     // 没有星期几 ⇒ 这条自定义课程无处可放，课表响应一处都改不了
     write(CUSTOM_COURSES_KEY, [item('c9', '没写星期的课', '1-18周 3-4节 另一个地方')]);
-    resetRewriteFlags();
     assertEqual(transformCurrentResponse('timetable', ok), null, '一处都改不了就原样放行');
-    assertEqual(didRewriteTimetable(), false, '不算接管到 —— 否则补偿会被白白跳过');
   });
 
-  it('列表响应改写不会把它记成课表改写（两个 kind 分开记）', () => {
+  it('列表响应使用当前的自定义课程', () => {
     boot();
     setEnabled(SITE_ID, TOGGLE.HIJACK_LIST_CONFLICT, true);
     write(CUSTOM_COURSES_KEY, [mine]);
-    resetRewriteFlags();
     assertEqual(
       transformCurrentResponse('list', textOf({ code: '1', dataList: PROGRAM.dataList })) !== null,
       true,
       '列表这次确实改到了',
     );
-    assertEqual(didRewriteTimetable(), false, '但课表那边仍然算「没赶上」');
   });
 });
 
@@ -589,7 +562,7 @@ describe('bkxk/hijack —— rewriteXhr', () => {
     }
   });
 
-  it('responseType=list 的 json 请求：连 response getter 一起换掉', () => {
+  it('JSON 模式通过 response 改写，访问 responseText 会抛错', () => {
     bootOn();
     const x = new FakeXhr();
     x.responseType = 'json';
@@ -597,6 +570,8 @@ describe('bkxk/hijack —— rewriteXhr', () => {
       code: '1',
       dataList: [{ tcList: [{ teachingPlace: '5-18周星期一9-10节汇德楼A508' }] }],
     }));
+    x.response = JSON.parse(x.responseText);
+    Object.defineProperty(x, 'responseText', { get: () => { throw new DOMException('JSON 模式', 'InvalidStateError'); } });
     assertEqual(rewriteXhr(x as unknown as XhrLike), true);
     const parsed = x.response as RawBody;
     const tc = ((parsed.dataList[0] as Record<string, unknown>)['tcList'] as Record<string, unknown>[])[0];
@@ -604,7 +579,7 @@ describe('bkxk/hijack —— rewriteXhr', () => {
   });
 });
 
-describe('bkxk/hijack —— installXhr / installFetch', () => {
+describe('bkxk/hijack —— installXhr', () => {
   it('装 XHR：新构造的对象带我们的监听，且 instanceof 仍然成立', () => {
     bootOn();
     const { env } = makeEnv();
@@ -639,57 +614,17 @@ describe('bkxk/hijack —— installXhr / installFetch', () => {
     assertEqual(installXhr({}), false);
   });
 
-  it('装 fetch：改写正文，并用原状态码包回一个 Response', async () => {
-    bootOn();
-    class FakeResponse {
-      body: string;
-      init: unknown;
-      constructor(body: string, init: unknown) {
-        this.body = body;
-        this.init = init;
-      }
-      text(): Promise<string> {
-        return Promise.resolve(this.body);
-      }
-    }
-    const res = {
-      status: 200,
-      statusText: 'OK',
-      headers: {},
-      text: () => Promise.resolve(textOf({ code: '1', totalCount: 14, dataList: TIMETABLE.dataList })),
-    };
-    const env: Env = { fetch: () => Promise.resolve(res), Response: FakeResponse };
-    assertEqual(installFetch(env), true);
-    const call = env['fetch'] as (u: string) => Promise<FakeResponse>;
-    const out = await call(TIMETABLE_URL);
-    const parsed = JSON.parse(out.body) as RawBody;
-    assertEqual(parsed.dataList.length, TIMETABLE.dataList.length + 1);
-    assertDeepEqual(out.init, { status: 200, statusText: 'OK', headers: {} });
-    assertEqual(installFetch(env), false, '重复装应当被守卫挡住');
-  });
-
-  it('带 __szuSkip 的请求原样放行（脚本自己发的请求不能被自己改写）', async () => {
-    bootOn();
-    const res = {
-      status: 200,
-      statusText: 'OK',
-      headers: {},
-      text: () => Promise.resolve(textOf({ code: '1', totalCount: 14, dataList: TIMETABLE.dataList })),
-    };
-    const env: Env = { fetch: () => Promise.resolve(res), Response: class {} };
-    installFetch(env);
-    const call = env['fetch'] as (u: string, i: unknown) => Promise<unknown>;
-    const out = await call(TIMETABLE_URL, { __szuSkip: true });
-    assert(out === res, '必须返回同一个对象（一个字节都不碰）');
-  });
-
-  it('installHijack 一次装两个；装不上返回 false', () => {
+  it('只挂站点 XHR，fetch 的响应正文由调用方读取', async () => {
     bootOn();
     const { env } = makeEnv();
-    env['fetch'] = () => Promise.resolve({ status: 200, statusText: '', headers: {}, text: async () => '{}' });
-    env['Response'] = class {};
+    const response = new Response('{}');
+    const fetch = async (_url: string) => response;
+    env['fetch'] = fetch;
     assertEqual(installHijack(env), true);
-    assertEqual(installHijack({}), false, '空环境里没有 XHR/fetch');
+    assertEqual(env['fetch'], fetch);
+    const result = await (env['fetch'] as typeof fetch)(TIMETABLE_URL);
+    assertEqual(await result.text(), '{}');
+    assertEqual(installHijack({ fetch }), false, '没有 XHR 时不安装');
   });
 
   it('不给 target 时装到页面 realm（unsafeWindow），不是沙箱的 globalThis', () => {

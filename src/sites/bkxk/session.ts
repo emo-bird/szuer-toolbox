@@ -22,7 +22,7 @@ export const DEFAULT_CAMPUS = '01';
 export interface BkxkSession {
   /** 学号；读不到时为空串 */
   readonly studentCode: string;
-  /** 选课批次码；sessionStorage 里没有时为 null（可从列表响应里补，见 `extractBatchCode`） */
+  /** 选课批次码；sessionStorage 里没有时为 null */
   readonly batchCode: string | null;
   /** 校区码；读不到时为 `DEFAULT_CAMPUS` */
   readonly campus: string;

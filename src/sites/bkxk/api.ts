@@ -1,5 +1,5 @@
 /**
- * bkxk（本科选课）接口层：端点表 / 报文构造 / 响应分类 / 未识别落档。
+ * bkxk（本科选课）接口层：端点表 / 报文构造 / 响应分类。
  *
  * 本文件里的每一个字段顺序、参数名、有无 `timestamp`，都是照着
  * `C:\Project\szu_bkxk\docs` 下的 HAR 抓包逐字节核对过的（旧仓库踩过
@@ -10,7 +10,6 @@
  *   R1 写接口默认关闭，不得改默认值（本文件只提供 `buildVolunteerBody`，
  *      守门在 `settings.ts` 的 `isEnabled('bkxk','write-api')`）
  *   R3 凭证不落盘：`headers()` 的返回值包含 token，**只许传给发请求的一方**
- *   R4 未识别响应必须全量落档
  */
 
 import { request } from '../../common/core/http.ts';
@@ -105,8 +104,6 @@ const RESP_CODE = {
 /** 登录失效的文案特征（仅 code 无法判定时兜底） */
 export const AUTH_MSG = /登录|认证/;
 
-/** extractBatchCode 扫描整棵响应树时的节点预算（防病态响应把主线程拖住） */
-const MAX_BATCH_SCAN_NODES = 20000;
 
 export interface Classified {
   readonly kind: RespKind;
@@ -132,7 +129,7 @@ function isAuthStatus(status: number): boolean {
  *   2. 非 JSON / 顶层不是对象 → 未识别
  *   3. code=1 成功 / code=2 业务拒绝 / code=302 登录失效
  *   4. code 无法判定 → msg 含「登录」「认证」→ 登录失效
- *   5. 其余 → 未识别（调用方必须全量落档，红线 R4）
+ *   5. 其余 → 未识别
  */
 export function classify(input: ClassifyInput): Classified {
   const out = {
@@ -238,11 +235,6 @@ export function buildCapacityBody(teachingClassId: string, batchCode: string): s
   return formBody({ teachingClassId, batchCode });
 }
 
-/** 构造查规则课表请求体 */
-export function buildTeachingTimeBody(studentCode: string): string {
-  return formBody({ studentCode });
-}
-
 export interface QueryParams {
   studentCode: string;
   electiveBatchCode: string;
@@ -310,80 +302,12 @@ export function capacityRemain(data: unknown): number | null {
   return cap - used;
 }
 
-/**
- * 从任意列表响应里挖出 electiveBatchCode（batchCode 的真实来源）。
- *
- * `counts` 用于判断「同一响应里出现了多个不同批次码」这种可疑情况，
- * 所以**必须走完整棵树**——早期版本在 `found !== null` 时直接短路，
- * `counts` 因此永远只有一个键，等于没有计数。代价用节点预算兜住。
- */
-export function extractBatchCode(json: unknown): { batchCode: string | null; counts: Record<string, number> } {
-  let found: string | null = null;
-  const counts: Record<string, number> = {};
-  let budget = MAX_BATCH_SCAN_NODES;
-
-  function walk(node: unknown, depth: number): void {
-    if (budget <= 0 || depth > 6 || node === null || typeof node !== 'object') return;
-    if (Array.isArray(node)) {
-      for (const item of node) walk(item, depth + 1);
-      return;
-    }
-    budget -= 1;
-    const obj = node as Record<string, unknown>;
-    const bc = obj['electiveBatchCode'];
-    if (typeof bc === 'string' && bc !== '') {
-      counts[bc] = (counts[bc] ?? 0) + 1;
-      if (found === null) found = bc;
-    }
-    for (const v of Object.values(obj)) walk(v, depth + 1);
-  }
-
-  walk(json, 0);
-  return { batchCode: found, counts };
-}
-
-// -------------------------------------------------------------- 落档
-
-export interface UnknownDumpInput {
-  action: string;
-  url: string;
-  body?: string;
-  text: string;
-  code: string | null;
-  msg: string;
-}
-
-/**
- * 未识别响应全量落档（红线 R4）。
- *
- * 「看不懂就留下，便于事后补分支」—— 走站点改版时，这段输出就是唯一线索，
- * 所以**原文不裁剪**。日志行里同时提一下 code/msg，便于一眼看出服务端在抱怨什么。
- */
-function dumpUnknown(input: UnknownDumpInput): string {
-  const text = input.text ?? '';
-  const block =
-    '\n──────── [未识别返回] ────────\n' +
-    `action: ${input.action}\n` +
-    `url: ${input.url}\n` +
-    `body: ${input.body ?? ''}\n` +
-    `code: ${input.code ?? ''} | msg: ${input.msg}\n` +
-    `长度: ${text.length} 字符\n` +
-    `原文:\n${text}\n` +
-    '──────────────────────────────\n';
-
-  log.error(
-    `未识别返回（已全量落档） code=${input.code ?? ''}${input.msg !== '' ? ` msg=${input.msg}` : ''}`,
-  );
-  console.log(`%c${block}`, 'color:#c00');
-  return block;
-}
-
 // -------------------------------------------------------------- 发送
 
 export interface SendOptions {
   /** 完整 URL；用 `endpointUrl(EP.X, origin())` 构造 */
   url: string;
-  /** 请求动作名，只用于日志与落档（**不要**把参数塞进来） */
+  /** 请求动作名，用于日志 */
   action: string;
   method?: HttpRequest['method'];
   body?: string;
@@ -408,11 +332,10 @@ export interface SendResult {
 /**
  * 发一次 bkxk 请求。**唯一出口**，不要绕过（绕过就绕过了串行队列）。
  *
- * 三件实测结论，别改错：
+ * 站点请求约定：
  *   1. token 必须带：站点要求 cookie + 请求头 `token` 缺一不可，
  *      否则服务端会报 `value sent to redis cannot be null` 这类错误。
  *   2. **不自动追加 timestamp**（见 `appendTimestamp` 注释）。
- *   3. 未识别响应必须落档（红线 R4）。
  */
 export async function bkxkSend(o: SendOptions): Promise<SendResult> {
   const token = o.token ?? '';
@@ -422,8 +345,7 @@ export async function bkxkSend(o: SendOptions): Promise<SendResult> {
 
   const url = o.timestamp === true ? appendTimestamp(o.url) : o.url;
 
-  // ⚠️ 只记动作名与路径：URL 与 body 都可能含学号/批次码（红线 R3）
-  log.info(`[请求] ${o.action} ${o.url}`);
+  log.info(`[请求] ${o.action}`);
 
   const raw = await request({
     url,
@@ -436,14 +358,7 @@ export async function bkxkSend(o: SendOptions): Promise<SendResult> {
   const cls = classify({ status: raw.status, text: raw.text });
 
   if (cls.kind === RESP_KIND.UNKNOWN) {
-    dumpUnknown({
-      action: o.action,
-      url,
-      body: o.body ?? '',
-      text: raw.text,
-      code: cls.code,
-      msg: cls.msg,
-    });
+    log.error(`${o.action} 返回未知格式（HTTP ${raw.status}，响应 ${raw.text.length} 字符）`);
   }
 
   return { status: raw.status, text: raw.text, cls, raw };

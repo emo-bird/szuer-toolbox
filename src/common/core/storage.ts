@@ -6,7 +6,7 @@
  * 不允许任何调用方把 token / cookie / 学号写进来。
  */
 
-export interface StorageBackend {
+interface StorageBackend {
   readonly name: string;
   get(key: string): unknown;
   set(key: string, value: unknown): void;
@@ -82,7 +82,7 @@ class GmBackend implements StorageBackend {
     GM_deleteValue(key);
   }
   keys(): string[] {
-    return GM_listValues().filter((k) => k.startsWith(NS_PREFIX));
+    return GM_listValues();
   }
 }
 
@@ -112,14 +112,11 @@ export function backendName(): string {
 
 // ---------------------------------------------------------------- public API
 
-/** 读一个值；不存在或类型不符时返回 fallback */
+/** 缺失时返回 fallback；具体类型的默认值同时用于基本类型检查。 */
 export function read<T>(key: string, fallback: T): T {
   const raw = backend.get(nsKey(key));
   if (raw === undefined) return fallback;
-  if (typeof raw !== typeof fallback && fallback !== null) {
-    // 类型不匹配（例如旧版本残留），退回默认值而不是把脏数据喂给业务代码
-    return fallback;
-  }
+  if (fallback !== null && fallback !== undefined && typeof raw !== typeof fallback) return fallback;
   return raw as T;
 }
 

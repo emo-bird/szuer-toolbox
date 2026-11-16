@@ -8,7 +8,7 @@
  * 不需要先构建 —— 这是「改完即刻能跑」的关键。
  */
 
-export interface TestResult {
+interface TestResult {
   suite: string;
   name: string;
   ok: boolean;

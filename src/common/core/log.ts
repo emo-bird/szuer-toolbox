@@ -38,14 +38,19 @@ const LEVEL_RANK: Record<LogLevel, number> = { debug: 10, info: 20, warn: 30, er
 const CAPACITY = 500;
 
 let seq = 0;
-let buffer: LogEntry[] = [];
+const buffer: LogEntry[] = [];
+let oldest = 0;
 let minLevel: LogLevel = 'info';
 const listeners = new Set<LogListener>();
 
 function push(level: LogLevel, scope: string, message: string, detail?: unknown): void {
   const entry: LogEntry = { seq: (seq += 1), time: Date.now(), level, scope, message, detail };
-  buffer.push(entry);
-  if (buffer.length > CAPACITY) buffer = buffer.slice(buffer.length - CAPACITY);
+  if (buffer.length < CAPACITY) {
+    buffer.push(entry);
+  } else {
+    buffer[oldest] = entry;
+    oldest = (oldest + 1) % CAPACITY;
+  }
   // 订阅者一律收到（含低于当前等级的条目）——由订阅方决定要不要显示，
   // 否则「先把等级调低、再复现问题」这条最常用的排查路径会失效。
   for (const listener of [...listeners]) {
@@ -74,7 +79,12 @@ export function passesLevel(level: LogLevel): boolean {
 
 /** 取当前缓冲快照（浅拷贝，调用方随便改）。**已按当前等级过滤。** */
 export function entries(): LogEntry[] {
-  return buffer.filter((e) => passesLevel(e.level));
+  const visible: LogEntry[] = [];
+  for (let i = 0; i < buffer.length; i += 1) {
+    const entry = buffer[(oldest + i) % CAPACITY]!;
+    if (passesLevel(entry.level)) visible.push(entry);
+  }
+  return visible;
 }
 
 /** 缓冲里的原始条数（含被等级过滤掉的），供空态文案显示真实的数量 */
@@ -84,7 +94,8 @@ export function rawCount(): number {
 
 /** 清空缓冲 */
 export function clear(): void {
-  buffer = [];
+  buffer.length = 0;
+  oldest = 0;
 }
 
 /** 订阅新日志，返回取消订阅函数 */

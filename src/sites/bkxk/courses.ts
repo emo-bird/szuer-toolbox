@@ -43,8 +43,7 @@
  * - `campus` 在 `programCourse` 的 tc 与课程级**都不存在**，`noArranged` 行里才有（`"01"`）
  *   ⇒ 归一化后可能是空串，需要校区时用会话里的 `DEFAULT_CAMPUS` 兜底。
  *
- * 本模块**只读**：不写 storage、不落盘、不发写接口；`fetchCategory` 也不写设置，
- * 「学到的批次码」用返回值交回调用方，由调用方决定要不要落盘。
+ * 本模块只读课程列表。
  */
 
 import { scoped } from '../../common/core/log.ts';
@@ -54,7 +53,6 @@ import {
   bkxkSend,
   buildQueryBody,
   endpointUrl,
-  extractBatchCode,
 } from './api.ts';
 import type { CategoryCode, RespKind, SendOptions, SendResult } from './api.ts';
 import { DEFAULT_CAMPUS } from './session.ts';
@@ -274,8 +272,6 @@ export interface CategoryResult {
   readonly code: string | null;
   readonly msg: string;
   readonly classes: readonly BkxkClass[];
-  /** 本次响应里学到的批次码（站点有时会换个新的），由调用方决定要不要落盘 */
-  readonly batchCode: string | null;
   /** HTTP 状态码；`0` 表示**根本没发请求**（参数不全 / 取不到 origin） */
   readonly status: number;
   /** 原始结果，供调用方取 finalUrl / 落档；没发请求时为 `null` */
@@ -290,7 +286,6 @@ function currentOrigin(): string {
 /**
  * 拉一个类别的课程列表（只读）。
  *
- * 不写任何 storage、不动设置：学到的批次码从返回值的 `batchCode` 交回调用方。
  * `send` 可注入 —— 档 1 用假 send 覆盖全部分支，不需要真机。
  */
 export async function fetchCategory(p: FetchCategoryParams): Promise<CategoryResult> {
@@ -300,7 +295,6 @@ export async function fetchCategory(p: FetchCategoryParams): Promise<CategoryRes
     code: null,
     msg,
     classes: [],
-    batchCode: null,
     status: 0,
     raw: null,
   });
@@ -340,7 +334,6 @@ export async function fetchCategory(p: FetchCategoryParams): Promise<CategoryRes
   const base = {
     code: raw.cls.code,
     msg: raw.cls.msg,
-    batchCode: null,
     status: raw.status,
     raw,
   };
@@ -355,6 +348,5 @@ export async function fetchCategory(p: FetchCategoryParams): Promise<CategoryRes
     kind: raw.cls.kind,
     classes,
     ...base,
-    batchCode: extractBatchCode(raw.cls.json).batchCode,
   };
 }

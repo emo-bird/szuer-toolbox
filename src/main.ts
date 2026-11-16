@@ -91,11 +91,6 @@ const COMMON_TABS: readonly TabEntry[] = [
   { siteId: COMMON_SITE_ID, tab: statusTab },
 ];
 
-/** 公共标签页 + 命中站点的专属标签页（顺序见 COMMON_TABS 的注释） */
-function buildEntries(siteTabs: readonly TabEntry[]): TabEntry[] {
-  return [...COMMON_TABS, ...siteTabs];
-}
-
 /** 依据分派结果装配（或重装）悬浮窗 */
 function boot(url: URL, res: Resolution): void {
   if (booted !== null) {
@@ -107,13 +102,7 @@ function boot(url: URL, res: Resolution): void {
   const siteTabs: TabEntry[] =
     adapter !== null ? adapter.tabs.map((tab) => ({ siteId: adapter.id, tab })) : [];
 
-  const panel = createPanel(baseCss, buildEntries(siteTabs), {
-    siteName: res.adapter?.name ?? null,
-  });
-
   setStatusProvider(() => ({
-    href: location.href,
-    host: location.host,
     resolution: res.reason,
     adapterId: res.adapter?.id ?? null,
     inject: res.inject,
@@ -123,6 +112,7 @@ function boot(url: URL, res: Resolution): void {
     buildTime: BUILD_TIME,
     version: VERSION,
   }));
+  const panel = createPanel(baseCss, [...COMMON_TABS, ...siteTabs], { siteName: adapter?.name ?? null });
 
   booted = { panel, adapterId: res.adapter?.id ?? null };
   log.info(
@@ -144,26 +134,20 @@ function boot(url: URL, res: Resolution): void {
  * 所以这里监听 hashchange / popstate，必要时重新分派。
  */
 function watchNavigation(): void {
-  let bootedFor = location.href;
-
   const onNavigate = (): void => {
     const url = new URL(location.href);
     const res = resolve(url);
     const nextAdapter = res.adapter?.id ?? null;
 
     // 站点没变、只是页内参数变了：不动悬浮窗，避免打断用户操作
-    if (nextAdapter === (booted?.adapterId ?? null) && res.inject) {
-      bootedFor = location.href;
-      return;
-    }
+    if (nextAdapter === (booted?.adapterId ?? null) && res.inject) return;
 
     if (!res.inject) {
       log.debug(`站内跳转后不再属于支持范围，保持现有悬浮窗`);
       return;
     }
 
-    log.info(`站内跳转导致重新分派：${bootedFor} → ${location.href}`);
-    bootedFor = location.href;
+    log.info(`站内跳转导致重新分派：${url.pathname}`);
     boot(url, res);
   };
 
@@ -184,7 +168,7 @@ function main(): void {
   // ⚠️ 必须用 console.info 而非 console.debug —— Edge DevTools 默认把 Verbose
   //    级别过滤掉，debug 日志用户根本看不见（UOOC 排查因此绕了远路）。
   console.info(
-    `[深大人工具箱] ${VERSION_LABEL} 启动，href=${location.href}，构建于 ${BUILD_TIME ?? '未知'}`,
+    `[深大人工具箱] ${VERSION_LABEL} 启动，host=${location.host}，构建于 ${BUILD_TIME ?? '未知'}`,
   );
 
   wireSites();

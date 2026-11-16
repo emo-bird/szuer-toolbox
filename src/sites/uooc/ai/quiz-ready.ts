@@ -1,12 +1,12 @@
 /**
  * UOOC 试卷「就绪判定」契约（从 ai/fill.ts 拆出，C2 批3）。
  *
- * 就绪 = 每个已出现的题目容器里都已经有可操作控件（`input[name]` 或 `textarea`）。
+ * 就绪 = 每个已出现的题目容器里都有选项、文本框或可编辑的富文本框。
  * 有单测钉住（tests/suites/uooc-quiz-ready.test.ts）；调用方是 takeover-utils 的
  * `viewerReady(kind:'quiz')` 与 ai/index 的作答主流程。
  */
 
-import { collectRoots } from './fill-dom.ts';
+import { collectRoots, essayControlIn } from './fill-dom.ts';
 
 /**
  * 纯函数：每个题目容器都已经有可操作的控件了吗。
@@ -29,7 +29,7 @@ export function containersComplete(controlCounts: readonly number[]): boolean {
  *
  * 判据（DOM 侧，无需先拿 paper）：
  * - 找到含 `div.queContainer` 的文档（旧版试卷在 iframe 里、新版在顶层，所以遍历同源 roots）；
- * - 且**每一个**容器里都已经有控件（`input[name]` 或 `textarea`）—— 空壳容器 = 还在渲染。
+ * - 且**每一个**容器里都已经有答题控件，因此空壳容器仍会等待。
  *
  * ⚠️ **已知边界**：站点若把题目**逐题懒渲染**（先出一题、滚到才出下一题），本判据只保证
  * 「已经出现的容器都是完整的」，保证不了「全部题目都出现了」。这是用户拍板接受的取舍
@@ -37,10 +37,12 @@ export function containersComplete(controlCounts: readonly number[]): boolean {
  */
 export function quizDomReady(top?: Document): boolean {
   for (const doc of top === undefined ? collectRoots() : [top]) {
-    const boxes = doc.querySelectorAll('div.queContainer');
+    const boxes = doc.querySelectorAll<HTMLElement>('div.queContainer');
     if (boxes.length === 0) continue;
     const counts: number[] = [];
-    for (const box of boxes) counts.push(box.querySelectorAll('input[name], textarea').length);
+    for (const box of boxes) {
+      counts.push(box.querySelectorAll('input[name], textarea').length || Number(essayControlIn(box) !== null));
+    }
     if (containersComplete(counts)) return true;
   }
   return false;

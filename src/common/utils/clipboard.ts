@@ -52,17 +52,12 @@ export function copyMethodOrder(env: CopyEnv): readonly CopyMethod[] {
   return ORDER.filter((m) => has(env, m));
 }
 
-/** 首选方式；一个都不可用时是 `'none'`（纯函数） */
-export function pickCopyMethod(env: CopyEnv): CopyMethod {
-  return copyMethodOrder(env)[0] ?? 'none';
-}
-
 /** 真机探测三个能力位 */
 function detectCopyEnv(): CopyEnv {
   const g = globalThis as Record<string, unknown>;
   return {
     hasGm: typeof g['GM_setClipboard'] === 'function',
-    // http 页面上这是 undefined；访问它本身也可能抛（极少），所以整段包起来
+    // http 页面上这是 undefined。
     hasClipboard: typeof navigator !== 'undefined' && navigator.clipboard !== undefined,
     hasExec: typeof document !== 'undefined' && typeof document.execCommand === 'function',
   };

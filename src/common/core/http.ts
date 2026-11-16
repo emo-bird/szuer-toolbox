@@ -7,8 +7,8 @@
  *   2. **限流只有软提示**（见 `limits.ts`）：低于建议下限（200ms）会 warn，但**不改用户的值**。
  *      校园站对高频请求零容忍（实测会被直接终止会话），所以默认值保守、提示醒目，
  *      但「要不要冒险」这个决定权归用户。红线 R2 的这一处放松由用户显式拍板（需求文档 Q-AF）。
- *   3. **凭证不落盘**（红线 R3）：本模块只记录 方法 / 路径 / 状态码 / 耗时 / 响应长度，
- *      绝不记录请求头与请求体。`Cookie` 与 `token` 只作为**参数**流经，不写日志。
+ *   3. 请求日志只记录方法、状态码、耗时和响应长度。同源请求另外记录路径。
+ *      GM 请求地址可能带有路径密钥，因此不记录地址。
  *   4. **未识别返回落档**（红线 R4）：由调用方通过 `classify` 决定落档策略，
  *      本模块只负责把原始响应文本原样交出去。
  *
@@ -53,14 +53,14 @@ export interface HttpRequest {
   url: string;
   method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'HEAD';
   headers?: Record<string, string>;
-  /** 字符串或 URLSearchParams；对象会被 JSON 序列化并由调用方自行设置 Content-Type */
-  data?: string | URLSearchParams | Record<string, unknown>;
+  /** 普通对象会被 JSON 序列化，Content-Type 由调用方设置 */
+  data?: string | URLSearchParams | FormData | Record<string, unknown>;
   /** 从出队起计时，覆盖读取响应正文。默认 60 秒。 */
   timeoutMs?: number;
   /** 可取消排队中或执行中的请求。 */
   signal?: AbortSignal;
   /** 响应解析方式，默认 'text'；'json' 会在解析失败时抛错 */
-  responseType?: 'text' | 'json';
+  responseType?: 'text' | 'json' | 'arraybuffer';
   /** 出队优先级，默认 PRIORITY.NORMAL */
   priority?: number;
   /**
@@ -75,6 +75,7 @@ export interface HttpRequest {
    * 出口仍然是本函数一处决定的 —— 不要在调用方自己写 `GM_xmlhttpRequest`。
    */
   channel?: 'page' | 'gm';
+  rejectRedirects?: boolean;
 }
 
 export interface HttpResponse {
@@ -84,6 +85,7 @@ export interface HttpResponse {
   readonly text: string;
   /** responseType 为 'json' 时的解析结果，否则为 null */
   readonly json: unknown;
+  readonly bytes?: ArrayBuffer;
   /** 重定向后的最终 URL（可用时） */
   readonly finalUrl: string;
   /** 等待后重试的建议值（响应头 Retry-After，接口未提供时为空）。 */
@@ -164,11 +166,11 @@ function schedule(queue: Queue): void {
   const delay = Math.max(0, queue.nextAt - Date.now());
   queue.timer = setTimeout(() => {
     queue.timer = null;
-    while (queue.inflight < queue.concurrency && queue.items.length > 0) runOne(queue);
+    while (queue.inflight < queue.concurrency && queue.items.length > 0) void runOne(queue);
   }, delay);
 }
 
-function runOne(queue: Queue): void {
+async function runOne(queue: Queue): Promise<void> {
   // 取优先级最高者；同级按入队先后
   let idx = 0;
   for (let i = 1; i < queue.items.length; i += 1) {
@@ -180,16 +182,14 @@ function runOne(queue: Queue): void {
   queue.inflight += 1;
   if (queue === pageQueue) queue.nextAt = Date.now() + intervalMs;
 
-  void Promise.resolve()
-    .then(() => item.task())
-    .then(
-      (value) => item.resolve(value),
-      (err: unknown) => item.reject(err),
-    )
-    .then(() => {
-      queue.inflight -= 1;
-      schedule(queue);
-    });
+  try {
+    item.resolve(await item.task());
+  } catch (err) {
+    item.reject(err);
+  } finally {
+    queue.inflight -= 1;
+    schedule(queue);
+  }
 }
 
 /**
@@ -229,10 +229,11 @@ function enqueue<T>(queue: Queue, task: () => Promise<T>, req: HttpRequest): Pro
 
 // -------------------------------------------------------------- 传输层
 
-function toBody(data: HttpRequest['data']): string | undefined {
+function toBody(data: HttpRequest['data']): string | FormData | undefined {
   if (data === undefined) return undefined;
   if (typeof data === 'string') return data;
   if (data instanceof URLSearchParams) return data.toString();
+  if (typeof FormData !== 'undefined' && data instanceof FormData) return data;
   return JSON.stringify(data);
 }
 
@@ -262,11 +263,12 @@ interface RawResult {
   status: number;
   statusText: string;
   text: string;
+  bytes?: ArrayBuffer;
   finalUrl: string;
   retryAfter?: string;
 }
 
-async function viaFetch(req: HttpRequest, body: string | undefined, signal: AbortSignal): Promise<RawResult> {
+async function viaFetch(req: HttpRequest, body: string | FormData | undefined, signal: AbortSignal): Promise<RawResult> {
   const target = resolveFetch();
   if (target === null) throw new Error('当前环境没有可用的 fetch');
 
@@ -275,6 +277,7 @@ async function viaFetch(req: HttpRequest, body: string | undefined, signal: Abor
     // 页面 fetch 的默认 credentials 是 same-origin，这里显式写出来，
     // 免得将来有人把出口挪到别的上下文时 cookie 静默丢失。
     credentials: 'include',
+    ...(req.rejectRedirects ? { redirect: 'error' } : {}),
     signal,
     ...(req.headers !== undefined ? { headers: req.headers } : {}),
     ...(body !== undefined ? { body } : {}),
@@ -284,11 +287,12 @@ async function viaFetch(req: HttpRequest, body: string | undefined, signal: Abor
   };
 
   const res = await target.fn.call(target.owner, req.url, init);
-  const text = await res.text();
+  const payload = req.responseType === 'arraybuffer'
+    ? { text: '', bytes: await res.arrayBuffer() } : { text: await res.text() };
   return {
     status: res.status,
     statusText: res.statusText,
-    text,
+    ...payload,
     finalUrl: res.url,
     retryAfter: res.headers?.get('Retry-After') ?? undefined,
   };
@@ -300,6 +304,7 @@ interface GmResponse {
   status: number;
   statusText: string;
   responseText: string;
+  response?: unknown;
   finalUrl?: string;
   responseHeaders?: string;
 }
@@ -309,7 +314,9 @@ interface GmDetails {
   url: string;
   anonymous: boolean;
   headers?: Record<string, string>;
-  data?: string;
+  data?: string | FormData;
+  responseType?: 'arraybuffer';
+  redirect?: 'error';
   onload?: (r: GmResponse) => void;
   onerror?: (e: unknown) => void;
   onabort?: () => void;
@@ -332,7 +339,7 @@ function resolveGm(): GmXhr | null {
   return typeof fn === 'function' ? (fn as GmXhr) : null;
 }
 
-async function viaGm(req: HttpRequest, body: string | undefined, signal: AbortSignal): Promise<RawResult> {
+async function viaGm(req: HttpRequest, body: string | FormData | undefined, signal: AbortSignal): Promise<RawResult> {
   const gm = resolveGm();
   if (gm === null) {
     throw new Error('GM_xmlhttpRequest 不可用：油猴清单里缺少 @grant GM_xmlhttpRequest');
@@ -356,13 +363,17 @@ async function viaGm(req: HttpRequest, body: string | undefined, signal: AbortSi
       method: req.method ?? 'GET',
       url: req.url,
       anonymous: true,
+      ...(req.rejectRedirects ? { redirect: 'error' } : {}),
+      ...(req.responseType === 'arraybuffer' ? { responseType: 'arraybuffer' } : {}),
       ...(req.headers !== undefined ? { headers: req.headers } : {}),
       ...(body !== undefined ? { data: body } : {}),
       onload: (r) => {
         resolve({
           status: r.status,
           statusText: r.statusText,
-          text: r.responseText ?? '',
+          ...(req.responseType === 'arraybuffer'
+            ? { text: '', bytes: r.response instanceof ArrayBuffer ? r.response : undefined }
+            : { text: r.responseText ?? '' }),
           finalUrl: r.finalUrl ?? req.url,
           retryAfter: /^retry-after:[ \t]*([^\r\n]+)/im.exec(r.responseHeaders ?? '')?.[1]?.trim(),
         });
@@ -380,7 +391,7 @@ async function viaGm(req: HttpRequest, body: string | undefined, signal: AbortSi
 }
 
 /** 统一计时与取消。GM 管理器可能忽略超时，也可能不触发取消回调。 */
-async function sendWithDeadline(req: HttpRequest, body: string | undefined): Promise<RawResult> {
+async function sendWithDeadline(req: HttpRequest, body: string | FormData | undefined): Promise<RawResult> {
   const caller = req.signal;
   if (caller?.aborted) throw caller.reason;
 
@@ -417,28 +428,29 @@ async function sendWithDeadline(req: HttpRequest, body: string | undefined): Pro
  * 发一个请求。统一由本模块控制排队、并发和超时。
  */
 export async function request(req: HttpRequest): Promise<HttpResponse> {
+  req.signal?.throwIfAborted();
   const body = toBody(req.data);
   const started = Date.now();
 
-  const queue = req.channel === 'gm' ? gmQueue : pageQueue;
-  const raw = await enqueue(queue, () => sendWithDeadline(req, body), req);
+  const gm = req.channel === 'gm';
+  const raw = await enqueue(gm ? gmQueue : pageQueue, () => sendWithDeadline(req, body), req);
 
   const elapsedMs = Date.now() - started;
   let json: unknown = null;
+  if (req.rejectRedirects && raw.finalUrl !== req.url) throw new Error('接口返回了意外的重定向');
+  const target = gm ? ' [gm]' : ` ${safePath(req.url)}`;
+  const method = req.method ?? 'GET';
   if (req.responseType === 'json') {
     try {
       json = JSON.parse(raw.text);
     } catch {
-      log.error(`期望 JSON 但解析失败 ${req.method ?? 'GET'} ${safePath(req.url)} → ${raw.status}`);
+      log.error(`期望 JSON 但解析失败 ${method}${target} → ${raw.status}`);
       throw new HttpError('响应不是合法 JSON', raw.status, raw.text);
     }
   }
 
-  // 只记路径，不记 query（query 里可能有 token），绝不记 header / body
-  const via = req.channel === 'gm' ? ' [gm]' : '';
-  log.debug(
-    `${req.method ?? 'GET'}${via} ${safePath(req.url)} → ${raw.status} (${elapsedMs}ms, ${raw.text.length}B)`,
-  );
+  const size = raw.bytes === undefined ? `${raw.text.length} 字符` : `${raw.bytes.byteLength}B`;
+  log.debug(`${method}${target} → ${raw.status} (${elapsedMs}ms, ${size})`);
 
   return { ...raw, elapsedMs, json };
 }

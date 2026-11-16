@@ -126,23 +126,20 @@ function runExe(exe, args) {
 // ------------------------------------------------------------------ 主流程
 
 function main() {
-  const args = process.argv.slice(2);
-  const checkOnly = args.includes('--check');
+  if (process.argv.includes('--check')) {
+    if (!existsSync(OUT_FILE)) {
+      fail(`找不到现有产物：${relative(ROOT, OUT_FILE)}，请先运行 node build.mjs`);
+      process.exitCode = 1;
+    } else {
+      info(`产物：${relative(ROOT, OUT_FILE)}（${fmtSize(statSync(OUT_FILE).size)}）`);
+    }
+    return;
+  }
 
   const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
   const version = process.env.SZB_VERSION ?? pkg.version;
   const buildTime = new Date().toISOString();
-
-  if (checkOnly && existsSync(OUT_FILE)) {
-    info(`产物：${relative(ROOT, OUT_FILE)}（${fmtSize(statSync(OUT_FILE).size)}）`);
-    return;
-  }
-
-  // 只有真正要写产物时才递增构建号（--check 不动计数）
   const buildNo = nextBuildNo();
-
-  mkdirSync(TMP_DIR, { recursive: true });
-
   const exe = resolveEsbuildExe();
   info(`esbuild：${relative(ROOT, exe)}`);
 

@@ -12,34 +12,28 @@
  * 所以每个标签页注册时可以带一份自己的 `css`，由本模块塞进 shadow root。
  */
 
-import { clear, el } from '../utils/dom.ts';
+import { el } from '../utils/dom.ts';
 import { scoped } from '../core/log.ts';
 import { planTabOrder } from './tab-order.ts';
 import type { TabOrderInput } from './tab-order.ts';
-import type { TabContext, TabRegistration } from '../../sites/types.ts';
+import type { PanelApi } from '../../sites/types.ts';
 
 const log = scoped('ui/tabs');
-
-export interface TabViewOptions {
-  /** 标签被选中时回调，供 panel 记忆「上次停留的标签」 */
-  onActivate?: (tabId: string) => void;
-}
 
 export class TabView {
   readonly tabbar: HTMLElement;
   readonly body: HTMLElement;
   private readonly shadowRoot: ShadowRoot;
-  private readonly options: TabViewOptions;
-  /** tabId → { tab, pane, dispose } */
+  private readonly onActivate: (tabId: string) => void;
   private readonly mounted = new Map<
     string,
-    { tab: TabRegistration; style: HTMLStyleElement; pane: HTMLElement; dispose?: () => void }
+    { button: HTMLButtonElement; style?: HTMLStyleElement; pane: HTMLElement; dispose?: () => void }
   >();
   private current: string | null = null;
 
-  constructor(shadowRoot: ShadowRoot, options: TabViewOptions = {}) {
+  constructor(shadowRoot: ShadowRoot, onActivate: (tabId: string) => void) {
     this.shadowRoot = shadowRoot;
-    this.options = options;
+    this.onActivate = onActivate;
     this.tabbar = el('nav', { class: 'sztb-tabbar', attrs: { role: 'tablist' } });
     this.body = el('div', { class: 'sztb-body' });
     this.tabbar.addEventListener('keydown', (event) => {
@@ -57,46 +51,20 @@ export class TabView {
     });
   }
 
-  /**
-   * 重建全部标签页。先卸载旧的（调用其 dispose），再挂新的。
-   * 骨架阶段沿用「整批重建」策略 —— 标签页数量是个位数，不值得做 diff。
-   *
-   * 入参是「标签页 + 它归属的站点 id」而不是裸的 `TabRegistration`：
-   * 分组要靠 `siteId` 区分站点组与公共组（见 ./tab-order.ts）。
-   *
-   * @param preferredTabId 初始选中的标签页 id（「上次停留的标签」）。
-   *   **本模块不读 storage** —— 记忆的读取与写回都在 panel 里，这里只负责
-   *   「优先选它；它不在本批标签集里就退回首屏第一个」。传 null / 省略即传统行为。
-   */
-  setTabs(entries: readonly TabOrderInput[], ctx: TabContext, preferredTabId: string | null = null): void {
-    this.destroyTabs();
-
+  mount(entries: readonly TabOrderInput[], host: PanelApi, preferredTabId: string | null): void {
     const planned = planTabOrder(entries);
     for (const item of planned) {
-      // 站点组与公共组的交界处先插竖线，再挂该组的第一个标签页
       if (item.dividerBefore) this.tabbar.appendChild(makeSeparator());
-      this.mountTab(item.entry.tab, ctx);
+      this.mountTab(item.entry, host);
     }
-
-    const first = planned[0];
-    if (first !== undefined) {
-      // ⚠️ 不要在这里读 `this.current`：上一行的 destroyTabs() 刚把它清成 null，
-      //    写回退分支等于死代码（曾经因此让「记住上次停留的标签页」整条功能失效）。
-      const keep =
-        preferredTabId !== null && this.mounted.has(preferredTabId)
-          ? preferredTabId
-          : first.entry.tab.id;
-      this.activate(keep);
-    }
+    const initial = preferredTabId ?? planned[0]?.entry.tab.id;
+    if (initial !== undefined) this.select(initial);
   }
 
-  private mountTab(tab: TabRegistration, ctx: TabContext): void {
+  private mountTab({ tab, siteId }: TabOrderInput, host: PanelApi): void {
     const id = `sztb-tab-${tab.id}`;
-    // 1) 样式：每个标签页一份 <style data-tab>，卸载时一并移除
-    const style = document.createElement('style');
-    style.dataset['tab'] = tab.id;
-    style.textContent = tab.css ?? '';
-    this.shadowRoot.appendChild(style);
+    const style = tab.css ? el('style', { text: tab.css }) : undefined;
+    if (style) this.shadowRoot.appendChild(style);
 
     // 2) 标签按钮
     const button = el('button', {
@@ -115,7 +83,7 @@ export class TabView {
 
     let dispose: (() => void) | undefined;
     try {
-      const result = tab.mount(pane, ctx);
+      const result = tab.mount(pane, { siteId, host });
       if (typeof result === 'function') dispose = result;
     } catch (err) {
       // 一个坏掉的标签页不该把悬浮窗整体带崩
@@ -123,52 +91,46 @@ export class TabView {
       pane.appendChild(el('div', { class: 'sztb-empty', text: `该标签页加载失败：${String(err)}` }));
     }
 
-    this.mounted.set(tab.id, { tab, style, pane, ...(dispose !== undefined ? { dispose } : {}) });
+    this.mounted.set(tab.id, { button, style, pane, dispose });
   }
 
   /** 切到某个标签页 */
   activate(tabId: string): void {
-    if (!this.mounted.has(tabId)) {
+    if (this.select(tabId)) this.onActivate(tabId);
+  }
+
+  private select(tabId: string): boolean {
+    const next = this.mounted.get(tabId);
+    if (!next) {
       log.warn(`激活了不存在的标签页 ${tabId}`);
-      return;
+      return false;
     }
-    this.current = tabId;
-    for (const button of this.tabbar.querySelectorAll<HTMLElement>('.sztb-tab')) {
-      const selected = button.dataset['tab'] === tabId;
-      button.setAttribute('aria-selected', String(selected));
-      button.tabIndex = selected ? 0 : -1;
-    }
-    for (const pane of this.body.querySelectorAll<HTMLElement>('.sztb-pane')) {
-      pane.dataset['active'] = String(pane.dataset['tab'] === tabId);
-    }
-    this.options.onActivate?.(tabId);
-  }
-
-  activeTabId(): string | null {
-    return this.current;
-  }
-
-  has(tabId: string): boolean {
-    return this.mounted.has(tabId);
-  }
-
-  private destroyTabs(): void {
-    for (const item of this.mounted.values()) {
-      try {
-        item.dispose?.();
-      } catch (err) {
-        log.warn(`标签页 ${item.tab.id} 卸载时抛错`, err);
+    if (this.current !== tabId) {
+      const previous = this.current === null ? undefined : this.mounted.get(this.current);
+      if (previous) {
+        previous.button.setAttribute('aria-selected', 'false');
+        previous.button.tabIndex = -1;
+        previous.pane.dataset['active'] = 'false';
       }
+      next.button.setAttribute('aria-selected', 'true');
+      next.button.tabIndex = 0;
+      next.pane.dataset['active'] = 'true';
+      this.current = tabId;
     }
-    this.mounted.clear();
-    this.current = null;
-    clear(this.tabbar);
-    clear(this.body);
-    for (const style of this.shadowRoot.querySelectorAll('style[data-tab]')) style.remove();
+    return true;
   }
 
   destroy(): void {
-    this.destroyTabs();
+    for (const [tabId, item] of this.mounted) {
+      try {
+        item.dispose?.();
+      } catch (err) {
+        log.warn(`标签页 ${tabId} 卸载时抛错`, err);
+      }
+      item.style?.remove();
+    }
+    this.mounted.clear();
+    this.current = null;
     this.tabbar.remove();
     this.body.remove();
   }
@@ -180,9 +142,6 @@ export class TabView {
  * `role="separator"` + 竖直朝向：标签栏会 `flex-wrap` 换行，用 `aria-orientation`
  * 说明这条线是**分组线**而不是页面里的水平分割。
  *
- * 类名刻意与 `.sztb-tab` 只差一个后缀：`activate()` 里用的是
- * `querySelectorAll('.sztb-tab')`，而 class 选择器是按**独立的 class token** 精确匹配的，
- * 不会命中 `.sztb-tab-sep`，所以这条线不会被当成标签按钮。
  */
 function makeSeparator(): HTMLElement {
   return el('span', {

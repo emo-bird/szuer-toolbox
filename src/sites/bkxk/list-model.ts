@@ -279,13 +279,9 @@ export function addTask(store: TaskStore, input: TaskAddInput): { store: TaskSto
   return { store: { seq, items: [...store.items, item] }, added: true };
 }
 
-export interface MonitorAddInput extends TargetInfo {
-  readonly now: number;
-}
-
 export function addMonitor(
   store: MonitorStore,
-  input: MonitorAddInput,
+  input: TargetInfo,
 ): { store: MonitorStore; added: boolean } {
   if (hasMonitor(store, input.tcId)) return { store, added: false };
   const item: MonitorItem = {
@@ -347,7 +343,7 @@ export function toggleTask(store: TaskStore, input: TaskAddInput): { store: Task
  */
 export function toggleMonitor(
   store: MonitorStore,
-  input: MonitorAddInput,
+  input: TargetInfo,
 ): { store: MonitorStore; on: boolean } {
   if (hasMonitor(store, input.tcId)) {
     const { store: next } = removeMonitor(store, input.tcId);
@@ -434,9 +430,6 @@ export const CLASS_COLLECTION_IMG = 'collection-img';
 /** 一个节点「该去哪儿」 —— 由纯函数算出，`list.ts` 只负责执行 */
 export type RelocateTarget = 'h5' | 'title-before' | 'none';
 
-/** 现在这个节点在哪 —— 也是纯函数算的，用来判断要不要动手 */
-export type RelocatePlace = 'h5' | 'title-before' | 'elsewhere';
-
 /**
  * 退选按钮该去哪儿。
  *
@@ -461,13 +454,6 @@ export function planDeleteVolunteer(inH5: boolean): RelocateTarget {
  */
 export function planCollectionImg(beforeTitle: boolean): RelocateTarget {
   return beforeTitle ? 'none' : 'title-before';
-}
-
-/** 当前所在位置 → 报告的字符串（日志与测试用） */
-export function describePlace(place: RelocatePlace): string {
-  if (place === 'h5') return '课名行（已摆好）';
-  if (place === 'title-before') return '课名前（已摆好）';
-  return '站点原位（需要搬家）';
 }
 
 /** `h5` 里三个元素的目标顺序：星标 → 课名 → 已选 → 退选 */
@@ -495,10 +481,7 @@ export function orderH5Children(keys: readonly string[]): readonly string[] {
     return i === -1 ? H5_ORDER.length : i;
   };
   // 稳定排序：Array.prototype.sort 在现代引擎里是稳定的，rank 相同则保持原序
-  return [...keys]
-    .map((key, index) => ({ key, index }))
-    .sort((a, b) => rank(a.key) - rank(b.key) || a.index - b.index)
-    .map((item) => item.key);
+  return [...keys].sort((a, b) => rank(a) - rank(b));
 }
 
 /**

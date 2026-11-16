@@ -65,6 +65,7 @@ interface Overlay {
   compact: boolean;
   readonly compactToggle: HTMLButtonElement;
   readonly heading: HTMLElement;
+  renderedQuiz: ReturnType<typeof monitorState>['quiz'];
   off: (() => void) | null;
   /** 巡检定时器（关遮罩时清掉） */
   timer: number | null;
@@ -193,37 +194,7 @@ function frameDoc(o: Overlay): Document | null {
   return doc === null || doc.body === null ? null : doc;
 }
 
-/**
- * 把节点挂到 iframe 当前那份 document 上（没挂 / 被抹掉 / 换了 document 都走这里）。
- *
- * 节点原本属于哪份 document 都行 —— `appendChild` 会隐式 adopt（同源 iframe 允许），
- * 这也是「iframe 导航后遮罩还能回来」的关键。
- *
- * @returns 挂上了返回 true
- */
-function ensureAttached(o: Overlay): boolean {
-  const doc = frameDoc(o);
-  if (doc === null) return false;
-  if (o.attached !== doc) {
-    if (o.attached !== null) log.info('试卷 iframe 换了 document，遮罩已挂到新页面上');
-    doc.body!.appendChild(o.node);
-    o.attached = doc;
-    return true;
-  }
-  if (!o.node.isConnected) {
-    doc.body!.appendChild(o.node);
-    log.debug('遮罩被站点重渲染抹掉，已重新挂回');
-    return true;
-  }
-  return false;
-}
-
-/**
- * 巡检该干什么 —— 抽成纯函数只为**能上单测**（DOM 侧的东西在 Node 里测不了）。
- *
- * 口径（用户 2026-10-09 拍板）：**就绪才挂**；等到超时仍没就绪则**照样挂**，
- * 因为「看不到进度」比「可能被站点刷掉一次」更糟。
- */
+/** 等题目出现后挂载，超时则先显示进度。 */
 export function overlayStep(ready: boolean, now: number, deadline: number): 'attach' | 'attach-late' | 'wait' {
   if (ready) return 'attach';
   return now >= deadline ? 'attach-late' : 'wait';
@@ -234,33 +205,20 @@ function poll(o: Overlay): void {
   if (cur !== o) return;
 
   const doc = frameDoc(o);
-  const ready = doc !== null && doc.querySelector(READY_SELECTOR) !== null;
-
-  switch (overlayStep(ready, Date.now(), o.deadline)) {
-    case 'attach':
-      // 站点已经渲染过试卷了，挂上（被抹掉/换了 document 都会在这里被补回来）
-      if (ensureAttached(o)) render(o);
-      return;
-
-    case 'wait':
-      // 还没就绪：**先不挂**（挂早了会被站点自己的首次渲染刷掉）
-      return;
-
-    default:
-      // 等到超时仍没就绪 ⇒ 照样挂，但如实告警一次
-      if (!o.warnedLate) {
-        o.warnedLate = true;
-        log.warn(
-          `等题目 DOM 超时（${waitTimeoutMs()} ms）仍没见到 ${READY_SELECTOR}，先把遮罩挂上（站点重渲染时会被刷掉一次）`,
-        );
-      }
-      if (ensureAttached(o)) render(o);
-      return;
+  if (doc === null || (o.attached === doc && o.node.isConnected)) return;
+  const step = overlayStep(doc.querySelector(READY_SELECTOR) !== null, Date.now(), o.deadline);
+  if (step === 'wait') return;
+  if (step === 'attach-late' && !o.warnedLate) {
+    o.warnedLate = true;
+    log.warn(`等题目 DOM 超时（${waitTimeoutMs()} ms）仍没见到 ${READY_SELECTOR}，先把遮罩挂上`);
   }
+  doc.body!.appendChild(o.node);
+  o.attached = doc;
+  render(o);
 }
 
 function render(o: Overlay): void {
-  const doc = frameDoc(o) ?? o.node.ownerDocument;
+  const doc = o.node.ownerDocument;
   const state = monitorState();
   // 监视状态里那份必须是**这张试卷**的，否则（换了一场测验）不该拿别人的进度来显示
   const quiz = state.quiz !== null && state.quiz.tid === o.tid ? state.quiz : null;
@@ -268,7 +226,6 @@ function render(o: Overlay): void {
   // 确认交卷及等待站点验证时，控制权交还给用户。
   const visible = !o.hidden && phase !== 'confirming' && phase !== 'submitting';
 
-  ensureAttached(o);
   o.node.style.setProperty('display', visible ? 'flex' : 'none');
   if (!visible) return;
   o.node.style.inset = o.compact ? 'auto 10px 10px 10px' : '0';
@@ -280,6 +237,9 @@ function render(o: Overlay): void {
   o.heading.textContent = o.compact && quiz !== null ? `AI 作答 · ${quiz.done}/${quiz.total} 已处理` : 'AI 作答';
   if (o.compact) return;
 
+  const previous = o.renderedQuiz;
+  if (previous?.questions === quiz?.questions && previous?.phase === quiz?.phase && previous?.message === quiz?.message) return;
+  o.renderedQuiz = quiz;
   o.live.textContent = '';
   if (quiz === null) return;
 
@@ -339,6 +299,7 @@ export function quizOverlayOpen(frame: HTMLIFrameElement | null, tid: string, st
     compact: false,
     compactToggle,
     heading,
+    renderedQuiz: null,
     off: null,
     timer: null,
     deadline: Date.now() + waitTimeoutMs(),

@@ -72,7 +72,7 @@ export function judgeToLetter(s: string): 'A' | 'B' | null {
  * 多个空按空序用竖线 `|` 原样保留，切段由 `fill.ts` 的 `blankSegments` 负责。
  */
 export function normalizeAnswer(raw: string, kind: QuestionKind): string | null {
-  if (kind === 'blank' || kind === 'other') {
+  if (kind === 'blank' || kind === 'essay' || kind === 'other') {
     const t = raw.trim();
     return t === '' ? null : t;
   }
@@ -186,6 +186,44 @@ export interface ModelAnswer {
   readonly explanation?: string;
 }
 
+export function essayLengthLimit(stem: string): number | undefined {
+  const match = /(?:不超过|不多于|最多|至多)\s*(\d+)\s*(?:个)?(?:汉字|字符|字)/.exec(stem.normalize('NFKC'));
+  return match ? Number(match[1]) : undefined;
+}
+
+function outputBody(text: string): string {
+  const body = text.trim();
+  return /^\x60\x60\x60(?:json|text)?[ \t]*\r?\n([\s\S]*?)\r?\n\x60\x60\x60$/i.exec(body)?.[1]?.trim() ?? body;
+}
+
+export function parseEssayAnswer(text: string, question: ExamQuestion):
+  | { answer: ModelAnswer }
+  | { error: string; overLimit?: true } {
+  let candidate = outputBody(text);
+  let explanation: string | undefined;
+  if (candidate.startsWith('{') || candidate.startsWith('[') || /^\x60\x60\x60json\b/i.test(text.trim())) {
+    const invalid = { error: '论述题的 JSON 回复缺少有效正文，请重试或将输出格式切换为文本' };
+    let result: unknown;
+    try { result = JSON.parse(candidate); } catch { return { error: '论述题的 JSON 回复无法解析，请重试或将输出格式切换为文本' }; }
+    if (result === null || typeof result !== 'object' || Array.isArray(result)) return invalid;
+    const record = result as Record<string, unknown>;
+    const value = record['answer'];
+    const parts = typeof value === 'string' ? [value] : value;
+    if (record['question'] !== 1 || !Array.isArray(parts) || parts.length === 0 ||
+      !parts.every((part): part is string => typeof part === 'string' && part.trim() !== '')) return invalid;
+    candidate = parts.join('\n');
+    if (typeof record['explanation'] === 'string') explanation = record['explanation'].trim().slice(0, 600);
+  }
+  const answer = candidate.split(/\r\n?|\n/).map((line) => line.trim()).filter(Boolean).join('\n');
+  if (!answer) return { error: '模型未返回论述题正文' };
+  const limit = essayLengthLimit(question.stem);
+  const length = [...answer.replace(/\s/g, '')].length;
+  if (limit !== undefined && length > limit) {
+    return { error: `论述题正文超出字数上限（${length}/${limit} 字，含标点、不含空白）`, overLimit: true };
+  }
+  return { answer: explanation ? { answer, explanation } : { answer } };
+}
+
 function makeModelAnswer(answer: string, explanation: string | undefined, question: ExamQuestion): ModelAnswer | null {
   const validated = validateQuestionAnswer(answer, question);
   if (validated === null) return null;
@@ -195,6 +233,10 @@ function makeModelAnswer(answer: string, explanation: string | undefined, questi
 
 /** 单题调用以 1 为题号。结构化输出校验形状、题号、类型与实际答案范围。 */
 export function parseModelAnswer(text: string, question: ExamQuestion): ModelAnswer | null {
+  if (question.kind === 'essay') {
+    const result = parseEssayAnswer(text, question);
+    return 'answer' in result ? result.answer : null;
+  }
   const body = text.trim();
   const fenced = /^\x60\x60\x60(?:json)?\s*\r?\n([\s\S]*?)\r?\n\x60\x60\x60$/i.exec(body)?.[1]?.trim();
   const candidate = fenced ?? body;

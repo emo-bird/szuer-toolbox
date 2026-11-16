@@ -24,7 +24,6 @@ import {
   addTask,
   categoryOfBodyId,
   cleanText,
-  describePlace,
   elementKey,
   grabButtonLabel,
   hasMonitor,
@@ -485,9 +484,4 @@ describe('bkxk 列表注入 —— 站点节点的重新摆位（v0.20）', () =
     });
   });
 
-  it('describePlace 三种位置都有可读文案（日志与排障要用）', () => {
-    assert(describePlace('h5').includes('已摆好'), 'h5 位置文案应含「已摆好」');
-    assert(describePlace('title-before').includes('已摆好'), 'title-before 位置文案应含「已摆好」');
-    assert(describePlace('elsewhere').includes('需要搬家'), 'elsewhere 位置文案应含「需要搬家」');
-  });
 });

@@ -98,14 +98,15 @@ export interface RawCatalogResponse {
 }
 
 /** 发一次请求；测试里注入假实现 */
-export type CatalogSender = (url: string, timeoutMs: number) => Promise<RawCatalogResponse>;
+export type CatalogSender = (url: string, timeoutMs: number, signal?: AbortSignal) => Promise<RawCatalogResponse>;
 
-const defaultSender: CatalogSender = async (url, timeoutMs) => {
+const defaultSender: CatalogSender = async (url, timeoutMs, signal) => {
   const res = await request({
     url,
     method: 'GET',
     responseType: 'json',
     timeoutMs,
+    signal,
     priority: PRIORITY.NORMAL,
     channel: 'page',
   });
@@ -188,15 +189,20 @@ export interface CatalogFetchOptions {
   send?: CatalogSender;
   /** 注入用（测试）；默认 `setTimeout` */
   sleep?: (ms: number) => Promise<void>;
-  /** 每次重试**之前**问一句：用户按了停止就别再发了 */
-  shouldAbort?: () => boolean;
+  signal?: AbortSignal;
   /** 覆盖 URL 的 origin（测试用） */
   origin?: string;
 }
 
-function defaultSleep(ms: number): Promise<void> {
+function defaultSleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
-    setTimeout(resolve, ms);
+    const finish = (): void => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', finish);
+      resolve();
+    };
+    const timer = setTimeout(finish, ms);
+    signal?.addEventListener('abort', finish, { once: true });
   });
 }
 
@@ -211,8 +217,8 @@ interface RetryPlan<T> {
   label: string;
   url: string;
   send: CatalogSender;
-  sleep: (ms: number) => Promise<void>;
-  shouldAbort?: (() => boolean) | undefined;
+  sleep: (ms: number, signal?: AbortSignal) => Promise<void>;
+  signal?: AbortSignal;
   /** 把一次成功的 HTTP 响应变成 `T`；失败分类由它自己决定 */
   parse: (res: RawCatalogResponse) => ParseOutcome<T>;
   /** 重试期间被停止时的 detail 文案 */
@@ -222,7 +228,7 @@ interface RetryPlan<T> {
 }
 
 /** 取数结果（两个接口共用同一形状） */
-export type RetryResult<T> =
+type RetryResult<T> =
   | { ok: true; attempts: number; value: T; raw: unknown }
   | { ok: false; attempts: number; failure: CatalogFailure };
 
@@ -230,7 +236,7 @@ export type RetryResult<T> =
 async function attemptOnce<T>(plan: RetryPlan<T>): Promise<ParseOutcome<T>> {
   let res: RawCatalogResponse;
   try {
-    res = await plan.send(plan.url, CATALOG_TIMEOUT_MS);
+    res = await plan.send(plan.url, CATALOG_TIMEOUT_MS, plan.signal);
   } catch (err) {
     return { ok: false, failure: { kind: 'network', detail: errorText(err) } };
   }
@@ -262,10 +268,11 @@ async function fetchWithRetry<T>(plan: RetryPlan<T>): Promise<RetryResult<T>> {
   });
 
   for (let attempt = 1; attempt <= CATALOG_ATTEMPTS; attempt += 1) {
+    if (plan.signal?.aborted) return aborted();
     attempts = attempt;
-    if (attempt > 1 && plan.shouldAbort?.() === true) return aborted();
 
     const outcome = await attemptOnce(plan);
+    if (plan.signal?.aborted) return aborted();
     if (outcome.ok) {
       log.info(
         `取到${plan.label}：${plan.describeOk(outcome.value)}（第 ${attempt}/${CATALOG_ATTEMPTS} 次）`,
@@ -276,11 +283,7 @@ async function fetchWithRetry<T>(plan: RetryPlan<T>): Promise<RetryResult<T>> {
     lastFailure = outcome.failure;
     log.warn(`取${plan.label}第 ${attempt}/${CATALOG_ATTEMPTS} 次失败 —— ${describeFailure(lastFailure)}`);
 
-    if (attempt >= CATALOG_ATTEMPTS) break;
-    if (plan.shouldAbort?.() === true) return aborted();
-
-    await plan.sleep(CATALOG_RETRY_DELAY_MS);
-    if (plan.shouldAbort?.() === true) return aborted();
+    if (attempt < CATALOG_ATTEMPTS) await plan.sleep(CATALOG_RETRY_DELAY_MS, plan.signal);
   }
 
   log.error(`取${plan.label}彻底失败（共 ${attempts} 次）—— ${describeFailure(lastFailure)}`);
@@ -302,8 +305,8 @@ export async function fetchCatalogPoints(options: CatalogFetchOptions): Promise<
     url: catalogListUrl(cid, options.origin),
     send: options.send ?? defaultSender,
     sleep: options.sleep ?? defaultSleep,
-    shouldAbort: options.shouldAbort,
-    abortDetail: '等待重试期间用户停止了接管',
+    signal: options.signal,
+    abortDetail: '读取课程目录期间停止了接管',
     parse: (res) => {
       const parsed = parseCatalogResponse(res.json, cid);
       return parsed.ok
@@ -387,8 +390,7 @@ export interface UnitFetchOptions {
   send?: CatalogSender;
   /** 注入用（测试）；默认 `setTimeout` */
   sleep?: (ms: number) => Promise<void>;
-  /** 每次重试**之前**问一句：用户按了停止就别再发了 */
-  shouldAbort?: () => boolean;
+  signal?: AbortSignal;
   /** 覆盖 URL 的 origin（测试用） */
   origin?: string;
 }
@@ -406,8 +408,8 @@ export async function fetchUnitSources(options: UnitFetchOptions): Promise<UnitF
     url: unitLearnUrl(cid, point, options.origin),
     send: options.send ?? defaultSender,
     sleep: options.sleep ?? defaultSleep,
-    shouldAbort: options.shouldAbort,
-    abortDetail: '等待重试期间用户停止了接管',
+    signal: options.signal,
+    abortDetail: '读取资源列表期间停止了接管',
     parse: (res) => {
       const parsed = parseUnitResponse(res.json);
       return parsed.ok
