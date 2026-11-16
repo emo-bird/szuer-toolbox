@@ -40,7 +40,7 @@
 ## 安装与更新
 
 1. 在 Chrome、Edge 或 Firefox 中安装 Tampermonkey（篡改猴）或 Violentmonkey（暴力猴）。
-2. 打开 v1.2.20 的安装链接，在管理器弹出的页面确认安装。 [安装深大人工具箱 v1.2.20](https://raw.githubusercontent.com/Starverse032/szuer-toolbox/release-v1.2.20/dist/szuer-toolbox.user.js)
+2. 打开 v1.2.20 的安装链接，在管理器弹出的页面确认安装。该链接固定到 v1.2.20 的构建产物。 [安装深大人工具箱 v1.2.20](https://raw.githubusercontent.com/emo-bird/szuer-toolbox/973bea15d11a67977cc73240d6112d76f5b75961/dist/szuer-toolbox.user.js)
 3. 打开或刷新优课课程页、本科选课页，点击悬浮球展开工具箱。
 
 安装后，脚本通过 `@updateURL` 从原仓库的 `master` 检查后续更新。
